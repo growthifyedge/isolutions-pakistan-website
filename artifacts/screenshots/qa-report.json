@@ -1,0 +1,98 @@
+[
+  {
+    "name": "desktop-home",
+    "path": "/",
+    "width": 1440,
+    "height": 1000,
+    "title": "iSolutions Pakistan — Visual Prototype",
+    "overflow": false,
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "broken": [],
+    "issues": []
+  },
+  {
+    "name": "desktop-shop",
+    "path": "/shop",
+    "width": 1440,
+    "height": 1000,
+    "title": "iSolutions Pakistan — Visual Prototype",
+    "overflow": false,
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "broken": [],
+    "issues": []
+  },
+  {
+    "name": "desktop-pdp",
+    "path": "/product/prototype-flagship-phone",
+    "width": 1440,
+    "height": 1000,
+    "title": "iSolutions Pakistan — Visual Prototype",
+    "overflow": false,
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "broken": [],
+    "issues": []
+  },
+  {
+    "name": "mobile-home",
+    "path": "/",
+    "width": 390,
+    "height": 844,
+    "title": "iSolutions Pakistan — Visual Prototype",
+    "overflow": false,
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "broken": [],
+    "issues": []
+  },
+  {
+    "name": "mobile-shop",
+    "path": "/shop",
+    "width": 390,
+    "height": 844,
+    "title": "iSolutions Pakistan — Visual Prototype",
+    "overflow": false,
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "broken": [],
+    "issues": []
+  },
+  {
+    "name": "mobile-pdp",
+    "path": "/product/prototype-flagship-phone",
+    "width": 390,
+    "height": 844,
+    "title": "iSolutions Pakistan — Visual Prototype",
+    "overflow": false,
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "broken": [],
+    "issues": []
+  },
+  {
+    "name": "tablet-home",
+    "path": "/",
+    "width": 768,
+    "height": 1024,
+    "title": "iSolutions Pakistan — Visual Prototype",
+    "overflow": false,
+    "scrollWidth": 768,
+    "clientWidth": 768,
+    "broken": [],
+    "issues": []
+  },
+  {
+    "name": "tablet-pdp",
+    "path": "/product/prototype-flagship-phone",
+    "width": 768,
+    "height": 1024,
+    "title": "iSolutions Pakistan — Visual Prototype",
+    "overflow": false,
+    "scrollWidth": 768,
+    "clientWidth": 768,
+    "broken": [],
+    "issues": []
+  }
+]
