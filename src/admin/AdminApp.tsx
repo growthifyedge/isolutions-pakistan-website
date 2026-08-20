@@ -133,12 +133,26 @@ function Login() {
       email,
       password,
     });
-    setLoading(false);
-    setMessage(
-      error
-        ? error.message
-        : "Signed in. Database-backed Admin profile verification is required before catalog access.",
-    );
+    if (error) {
+      setLoading(false);
+      setMessage(error.message);
+      return;
+    }
+
+    const { data: isAuthorized, error: authorizationError } =
+      await supabase.rpc("is_catalog_admin");
+    if (authorizationError || !isAuthorized) {
+      await supabase.auth.signOut();
+      setLoading(false);
+      setMessage(
+        authorizationError
+          ? "Your profile authorization could not be verified."
+          : "This account is not an active Owner or Admin.",
+      );
+      return;
+    }
+
+    location.assign("/admin");
   }
   return (
     <div className="admin-login">
@@ -216,6 +230,49 @@ function Login() {
       </div>
     </div>
   );
+}
+
+function AuthorizedAdmin({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<"checking" | "authorized" | "denied">(
+    "checking",
+  );
+
+  useEffect(() => {
+    if (!supabase) {
+      setState("denied");
+      return;
+    }
+
+    let active = true;
+    async function verify() {
+      const { data: sessionData } = await supabase!.auth.getSession();
+      if (!sessionData.session) {
+        location.replace("/admin/login");
+        return;
+      }
+
+      const { data: isAuthorized, error } =
+        await supabase!.rpc("is_catalog_admin");
+      if (!active) return;
+      setState(!error && isAuthorized ? "authorized" : "denied");
+    }
+    void verify();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (state === "checking") {
+    return <div className="admin-auth-state">Verifying database-backed access…</div>;
+  }
+  if (state === "denied") {
+    return (
+      <div className="admin-auth-state">
+        Access denied. An active Owner or Admin profile is required.
+      </div>
+    );
+  }
+  return children;
 }
 
 function Dashboard() {
@@ -578,10 +635,11 @@ export function AdminApp() {
   }, []);
   const path = location.pathname;
   if (path === "/admin/login") return <Login />;
-  if (path === "/admin/products") return <ProductList />;
-  if (path.startsWith("/admin/products/")) return <ProductEditor />;
-  if (path === "/admin/media") return <Future title="Media" />;
-  if (path === "/admin/homepage") return <Future title="Homepage" />;
-  if (path === "/admin/settings") return <Future title="Settings" />;
-  return <Dashboard />;
+  let page: React.ReactNode = <Dashboard />;
+  if (path === "/admin/products") page = <ProductList />;
+  else if (path.startsWith("/admin/products/")) page = <ProductEditor />;
+  else if (path === "/admin/media") page = <Future title="Media" />;
+  else if (path === "/admin/homepage") page = <Future title="Homepage" />;
+  else if (path === "/admin/settings") page = <Future title="Settings" />;
+  return <AuthorizedAdmin>{page}</AuthorizedAdmin>;
 }
