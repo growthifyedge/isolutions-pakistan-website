@@ -1,8 +1,12 @@
 # Project operating agreement
 
-- Codex is the primary implementation engineer. GPT is Product Manager, Solution Architect, UX Strategist, and QA Lead. Muhammad Junaid is Owner and final visual approver.
-- Current stage: high-fidelity visual prototype only. Owner approval is mandatory before Phase 2.
-- No final production architecture has been selected. Backend, database, authentication, admin, checkout, payments, inventory, media pipeline, hosting, and deployment work are not authorized.
-- Never inherit, restore, import, or consult code or assumptions from any older iSolutions project. This folder is the sole project source.
-- Mock catalog content must remain visibly and programmatically labeled as prototype data.
-- Preserve the sequence: visual first → Owner approval → architecture → backend → real catalog → commerce → launch.
+- Muhammad Junaid is Owner and final decision-maker. GPT is Product Manager, Solution Architect, UX Strategist, and QA Lead. Codex is primary implementation engineer.
+- Phase 0 Discovery, Phase 1 Visual Storefront, and Phase 2 Production Architecture are Owner approved.
+- Current stage: Phase 3A — Data Model + Admin Foundation, authorized and in progress.
+- Approved architecture: React, Vite, TypeScript; Firebase Hosting; Supabase PostgreSQL and Auth; PostgreSQL RLS; Supabase Edge Functions and/or carefully designed RPCs for privileged operations; Cloudinary later; PostgreSQL structured search.
+- Preserve the Owner-approved storefront without redesign. Never inherit code or assumptions from an older iSolutions project.
+- Phase 3A may implement versioned database migrations, RLS, database-backed Owner/Admin authorization, catalog/inventory foundations, and the Admin Studio.
+- Still unauthorized: Cloudinary implementation, real catalog import, customer accounts, checkout, orders, payments, promotions engine, and production commerce.
+- Never expose or request a service-role key, database password, or privileged credential. `.env.local` remains untracked.
+- Do not introduce Cloudflare/OpenNext or select Vercel as production hosting.
+- Preserve the sequence: approved architecture → Phase 3A foundation → Owner/GPT review → later media/catalog/commerce phases only when separately authorized.

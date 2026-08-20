@@ -1,5 +1,12 @@
 # Project history
 
+## 2026-08-20 — Owner authorization for Phase 3A
+
+- Owner approved Phase 0 Discovery, Phase 1 Visual Storefront, and Phase 2 Production Architecture.
+- Authorized Phase 3A Data Model + Admin Foundation.
+- Selected React/Vite/TypeScript, Firebase Hosting, Supabase PostgreSQL/Auth/RLS, later Cloudinary, and PostgreSQL structured search.
+- Preserved the approved storefront and explicitly deferred Cloudinary implementation, real catalog import, customer accounts, checkout, orders, payments, and promotions.
+
 ## 2026-08-19 — Targeted Phase 1 refinement
 
 - Corrected the mobile PDP purchase hierarchy and removed the sticky-CTA spacing defect.

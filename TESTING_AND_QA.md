@@ -1,5 +1,7 @@
 # Testing and QA
 
-Required milestone checks: lint, TypeScript production build, three routes at 1440px, 390px, and requested 768px views, console errors, remote image failures, focus usability, and horizontal overflow. Evidence screenshots belong in `artifacts/screenshots/`.
+Phase 3A gates include TypeScript, ESLint, automated commercial/security rule tests, production build, migration validation where practical, and responsive Admin Studio browser QA.
 
-The interface is a visual prototype: search, account, wishlist, cart, filters, CTAs, reviews, availability, promotions, delivery, warranty, and pricing have no production behavior or verified commercial meaning.
+Critical assertions: variants are explicit; money is integer minor units; draft products are public-invisible; PTA `unknown` differs from `not_approved`; delivery is resolved before publication; invalid publication is blocked; inventory is numeric; public writes fail; Admin authorization is database-backed; RLS protects private and draft data.
+
+Required Admin evidence: 1440px login state, dashboard, product list, product editor, variant editor; 390px navigation/dashboard and catalog/editor. Screenshots live under `artifacts/screenshots/admin/`.
