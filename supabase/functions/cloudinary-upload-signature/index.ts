@@ -19,7 +19,7 @@ Deno.serve(async (request) => {
       folder: `isolutions-development/products/${productId}`,
       overwrite: "false",
       timestamp,
-      transformation: "c_limit,w_3000,h_3000,q_90,fl_strip",
+      transformation: "c_limit,w_3000,h_3000,q_90,fl_force_strip",
       unique_filename: "true",
       use_filename: "false",
     };

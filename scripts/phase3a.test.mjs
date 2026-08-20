@@ -164,7 +164,8 @@ test("publication requires a complete primary Cloudinary image", () => {
 });
 
 test("Cloudinary master and delivery policies stay distinct", () => {
-  assert.match(uploadFunction, /c_limit,w_3000,h_3000,q_90,fl_strip/);
+  assert.match(uploadFunction, /c_limit,w_3000,h_3000,q_90,fl_force_strip/);
+  assert.doesNotMatch(uploadFunction, /(?:^|,)fl_strip(?:,|$)/m);
   assert.doesNotMatch(uploadFunction, /f_auto/);
   assert.match(cloudinaryClient, /q_auto,f_auto/);
 });
