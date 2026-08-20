@@ -11,6 +11,7 @@ const rls = await readFile(
   "utf8",
 );
 const devData = await readFile("src/data/adminDevelopmentData.ts", "utf8");
+const adminApp = await readFile("src/admin/AdminApp.tsx", "utf8");
 
 test("sellable combinations are explicit rows and impossible combinations are absent", () => {
   assert.match(schema, /Each row is one explicit sellable combination/);
@@ -93,4 +94,7 @@ test("Admin authorization is database-backed and RLS covers every exposed table"
       new RegExp(`alter table public\\.${table} enable row level security`),
     );
   assert.doesNotMatch(rls, /email/i);
+  assert.match(adminApp, /rpc\("is_catalog_admin"\)/);
+  assert.match(adminApp, /Verified Owner \/ Admin/);
+  assert.doesNotMatch(adminApp, /Profile verification required/);
 });

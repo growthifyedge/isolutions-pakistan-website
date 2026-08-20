@@ -9,6 +9,7 @@
 - Applied the complete Phase 3A foundation to the remote development project through the SQL Editor repair migration.
 - Verified public catalog reads and anonymous denial for profiles, inventory, catalog writes, and Admin RPC access using only the publishable key.
 - Completed the responsive Admin Studio shell, commercial/security tests, production build, and screenshot QA.
+- Verified the Owner Auth identity against the database-backed active `owner` profile, enforced the authorization RPC on login and every protected Admin route, and completed Phase 3A on 2026-08-21.
 
 ## 2026-08-19 — Targeted Phase 1 refinement
 

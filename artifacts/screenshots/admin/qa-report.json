@@ -4,6 +4,7 @@
     "path": "/admin/login",
     "width": 1440,
     "height": 1000,
+    "authorization": "public-login",
     "overflow": false,
     "brokenImages": 0,
     "issues": []
@@ -13,6 +14,7 @@
     "path": "/admin",
     "width": 1440,
     "height": 1000,
+    "authorization": "simulated-visual-qa-owner",
     "overflow": false,
     "brokenImages": 0,
     "issues": []
@@ -22,6 +24,7 @@
     "path": "/admin/products",
     "width": 1440,
     "height": 1000,
+    "authorization": "simulated-visual-qa-owner",
     "overflow": false,
     "brokenImages": 0,
     "issues": []
@@ -31,6 +34,7 @@
     "path": "/admin/products/new",
     "width": 1440,
     "height": 1000,
+    "authorization": "simulated-visual-qa-owner",
     "overflow": false,
     "brokenImages": 0,
     "issues": []
@@ -40,6 +44,7 @@
     "path": "/admin/products/new?tab=variants",
     "width": 1440,
     "height": 1000,
+    "authorization": "simulated-visual-qa-owner",
     "overflow": false,
     "brokenImages": 0,
     "issues": []
@@ -49,6 +54,7 @@
     "path": "/admin",
     "width": 390,
     "height": 844,
+    "authorization": "simulated-visual-qa-owner",
     "overflow": false,
     "brokenImages": 0,
     "issues": []
@@ -58,6 +64,7 @@
     "path": "/admin/products/new",
     "width": 390,
     "height": 844,
+    "authorization": "simulated-visual-qa-owner",
     "overflow": false,
     "brokenImages": 0,
     "issues": []
