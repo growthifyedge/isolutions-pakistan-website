@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   ChevronDown,
@@ -24,6 +24,9 @@ import {
   products,
   type Product,
 } from "./data/mockCatalog";
+const AdminApp = lazy(() =>
+  import("./admin/AdminApp").then((module) => ({ default: module.AdminApp })),
+);
 const cats = [
   "Mobiles",
   "Laptops",
@@ -738,6 +741,12 @@ function PDP() {
 }
 export function App() {
   const path = location.pathname;
+  if (path.startsWith("/admin"))
+    return (
+      <Suspense fallback={<div aria-live="polite">Loading Admin Studio…</div>}>
+        <AdminApp />
+      </Suspense>
+    );
   return path === "/shop" ? (
     <Shop />
   ) : path === "/product/prototype-flagship-phone" ? (

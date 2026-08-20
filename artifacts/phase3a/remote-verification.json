@@ -1,0 +1,57 @@
+{
+  "verifiedAt": "2026-08-20T18:52:03.201Z",
+  "credentialClass": "publishable_only",
+  "passed": true,
+  "results": [
+    {
+      "check": "public_read_brands",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "public_read_categories",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "public_read_products",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "public_read_product_variants",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "public_read_product_specifications",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "public_read_product_media",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "anonymous_private_read_denied_profiles",
+      "passed": true,
+      "status": 401
+    },
+    {
+      "check": "anonymous_private_read_denied_inventory_movements",
+      "passed": true,
+      "status": 401
+    },
+    {
+      "check": "anonymous_catalog_write_denied",
+      "passed": true,
+      "status": 401
+    },
+    {
+      "check": "anonymous_admin_rpc_denied",
+      "passed": true,
+      "status": 401
+    }
+  ]
+}

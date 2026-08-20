@@ -6,6 +6,9 @@
 - Authorized Phase 3A Data Model + Admin Foundation.
 - Selected React/Vite/TypeScript, Firebase Hosting, Supabase PostgreSQL/Auth/RLS, later Cloudinary, and PostgreSQL structured search.
 - Preserved the approved storefront and explicitly deferred Cloudinary implementation, real catalog import, customer accounts, checkout, orders, payments, and promotions.
+- Applied the complete Phase 3A foundation to the remote development project through the SQL Editor repair migration.
+- Verified public catalog reads and anonymous denial for profiles, inventory, catalog writes, and Admin RPC access using only the publishable key.
+- Completed the responsive Admin Studio shell, commercial/security tests, production build, and screenshot QA.
 
 ## 2026-08-19 — Targeted Phase 1 refinement
 

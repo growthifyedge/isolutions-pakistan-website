@@ -1,0 +1,65 @@
+[
+  {
+    "name": "desktop-login",
+    "path": "/admin/login",
+    "width": 1440,
+    "height": 1000,
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "desktop-dashboard",
+    "path": "/admin",
+    "width": 1440,
+    "height": 1000,
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "desktop-products",
+    "path": "/admin/products",
+    "width": 1440,
+    "height": 1000,
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "desktop-product-editor",
+    "path": "/admin/products/new",
+    "width": 1440,
+    "height": 1000,
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "desktop-variant-editor",
+    "path": "/admin/products/new?tab=variants",
+    "width": 1440,
+    "height": 1000,
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "mobile-dashboard",
+    "path": "/admin",
+    "width": 390,
+    "height": 844,
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "mobile-product-editor",
+    "path": "/admin/products/new",
+    "width": 390,
+    "height": 844,
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  }
+]
