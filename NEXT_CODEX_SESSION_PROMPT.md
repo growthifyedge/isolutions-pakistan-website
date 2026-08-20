@@ -1,5 +1,5 @@
 # Next Codex session
 
-Continue the Owner-authorized Phase 3A Data Model + Admin Foundation. Read `AGENTS.md`, `PROJECT_STATE.json`, migrations, tests, and current Git state first. Preserve the approved storefront. Use only the configured Supabase URL and publishable key in client code; never request or expose privileged credentials.
+Continue the existing iSolutions Pakistan website from the checked-in project state. Phase 3A is Owner approved and complete. Phase 3B Cloudinary integration is in progress with code complete in a safe pre-connection state. Read `AGENTS.md`, `PROJECT_STATE.json`, migrations, tests, and current Git state first. Preserve the approved storefront and Admin design.
 
-Do not start Cloudinary implementation, real catalog integration, customer accounts, checkout, orders, payments, promotions, or later commerce work without new Owner/GPT authorization. Firebase Hosting is approved architecture but deployment is not part of Phase 3A unless separately requested.
+Do not request or expose secrets. Confirm the Owner has configured `VITE_CLOUDINARY_CLOUD_NAME` locally and `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` as Supabase Edge Function secrets, then apply `202608210001_phase_3b_cloudinary_media.sql`, deploy `cloudinary-upload-signature` and `cloudinary-delete-media`, and perform one development-only end-to-end media verification. Do not import real catalog data or start commerce.

@@ -50,6 +50,16 @@
     "issues": []
   },
   {
+    "name": "desktop-media-preconnection",
+    "path": "/admin/products/new?tab=media",
+    "width": 1440,
+    "height": 1000,
+    "authorization": "simulated-visual-qa-owner",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
     "name": "mobile-dashboard",
     "path": "/admin",
     "width": 390,
@@ -62,6 +72,16 @@
   {
     "name": "mobile-product-editor",
     "path": "/admin/products/new",
+    "width": 390,
+    "height": 844,
+    "authorization": "simulated-visual-qa-owner",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "mobile-media-preconnection",
+    "path": "/admin/products/new?tab=media",
     "width": 390,
     "height": 844,
     "authorization": "simulated-visual-qa-owner",

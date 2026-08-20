@@ -1,5 +1,13 @@
 # Project history
 
+## 2026-08-21 — Phase 3B Cloudinary foundation
+
+- Owner authorized Phase 3B while preserving the approved storefront/Admin design and excluding real catalog and commerce.
+- Implemented metadata-only media schema completion, primary/reorder/variant integrity, and required-media publication validation.
+- Implemented Owner/Admin-verified Supabase Edge Functions for short-lived signed direct upload and secure Cloudinary destruction.
+- Implemented the focused Admin Media workflow: validation, progress, preview/listing, alt text, variant assignment, primary selection, reorder, replace, and delete.
+- Captured and verified the safe pre-connection Media state. Live integration remains pending Cloudinary configuration and remote deployment.
+
 ## 2026-08-20 — Owner authorization for Phase 3A
 
 - Owner approved Phase 0 Discovery, Phase 1 Visual Storefront, and Phase 2 Production Architecture.

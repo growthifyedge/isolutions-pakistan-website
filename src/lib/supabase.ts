@@ -5,7 +5,7 @@ export const hasSupabaseEnvironment = Boolean(
   supabaseUrl && supabasePublishableKey,
 );
 export const supabase = hasSupabaseEnvironment
-  ? createClient(supabaseUrl, supabasePublishableKey, {
+  ? createClient(supabaseUrl!, supabasePublishableKey!, {
       auth: { persistSession: true, autoRefreshToken: true },
     })
   : null;

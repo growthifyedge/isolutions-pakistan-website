@@ -11,3 +11,7 @@ Remote verification evidence lives at `artifacts/phase3a/remote-verification.jso
 Owner-authenticated authorization was manually verified on 2026-08-21: Supabase Auth login succeeded, the database-backed `is_catalog_admin()` check authorized the active `owner` profile, protected Admin routes loaded, and the header displayed `Verified Owner / Admin`. No password, access token, service-role key, or database secret was requested or stored.
 
 Authenticated Admin screenshots use a clearly identified simulated visual-QA session with the authorization RPC intercepted locally. They validate responsive presentation only; they are not counted as remote authorization evidence.
+
+Phase 3B adds automated assertions for Edge Function Admin authorization, metadata-only storage, primary fallback, atomic reorder validation, variant ownership, required publication media, server-side delete ordering, master/delivery transformation separation, and absence of Cloudinary secrets from frontend source.
+
+Pre-connection screenshots are `desktop-media-preconnection.png` and `mobile-media-preconnection.png`. Live upload/order/primary screenshots remain pending until Cloudinary and the Edge Functions are configured. Storefront source and its lazy-loaded Admin boundary remain unchanged; the production build confirms the Admin media code stays in the separate Admin chunk.

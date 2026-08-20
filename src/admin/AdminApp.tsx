@@ -27,6 +27,7 @@ import {
   formatPkrMinor,
 } from "../data/adminDevelopmentData";
 import { hasSupabaseEnvironment, supabase } from "../lib/supabase";
+import { MediaManager } from "./MediaManager";
 import "./admin.css";
 
 const nav = [
@@ -263,7 +264,9 @@ function AuthorizedAdmin({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (state === "checking") {
-    return <div className="admin-auth-state">Verifying database-backed access…</div>;
+    return (
+      <div className="admin-auth-state">Verifying database-backed access…</div>
+    );
   }
   if (state === "denied") {
     return (
@@ -437,8 +440,16 @@ const tabs = [
 ];
 function ProductEditor() {
   const query = new URLSearchParams(location.search);
+  const routeId = location.pathname.split("/").at(-1) ?? "";
+  const productId = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(routeId)
+    ? routeId
+    : null;
   const initial =
-    query.get("tab") === "variants" ? "Variants & Pricing" : "Overview";
+    query.get("tab") === "variants"
+      ? "Variants & Pricing"
+      : query.get("tab") === "media"
+        ? "Media"
+        : "Overview";
   const [tab, setTab] = useState(initial);
   return (
     <AdminLayout section="Catalog">
@@ -472,6 +483,8 @@ function ProductEditor() {
         <section className="editor-card">
           {tab === "Variants & Pricing" ? (
             <VariantEditor />
+          ) : tab === "Media" ? (
+            <MediaManager productId={productId} />
           ) : (
             <EditorSection tab={tab} />
           )}
