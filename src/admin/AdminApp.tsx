@@ -107,7 +107,7 @@ function AdminLayout({
           <div className="admin-user">
             <span>MJ</span>
             <div>
-              Development Admin<small>Profile verification required</small>
+              Development Admin<small>Verified Owner / Admin</small>
             </div>
           </div>
         </header>
