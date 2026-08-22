@@ -170,7 +170,21 @@ test("Cloudinary master and delivery policies stay distinct", () => {
   assert.match(cloudinaryClient, /q_auto,f_auto/);
   assert.match(adminFunction, /"SHA-256"/);
   assert.doesNotMatch(uploadFunction, /overwrite|unique_filename|use_filename/);
-  assert.match(mediaManager, /\["folder", "timestamp", "transformation"\]/);
+  const formFields = [...mediaManager.matchAll(/form\.set\("([^"]+)"/g)].map(
+    (match) => match[1],
+  );
+  assert.deepEqual(formFields, [
+    "file",
+    "api_key",
+    "signature",
+    "folder",
+    "timestamp",
+    "transformation",
+  ]);
+  assert.doesNotMatch(
+    mediaManager,
+    /form\.set\("(?:overwrite|unique_filename|use_filename|expiresAt|cloud_name|resource_type)"/,
+  );
 });
 
 test("Cloudinary secrets never enter frontend source", async () => {

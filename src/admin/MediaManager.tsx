@@ -22,7 +22,6 @@ type UploadSignature = {
   folder: string;
   timestamp: number;
   transformation: string;
-  expiresAt: number;
 };
 
 function safeCloudinaryUploadError(responseText: string) {
@@ -106,8 +105,9 @@ export function MediaManager({ productId }: { productId: string | null }) {
       form.set("file", file);
       form.set("api_key", data.apiKey);
       form.set("signature", data.signature);
-      for (const key of ["folder", "timestamp", "transformation"] as const)
-        form.set(key, String(data[key]));
+      form.set("folder", data.folder);
+      form.set("timestamp", String(data.timestamp));
+      form.set("transformation", data.transformation);
       const result = await new Promise<Record<string, unknown>>(
         (resolve, reject) => {
           const xhr = new XMLHttpRequest();
