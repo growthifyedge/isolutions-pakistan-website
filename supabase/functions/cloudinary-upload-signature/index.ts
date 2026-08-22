@@ -22,7 +22,13 @@ Deno.serve(async (request) => {
     };
     const signature = await cloudinarySignature(params, apiSecret);
     return Response.json(
-      { cloudName, apiKey, signature, ...params, expiresAt: timestamp + 300 },
+      {
+        cloudName,
+        apiKey,
+        signature,
+        signedParameters: params,
+        expiresAt: timestamp + 300,
+      },
       { headers: corsHeaders },
     );
   } catch (error) {

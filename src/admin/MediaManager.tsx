@@ -19,9 +19,11 @@ type UploadSignature = {
   cloudName: string;
   apiKey: string;
   signature: string;
-  folder: string;
-  timestamp: number;
-  transformation: string;
+  signedParameters: {
+    folder: string;
+    timestamp: number;
+    transformation: string;
+  };
 };
 
 function safeCloudinaryUploadError(responseText: string) {
@@ -105,9 +107,8 @@ export function MediaManager({ productId }: { productId: string | null }) {
       form.set("file", file);
       form.set("api_key", data.apiKey);
       form.set("signature", data.signature);
-      form.set("folder", data.folder);
-      form.set("timestamp", String(data.timestamp));
-      form.set("transformation", data.transformation);
+      for (const [key, value] of Object.entries(data.signedParameters))
+        form.set(key, String(value));
       const result = await new Promise<Record<string, unknown>>(
         (resolve, reject) => {
           const xhr = new XMLHttpRequest();
