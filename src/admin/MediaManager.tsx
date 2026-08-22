@@ -20,11 +20,8 @@ type UploadSignature = {
   apiKey: string;
   signature: string;
   folder: string;
-  overwrite: string;
   timestamp: number;
   transformation: string;
-  unique_filename: string;
-  use_filename: string;
   expiresAt: number;
 };
 
@@ -109,14 +106,7 @@ export function MediaManager({ productId }: { productId: string | null }) {
       form.set("file", file);
       form.set("api_key", data.apiKey);
       form.set("signature", data.signature);
-      for (const key of [
-        "folder",
-        "overwrite",
-        "timestamp",
-        "transformation",
-        "unique_filename",
-        "use_filename",
-      ] as const)
+      for (const key of ["folder", "timestamp", "transformation"] as const)
         form.set(key, String(data[key]));
       const result = await new Promise<Record<string, unknown>>(
         (resolve, reject) => {

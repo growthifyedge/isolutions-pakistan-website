@@ -38,7 +38,7 @@ export async function cloudinarySignature(
       .map(([key, value]) => `${key}=${value}`)
       .join("&") + secret;
   const digest = await crypto.subtle.digest(
-    "SHA-1",
+    "SHA-256",
     new TextEncoder().encode(payload),
   );
   return [...new Uint8Array(digest)]

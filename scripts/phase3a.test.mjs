@@ -168,6 +168,9 @@ test("Cloudinary master and delivery policies stay distinct", () => {
   assert.doesNotMatch(uploadFunction, /(?:^|,)fl_strip(?:,|$)/m);
   assert.doesNotMatch(uploadFunction, /f_auto/);
   assert.match(cloudinaryClient, /q_auto,f_auto/);
+  assert.match(adminFunction, /"SHA-256"/);
+  assert.doesNotMatch(uploadFunction, /overwrite|unique_filename|use_filename/);
+  assert.match(mediaManager, /\["folder", "timestamp", "transformation"\]/);
 });
 
 test("Cloudinary secrets never enter frontend source", async () => {

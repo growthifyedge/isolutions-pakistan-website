@@ -9,6 +9,7 @@
 - Cloudinary upload authorization and destruction run only in Supabase Edge Functions after Auth identity and `is_catalog_admin()` verification.
 - `CLOUDINARY_API_SECRET` and `CLOUDINARY_API_KEY` are Edge Function secrets and must never use a `VITE_` prefix. Only the cloud name is browser-visible.
 - Upload authorization responses are treated as short-lived and include a five-minute client expiry marker. The browser uploads directly to Cloudinary; Supabase never proxies large image files.
+- Cloudinary signatures use SHA-256 over the minimal required signed parameter set: `folder`, `timestamp`, and `transformation`. Default boolean upload options are omitted rather than string-canonicalized.
 - The stored master uses a 3000 × 3000 limit transformation without upscaling, fixed premium quality normalization, and Cloudinary's supported `fl_force_strip` metadata stripping. `f_auto` is reserved for delivery, not master storage.
 - PostgreSQL stores references and descriptive metadata only. Image binary, blobs, and base64 data are forbidden.
 - Media deletion is Owner/Admin-only and server-side. Database triggers preserve a valid primary fallback after deletion; reorder sets and variant ownership are validated atomically.
