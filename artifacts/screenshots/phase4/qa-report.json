@@ -1,0 +1,152 @@
+[
+  {
+    "name": "desktop-home",
+    "path": "/",
+    "width": 1440,
+    "height": 1000,
+    "authorization": "simulated-published-real-fixture",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "desktop-shop",
+    "path": "/shop",
+    "width": 1440,
+    "height": 1000,
+    "authorization": "simulated-published-real-fixture",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "desktop-real-pdp",
+    "path": "/product/owner-approved-qa-product",
+    "width": 1440,
+    "height": 1000,
+    "authorization": "simulated-published-real-fixture",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "tablet-home",
+    "path": "/",
+    "width": 768,
+    "height": 1024,
+    "authorization": "simulated-published-real-fixture",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "tablet-shop",
+    "path": "/shop",
+    "width": 768,
+    "height": 1024,
+    "authorization": "simulated-published-real-fixture",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "tablet-real-pdp",
+    "path": "/product/owner-approved-qa-product",
+    "width": 768,
+    "height": 1024,
+    "authorization": "simulated-published-real-fixture",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "mobile-home",
+    "path": "/",
+    "width": 390,
+    "height": 844,
+    "authorization": "simulated-published-real-fixture",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "mobile-shop",
+    "path": "/shop",
+    "width": 390,
+    "height": 844,
+    "authorization": "simulated-published-real-fixture",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "mobile-real-pdp",
+    "path": "/product/owner-approved-qa-product",
+    "width": 390,
+    "height": 844,
+    "authorization": "simulated-published-real-fixture",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "desktop-admin-products",
+    "path": "/admin/products",
+    "width": 1440,
+    "height": 1000,
+    "authorization": "simulated-visual-qa-owner",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "desktop-admin-editor",
+    "path": "/admin/products/new",
+    "width": 1440,
+    "height": 1000,
+    "authorization": "simulated-visual-qa-owner",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "desktop-admin-media",
+    "path": "/admin/media",
+    "width": 1440,
+    "height": 1000,
+    "authorization": "simulated-visual-qa-owner",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "mobile-admin-products",
+    "path": "/admin/products",
+    "width": 390,
+    "height": 844,
+    "authorization": "simulated-visual-qa-owner",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "mobile-admin-editor",
+    "path": "/admin/products/new",
+    "width": 390,
+    "height": 844,
+    "authorization": "simulated-visual-qa-owner",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  },
+  {
+    "name": "mobile-admin-media",
+    "path": "/admin/media",
+    "width": 390,
+    "height": 844,
+    "authorization": "simulated-visual-qa-owner",
+    "overflow": false,
+    "brokenImages": 0,
+    "issues": []
+  }
+]

@@ -1,5 +1,15 @@
 # Project history
 
+## 2026-08-25 — Phase 4 integration architecture implemented
+
+- Owner approved Phase 3B and authorized Phase 4 real catalog integration while keeping commerce outside scope.
+- Added a forward-only migration with explicit `development`/`real` isolation, tightened related-table public RLS, publication validation, structured database-side search/filtering, and safe numeric inventory projection.
+- Removed the storefront runtime dependency on fictional mock products; homepage catalog sections, Shop, search/filters, and slug PDP now use Supabase published-real data with honest empty/not-found states.
+- Implemented routine database-backed Admin management for taxonomy classification, product drafts, explicit variants/pricing, inventory movements, specifications, existing Cloudinary Media, SEO, and validated publishing.
+- Found no Owner-supplied real product dataset in the repository; imported zero real products and did not convert development/prototype records.
+- Passed 32 automated tests, TypeScript, ESLint, production build, Phase 3A/3B remote regression checks, and 15-view desktop/tablet/mobile visual QA.
+- Remote Phase 4 activation remains pending because the CLI is not linked; the Owner must apply `202608250001_phase_4_real_catalog.sql` in the Supabase SQL Editor before catalog entry.
+
 ## 2026-08-25 — Phase 3B live verification complete
 
 - Applied and verified the Phase 3B media migration, RLS boundaries, and both Owner/Admin-authorized Cloudinary Edge Functions in the development project.

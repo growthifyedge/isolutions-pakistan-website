@@ -26,6 +26,11 @@ import {
   adminDevelopmentVariants,
   formatPkrMinor,
 } from "../data/adminDevelopmentData";
+import {
+  Phase4ProductEditor,
+  Phase4ProductList,
+  TaxonomyManager,
+} from "./AdminCatalog";
 import { hasSupabaseEnvironment, supabase } from "../lib/supabase";
 import { MediaManager } from "./MediaManager";
 import { MediaLibrary } from "./MediaLibrary";
@@ -43,7 +48,7 @@ const nav = [
 function DevNotice() {
   return (
     <div className="admin-dev-note">
-      <span /> Development workspace · TEST DATA ONLY
+      <span /> Development workspace · Real catalog isolated from test data
     </div>
   );
 }
@@ -370,6 +375,14 @@ function Dashboard() {
 }
 
 function ProductList() {
+  const phase4Catalog = true;
+  if (phase4Catalog)
+    return (
+      <AdminLayout section="Catalog">
+        <Phase4ProductList />
+      </AdminLayout>
+    );
+
   return (
     <AdminLayout section="Catalog">
       <div className="admin-heading compact">
@@ -452,6 +465,14 @@ function ProductEditor() {
         ? "Media"
         : "Overview";
   const [tab, setTab] = useState(initial);
+  const phase4Catalog = true;
+  if (phase4Catalog)
+    return (
+      <AdminLayout section="Catalog">
+        <Phase4ProductEditor />
+      </AdminLayout>
+    );
+
   return (
     <AdminLayout section="Catalog">
       <div className="editor-head">
@@ -650,6 +671,12 @@ export function AdminApp() {
   if (path === "/admin/login") return <Login />;
   let page: React.ReactNode = <Dashboard />;
   if (path === "/admin/products") page = <ProductList />;
+  else if (path === "/admin/taxonomy")
+    page = (
+      <AdminLayout section="Catalog">
+        <TaxonomyManager />
+      </AdminLayout>
+    );
   else if (path.startsWith("/admin/products/")) page = <ProductEditor />;
   else if (path === "/admin/media")
     page = (

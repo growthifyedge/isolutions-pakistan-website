@@ -14,3 +14,7 @@
 - Final publishable-key verification confirms anonymous callers receive HTTP 401 from both Cloudinary Edge Functions and the primary-media RPC; Owner-authenticated lifecycle verification succeeded without storing credentials or tokens.
 - PostgreSQL stores references and descriptive metadata only. Image binary, blobs, and base64 data are forbidden.
 - Media deletion is Owner/Admin-only and server-side. Database triggers preserve a valid primary fallback after deletion; reorder sets and variant ownership are validated atomically.
+- Phase 4 defaults brands, categories, and products to `development`; only explicitly Owner-approved `real` records can pass public RLS and publication validation.
+- `search_public_catalog` is a read-only security-definer function with explicit published-real predicates. It exposes numeric availability without granting anonymous access to `inventory_movements`.
+- Related public variant, specification, and media policies explicitly require a published `real` parent product. Draft, archived, and development records remain public-invisible.
+- Public search/filter parameters are typed and executed in PostgreSQL. The browser receives only public catalog projections and has no mutation path.
