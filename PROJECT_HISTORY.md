@@ -1,5 +1,14 @@
 # Project history
 
+## 2026-08-25 — Phase 3B live verification complete
+
+- Applied and verified the Phase 3B media migration, RLS boundaries, and both Owner/Admin-authorized Cloudinary Edge Functions in the development project.
+- Owner-confirmed the live lifecycle: signed upload, metadata and alt-text update, second upload, primary selection, sidebar Media navigation, and deletion with a valid remaining primary image.
+- Replaced the obsolete Media placeholder with a database-backed media index that delegates all mutations to Product → Media.
+- Re-ran publishable-key remote boundary checks, TypeScript, ESLint, 16 automated tests, the production build, and responsive Admin visual QA.
+- Captured final desktop/mobile Media index and direct product Media screenshots with no overflow, broken images, or page errors.
+- Completed Phase 3B without importing real catalog data or starting commerce.
+
 ## 2026-08-21 — Phase 3B Cloudinary foundation
 
 - Owner authorized Phase 3B while preserving the approved storefront/Admin design and excluding real catalog and commerce.

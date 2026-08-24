@@ -12,6 +12,10 @@ Owner-authenticated authorization was manually verified on 2026-08-21: Supabase 
 
 Authenticated Admin screenshots use a clearly identified simulated visual-QA session with the authorization RPC intercepted locally. They validate responsive presentation only; they are not counted as remote authorization evidence.
 
-Phase 3B adds automated assertions for Edge Function Admin authorization, metadata-only storage, primary fallback, atomic reorder validation, variant ownership, required publication media, server-side delete ordering, master/delivery transformation separation, and absence of Cloudinary secrets from frontend source.
+Phase 3B automated assertions cover Edge Function Admin authorization, metadata-only storage, primary fallback, atomic reorder validation, variant ownership, required publication media, server-side delete ordering, master/delivery transformation separation, absence of Cloudinary secrets from frontend source, and Media navigation delegation. All 16 tests pass.
 
-Pre-connection screenshots are `desktop-media-preconnection.png` and `mobile-media-preconnection.png`. Live upload/order/primary screenshots remain pending until Cloudinary and the Edge Functions are configured. Storefront source and its lazy-loaded Admin boundary remain unchanged; the production build confirms the Admin media code stays in the separate Admin chunk.
+Phase 3B remote evidence lives at `artifacts/phase3b/remote-verification.json`. Its publishable-key-only checks confirm the approved media columns are live and anonymous callers are denied by the primary-selection RPC and both Cloudinary Edge Functions.
+
+Owner-authenticated live lifecycle verification was confirmed on 2026-08-25: signed upload completed, metadata and alt text updated, a second image uploaded, primary selection changed, sidebar Media navigated to the product editor, and deletion preserved a valid remaining primary image. No password, access token, service-role key, database password, or Cloudinary secret was requested or stored.
+
+Final visual evidence includes `desktop-media-library.png`, `desktop-media-direct.png`, `mobile-media-library.png`, and `mobile-media-direct.png`. The 13-route responsive suite passed with no overflow, broken images, or page errors. These screenshots use the clearly labelled simulated visual-QA dataset and are presentation evidence; the Owner-confirmed development Admin Studio run is the authenticated functional evidence. The production build confirms the storefront and lazy-loaded Admin boundary remain separate.

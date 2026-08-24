@@ -2,7 +2,7 @@
 
 ## Current scope
 
-Phase 3A is Owner approved and complete. Phase 3B adds the Cloudinary product-media path without redesigning the Owner-approved storefront or Admin Studio. The catalog remains clearly marked development/test data until a later approval.
+Phase 3A is Owner approved and complete. Phase 3B completes the live-verified Cloudinary product-media path without redesigning the Owner-approved storefront or Admin Studio. The catalog remains clearly marked development/test data until a later approval.
 
 ## Approved stack
 

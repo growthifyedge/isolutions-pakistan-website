@@ -11,5 +11,6 @@
 - Upload authorization responses are treated as short-lived and include a five-minute client expiry marker. The browser uploads directly to Cloudinary; Supabase never proxies large image files.
 - Cloudinary signatures use SHA-256 over the minimal required signed parameter set: `folder`, `timestamp`, and `transformation`. Default boolean upload options are omitted rather than string-canonicalized.
 - The stored master uses a 3000 × 3000 limit transformation without upscaling, fixed premium quality normalization, and Cloudinary's supported `fl_force_strip` metadata stripping. `f_auto` is reserved for delivery, not master storage.
+- Final publishable-key verification confirms anonymous callers receive HTTP 401 from both Cloudinary Edge Functions and the primary-media RPC; Owner-authenticated lifecycle verification succeeded without storing credentials or tokens.
 - PostgreSQL stores references and descriptive metadata only. Image binary, blobs, and base64 data are forbidden.
 - Media deletion is Owner/Admin-only and server-side. Database triggers preserve a valid primary fallback after deletion; reorder sets and variant ownership are validated atomically.

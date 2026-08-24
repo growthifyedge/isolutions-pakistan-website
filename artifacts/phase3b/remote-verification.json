@@ -1,0 +1,28 @@
+{
+  "verifiedAt": "2026-08-24T19:19:48.210Z",
+  "credentialClass": "publishable_only",
+  "liveAuthenticatedEvidence": "Owner-confirmed in the development Admin Studio; no credentials or tokens stored.",
+  "passed": true,
+  "results": [
+    {
+      "check": "phase3b_product_media_columns_available",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "anonymous_primary_rpc_denied",
+      "passed": true,
+      "status": 401
+    },
+    {
+      "check": "anonymous_cloudinary-upload-signature_denied",
+      "passed": true,
+      "status": 401
+    },
+    {
+      "check": "anonymous_cloudinary-delete-media_denied",
+      "passed": true,
+      "status": 401
+    }
+  ]
+}
