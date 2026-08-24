@@ -1229,3 +1229,136 @@
     padding: 35px 25px;
   }
 }
+
+.media-library-heading {
+  margin-bottom: 28px;
+}
+.media-library-state {
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+  border: 1px solid #d8d5cd;
+  background: #fff;
+}
+.media-library-state > svg {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 18px;
+  color: #7e8985;
+}
+.media-library-state h2 {
+  margin: 0 0 8px;
+}
+.media-library-state p {
+  max-width: 560px;
+  margin: 0 0 20px;
+  color: #61706b;
+}
+.media-library-state a {
+  color: #d94d30;
+  font-weight: 800;
+}
+.media-library-state.error {
+  min-height: 180px;
+  color: #9f3828;
+}
+.media-library-list {
+  display: grid;
+  gap: 22px;
+}
+.media-library-list > article {
+  border: 1px solid #d8d5cd;
+  background: #fff;
+}
+.media-library-product {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 24px;
+  border-bottom: 1px solid #e0ddd5;
+}
+.media-library-product h2 {
+  margin: 4px 0;
+  font-size: 22px;
+}
+.media-library-product p {
+  margin: 0;
+  color: #66716d;
+}
+.media-library-product > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  color: #d94d30;
+  font-size: 13px;
+  font-weight: 800;
+}
+.media-library-product > a svg {
+  width: 17px;
+}
+.media-library-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 16px;
+  padding: 20px 24px 24px;
+}
+.media-library-thumbs figure {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid #e0ddd5;
+  background: #faf9f6;
+}
+.media-library-thumbs img,
+.media-library-missing {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: #f0eee8;
+}
+.media-library-missing {
+  display: grid;
+  place-items: center;
+  color: #89918e;
+}
+.media-library-thumbs figcaption {
+  display: block;
+  padding: 12px;
+}
+.media-library-thumbs figcaption strong,
+.media-library-thumbs figcaption span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.media-library-thumbs figcaption strong {
+  margin-bottom: 5px;
+  font-size: 13px;
+}
+.media-library-thumbs figcaption span {
+  color: #68736f;
+  font-size: 11px;
+}
+@media (max-width: 700px) {
+  .media-library-state {
+    min-height: 300px;
+    padding: 28px 18px;
+  }
+  .media-library-product {
+    display: block;
+    padding: 18px;
+  }
+  .media-library-product > a {
+    margin-top: 16px;
+  }
+  .media-library-thumbs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 14px 18px 18px;
+  }
+}

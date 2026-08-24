@@ -28,6 +28,7 @@ import {
 } from "../data/adminDevelopmentData";
 import { hasSupabaseEnvironment, supabase } from "../lib/supabase";
 import { MediaManager } from "./MediaManager";
+import { MediaLibrary } from "./MediaLibrary";
 import "./admin.css";
 
 const nav = [
@@ -632,9 +633,8 @@ function Future({ title }: { title: string }) {
         <span className="admin-kicker">PHASE BOUNDARY</span>
         <h1>{title}</h1>
         <p>
-          {title === "Media"
-            ? "Cloudinary metadata foundations exist, but uploading is not authorized in this pass."
-            : "This area is intentionally unavailable until a later Owner-approved phase."}
+          This area is intentionally unavailable until a later Owner-approved
+          phase.
         </p>
         <a href="/admin">Return to dashboard</a>
       </div>
@@ -651,7 +651,22 @@ export function AdminApp() {
   let page: React.ReactNode = <Dashboard />;
   if (path === "/admin/products") page = <ProductList />;
   else if (path.startsWith("/admin/products/")) page = <ProductEditor />;
-  else if (path === "/admin/media") page = <Future title="Media" />;
+  else if (path === "/admin/media")
+    page = (
+      <AdminLayout section="Media">
+        <div className="admin-heading compact media-library-heading">
+          <div>
+            <span className="admin-kicker">PHASE 3B · CLOUDINARY</span>
+            <h1>Product media</h1>
+            <p>
+              Review media records here, then open the product Media editor for
+              upload and management actions.
+            </p>
+          </div>
+        </div>
+        <MediaLibrary />
+      </AdminLayout>
+    );
   else if (path === "/admin/homepage") page = <Future title="Homepage" />;
   else if (path === "/admin/settings") page = <Future title="Settings" />;
   return <AuthorizedAdmin>{page}</AuthorizedAdmin>;

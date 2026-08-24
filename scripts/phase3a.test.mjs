@@ -207,3 +207,17 @@ test("delete flow removes Cloudinary asset before metadata and preserves a prima
   assert.match(mediaMigration, /if old\.is_primary then/);
   assert.match(mediaMigration, /order by sort_order, created_at, id limit 1/);
 });
+
+test("Admin Media navigation uses the Phase 3B index and product Media editor", async () => {
+  const mediaLibrary = await readFile("src/admin/MediaLibrary.tsx", "utf8");
+  assert.match(adminApp, /path === "\/admin\/media"/);
+  assert.match(adminApp, /<MediaLibrary \/>/);
+  assert.doesNotMatch(adminApp, /uploading is not authorized/i);
+  assert.match(mediaLibrary, /from\("product_media"\)/);
+  assert.match(
+    mediaLibrary,
+    /\/admin\/products\/\$\{media\[0\]\.product_id\}\?tab=media/,
+  );
+  assert.match(adminApp, /query\.get\("tab"\) === "media"/);
+  assert.match(adminApp, /<MediaManager productId=\{productId\} \/>/);
+});
