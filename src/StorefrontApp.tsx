@@ -26,6 +26,7 @@ import {
   type CatalogProduct,
   type CatalogVariant,
 } from "./lib/catalog";
+import { parsePkrMajorToMinor } from "./lib/money";
 import { cloudinaryDeliveryUrl } from "./lib/cloudinary";
 
 type Taxonomy = Awaited<ReturnType<typeof fetchPublicTaxonomy>>;
@@ -460,7 +461,7 @@ function Filters({
               onChange({
                 ...value,
                 priceMin: e.target.value
-                  ? Number(e.target.value) * 100
+                  ? parsePkrMajorToMinor(e.target.value)
                   : undefined,
               })
             }
@@ -476,7 +477,7 @@ function Filters({
               onChange({
                 ...value,
                 priceMax: e.target.value
-                  ? Number(e.target.value) * 100
+                  ? parsePkrMajorToMinor(e.target.value)
                   : undefined,
               })
             }

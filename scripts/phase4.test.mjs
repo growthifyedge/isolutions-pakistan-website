@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import {
+  formatPkrMinor,
+  minimumActiveVariantPrice,
+  parsePkrMajorToMinor,
+} from "../src/lib/money.ts";
 
 const [migration, storefront, catalog, admin, app, phase3b, taxonomyRepair] =
   await Promise.all([
@@ -56,9 +61,24 @@ test("variants remain explicit rows without Cartesian generation", () => {
   assert.match(admin, /Add explicit variant/);
   assert.doesNotMatch(storefront, /cartesian|flatMap/);
 });
-test("money remains integer minor units", () => {
-  assert.match(catalog, /Math\.trunc\(value\) \/ 100/);
-  assert.match(admin, /Math\.round\(Number\(newVariant\.price\) \* 100\)/);
+test("exact minimum active variant pricing and PKR formatting", () => {
+  const variants = [
+    { priceMinor: 22500000 },
+    { priceMinor: 22300000 },
+    { priceMinor: 22300000 },
+    { priceMinor: 25900000 },
+    { priceMinor: 25600000 },
+    { priceMinor: 22299800, isActive: false },
+  ];
+  const minimum = minimumActiveVariantPrice(variants);
+  assert.equal(minimum, 22300000);
+  assert.equal(formatPkrMinor(minimum), "Rs 223,000");
+  assert.equal(parsePkrMajorToMinor("223,000"), 22300000);
+  assert.doesNotMatch(
+    admin,
+    /Math\.round\(Number\(newVariant\.price\) \* 100\)/,
+  );
+  assert.doesNotMatch(storefront, /Number\(e\.target\.value\) \* 100/);
 });
 test("compare-at price is returned only when greater than current price", () => {
   assert.match(migration, /compare_at_price_minor > v\.price_minor/);

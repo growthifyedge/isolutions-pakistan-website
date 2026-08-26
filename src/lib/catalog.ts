@@ -1,4 +1,6 @@
 import { supabase } from "./supabase";
+import { minimumActiveVariantPrice } from "./money";
+export { formatPkrMinor } from "./money";
 
 export type CatalogVariant = {
   id: string;
@@ -93,13 +95,6 @@ export async function fetchPublicTaxonomy() {
     categories: { id: string; name: string; slug: string }[];
   };
 }
-export function formatPkrMinor(value: number) {
-  return new Intl.NumberFormat("en-PK", {
-    style: "currency",
-    currency: "PKR",
-    maximumFractionDigits: 0,
-  }).format(Math.trunc(value) / 100);
-}
 
 export function validCompareAt(variant: CatalogVariant) {
   return variant.compareAtPriceMinor !== null &&
@@ -109,8 +104,7 @@ export function validCompareAt(variant: CatalogVariant) {
 }
 
 export function productPrice(product: CatalogProduct) {
-  const prices = product.variants.map((variant) => variant.priceMinor);
-  return prices.length ? Math.min(...prices) : null;
+  return minimumActiveVariantPrice(product.variants);
 }
 
 export function hasVariablePrice(product: CatalogProduct) {

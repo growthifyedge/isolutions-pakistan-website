@@ -7,6 +7,11 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
+import {
+  formatPkrMinor,
+  parsePkrMajorToMinor,
+  pkrMajorInputFromMinor,
+} from "../lib/money";
 import { MediaManager } from "./MediaManager";
 
 type Option = {
@@ -78,13 +83,6 @@ const emptyDraft: Draft = {
   publication_status: "draft",
   data_class: "development",
 };
-const money = (minor: number) =>
-  new Intl.NumberFormat("en-PK", {
-    style: "currency",
-    currency: "PKR",
-    maximumFractionDigits: 0,
-  }).format(minor / 100);
-
 export function Phase4ProductList() {
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [query, setQuery] = useState("");
@@ -324,6 +322,9 @@ export function Phase4ProductEditor() {
   const [brands, setBrands] = useState<Option[]>([]);
   const [categories, setCategories] = useState<Option[]>([]);
   const [variants, setVariants] = useState<Variant[]>([]);
+  const [variantPrices, setVariantPrices] = useState<Record<string, string>>(
+    {},
+  );
   const [specs, setSpecs] = useState<Specification[]>([]);
   const [message, setMessage] = useState("");
   const [newVariant, setNewVariant] = useState({
@@ -397,6 +398,14 @@ export function Phase4ProductEditor() {
         quantity: quantities.get(x.id) ?? 0,
       })),
     );
+    setVariantPrices(
+      Object.fromEntries(
+        ((v.data ?? []) as Variant[]).map((variant) => [
+          variant.id,
+          pkrMajorInputFromMinor(variant.price_minor),
+        ]),
+      ),
+    );
     setSpecs((s.data ?? []) as Specification[]);
   }, [productId]);
   useEffect(() => {
@@ -462,7 +471,15 @@ export function Phase4ProductEditor() {
   };
   const addVariant = async () => {
     if (!supabase || !productId) return;
-    const priceMinor = Math.round(Number(newVariant.price) * 100);
+    let priceMinor: number;
+    try {
+      priceMinor = parsePkrMajorToMinor(newVariant.price);
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Enter a valid PKR price.",
+      );
+      return;
+    }
     const { error } = await supabase.from("product_variants").insert({
       product_id: productId,
       sku: newVariant.sku.trim(),
@@ -488,6 +505,24 @@ export function Phase4ProductEditor() {
       });
       await load();
     }
+  };
+  const saveVariantPrice = async (variantId: string) => {
+    if (!supabase) return;
+    let priceMinor: number;
+    try {
+      priceMinor = parsePkrMajorToMinor(variantPrices[variantId] ?? "");
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Enter a valid PKR price.",
+      );
+      return;
+    }
+    const { error } = await supabase
+      .from("product_variants")
+      .update({ price_minor: priceMinor })
+      .eq("id", variantId);
+    setMessage(error?.message ?? "Variant price saved exactly.");
+    if (!error) await load();
   };
   const adjustStock = async (variantId: string) => {
     if (!supabase) return;
@@ -828,7 +863,31 @@ export function Phase4ProductEditor() {
                       <span>Explicit row</span>
                     </div>
                     <code>{v.sku}</code>
-                    <strong>{money(v.price_minor)}</strong>
+                    <div>
+                      <label>
+                        Price PKR
+                        <input
+                          inputMode="decimal"
+                          value={
+                            variantPrices[v.id] ??
+                            pkrMajorInputFromMinor(v.price_minor)
+                          }
+                          onChange={(event) =>
+                            setVariantPrices({
+                              ...variantPrices,
+                              [v.id]: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <small>{formatPkrMinor(v.price_minor)}</small>
+                      <button
+                        className="admin-secondary"
+                        onClick={() => saveVariantPrice(v.id)}
+                      >
+                        Save price
+                      </button>
+                    </div>
                     <span>{v.pta_status}</span>
                     <span>{v.quantity ?? 0} units</span>
                   </article>
