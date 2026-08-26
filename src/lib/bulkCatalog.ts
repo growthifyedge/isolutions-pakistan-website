@@ -11,9 +11,13 @@ export type BulkVariant = {
   compareAtPricePkr: string | null;
   compareAtPriceMinor: number | null;
   ptaStatus: "approved" | "not_approved" | "not_applicable" | "unknown";
+  ptaSource:
+    "explicit variant override" | "inherited by variant" | "unresolved";
   condition: "brand_new" | "used" | "open_box" | "refurbished" | "unknown";
   warranty: string | null;
   deliveryScope: "karachi_only" | "nationwide" | null;
+  deliverySource:
+    "explicit variant override" | "inherited by variant" | "unresolved";
   inventory: number | null;
   warnings: string[];
 };
@@ -27,6 +31,8 @@ export type BulkProduct = {
   shortDescription: string | null;
   seoTitle: string | null;
   seoDescription: string | null;
+  defaultPtaStatus: BulkVariant["ptaStatus"] | null;
+  defaultDeliveryScope: BulkVariant["deliveryScope"];
   variants: BulkVariant[];
   warnings: string[];
 };
@@ -68,7 +74,10 @@ function price(value?: string | null) {
 }
 
 function pta(value?: string | null): BulkVariant["ptaStatus"] {
-  const normalized = value?.trim().toLowerCase().replaceAll(" ", "_");
+  const normalized = value
+    ?.trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
   if (normalized === "pta_approved" || normalized === "official_approved")
     return "approved";
   if (normalized === "non_pta" || normalized === "not_approved")
@@ -154,6 +163,10 @@ function parseCsv(text: string): BulkParseResult {
         shortDescription: clean(record.short_description),
         seoTitle: clean(record.seo_title),
         seoDescription: clean(record.seo_description),
+        defaultPtaStatus: clean(record.default_pta_status)
+          ? pta(record.default_pta_status)
+          : null,
+        defaultDeliveryScope: delivery(record.default_delivery_scope),
         variants: [],
         warnings: [],
       };
@@ -180,10 +193,23 @@ function parseCsv(text: string): BulkParseResult {
       priceMinor: parsedPrice.minor,
       compareAtPricePkr: parsedCompare.entered,
       compareAtPriceMinor: parsedCompare.minor,
-      ptaStatus: pta(record.pta_status),
+      ptaStatus: clean(record.pta_status)
+        ? pta(record.pta_status)
+        : (product.defaultPtaStatus ?? "unknown"),
+      ptaSource: clean(record.pta_status)
+        ? "explicit variant override"
+        : product.defaultPtaStatus
+          ? "inherited by variant"
+          : "unresolved",
       condition: condition(record.condition),
       warranty: clean(record.warranty),
-      deliveryScope: delivery(record.delivery_scope),
+      deliveryScope:
+        delivery(record.delivery_scope) ?? product.defaultDeliveryScope,
+      deliverySource: clean(record.delivery_scope)
+        ? "explicit variant override"
+        : product.defaultDeliveryScope
+          ? "inherited by variant"
+          : "unresolved",
       inventory: quantity,
       warnings,
     });
@@ -220,6 +246,8 @@ function parseRough(text: string): BulkParseResult {
       shortDescription: null,
       seoTitle: null,
       seoDescription: null,
+      defaultPtaStatus: null,
+      defaultDeliveryScope: null,
       variants: [],
       warnings: [],
     };
@@ -236,14 +264,18 @@ function parseRough(text: string): BulkParseResult {
         product.slug = slugify(pair[2]);
       else if (pair?.[1].toLowerCase() === "warranty")
         defaultWarranty = pair[2].trim();
-      else if (/^(PTA Approved|Official Approved)$/i.test(line))
+      else if (/^(PTA Approved|Official Approved|PTA:\s*Approved)$/i.test(line))
         defaultPta = "approved";
+      else if (/^(Non-PTA|PTA:\s*Non-PTA)$/i.test(line))
+        defaultPta = "not_approved";
       else if (/^Brand New$/i.test(line)) defaultCondition = "brand_new";
       else if (/^Karachi only$/i.test(line)) defaultDelivery = "karachi_only";
       else if (/^Nationwide$/i.test(line)) defaultDelivery = "nationwide";
       else if (/\d[\d,]*k?$/i.test(line)) variantLines.push(line);
       else product.warnings.push(`Needs Owner Review: ${line}`);
     }
+    product.defaultPtaStatus = defaultPta === "unknown" ? null : defaultPta;
+    product.defaultDeliveryScope = defaultDelivery;
     for (const line of variantLines) {
       const match = line.match(
         /^(?:(\d+)\s*\/\s*)?(\d+)\s*(GB|TB)?\s+(.+?)\s+([\d,]+k?)$/i,
@@ -253,7 +285,14 @@ function parseRough(text: string): BulkParseResult {
         continue;
       }
       const parsed = price(match[5]);
-      const colors = match[4]
+      const explicitPtaMatch = match[4].match(
+        /\s+(PTA Approved|Official Approved|Non-PTA)$/i,
+      );
+      const explicitPta = explicitPtaMatch ? pta(explicitPtaMatch[1]) : null;
+      const colorSource = explicitPtaMatch
+        ? match[4].slice(0, -explicitPtaMatch[0].length).trim()
+        : match[4];
+      const colors = colorSource
         .split("/")
         .map((color) => color.trim())
         .filter(Boolean);
@@ -268,10 +307,18 @@ function parseRough(text: string): BulkParseResult {
           priceMinor: parsed.minor,
           compareAtPricePkr: null,
           compareAtPriceMinor: null,
-          ptaStatus: defaultPta,
+          ptaStatus: explicitPta ?? defaultPta,
+          ptaSource: explicitPta
+            ? "explicit variant override"
+            : product.defaultPtaStatus
+              ? "inherited by variant"
+              : "unresolved",
           condition: defaultCondition,
           warranty: defaultWarranty,
           deliveryScope: defaultDelivery,
+          deliverySource: defaultDelivery
+            ? "inherited by variant"
+            : "unresolved",
           inventory: null,
           warnings: parsed.minor ? [] : ["Price missing or invalid"],
         });

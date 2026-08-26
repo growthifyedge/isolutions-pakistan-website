@@ -23,7 +23,7 @@ Supported explicit shared lines are `PTA Approved`, `Official Approved`, `Brand 
 Supported columns are:
 
 ```text
-product_title,brand,category,slug,sku,ram,storage,color,price_pkr,compare_at_price_pkr,pta_status,condition,warranty,delivery_scope,inventory,short_description,seo_title,seo_description
+product_title,brand,category,slug,sku,ram,storage,color,price_pkr,compare_at_price_pkr,default_pta_status,pta_status,condition,warranty,default_delivery_scope,delivery_scope,inventory,short_description,seo_title,seo_description
 ```
 
 Only `product_title` and `brand` are structurally required per row, but new products require a category and new variants require an exact price before Apply becomes available. Omitted fields remain unresolved; omitted inventory preserves an existing quantity and creates no movement. Prices are entered in PKR major units and converted with integer-only minor-unit handling.

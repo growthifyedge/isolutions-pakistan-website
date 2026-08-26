@@ -41,6 +41,8 @@ type Draft = {
   content: string;
   default_warranty: string;
   default_delivery_scope: "" | "karachi_only" | "nationwide";
+  default_pta_status:
+    "approved" | "not_approved" | "not_applicable" | "unknown";
   seo_title: string;
   seo_description: string;
   publication_status: "draft" | "published" | "archived";
@@ -78,6 +80,7 @@ const emptyDraft: Draft = {
   content: "",
   default_warranty: "",
   default_delivery_scope: "",
+  default_pta_status: "unknown",
   seo_title: "",
   seo_description: "",
   publication_status: "draft",
@@ -386,6 +389,7 @@ export function Phase4ProductEditor() {
       content: p.data.content ?? "",
       default_warranty: p.data.default_warranty ?? "",
       default_delivery_scope: p.data.default_delivery_scope ?? "",
+      default_pta_status: p.data.default_pta_status ?? "unknown",
       seo_title: p.data.seo_title ?? "",
       seo_description: p.data.seo_description ?? "",
     });
@@ -455,6 +459,7 @@ export function Phase4ProductEditor() {
       content: draft.content || null,
       default_warranty: draft.default_warranty || null,
       default_delivery_scope: draft.default_delivery_scope || null,
+      default_pta_status: draft.default_pta_status,
       seo_title: draft.seo_title || null,
       seo_description: draft.seo_description || null,
       publication_status: "draft" as const,
@@ -724,6 +729,24 @@ export function Phase4ProductEditor() {
                   <option value="">Unresolved</option>
                   <option value="karachi_only">Karachi only</option>
                   <option value="nationwide">Nationwide</option>
+                </select>
+              </label>
+              <label>
+                Default PTA status
+                <select
+                  value={draft.default_pta_status}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      default_pta_status: e.target
+                        .value as Draft["default_pta_status"],
+                    })
+                  }
+                >
+                  <option value="unknown">Unresolved / Unknown</option>
+                  <option value="approved">PTA Approved</option>
+                  <option value="not_approved">Non-PTA</option>
+                  <option value="not_applicable">Not Applicable</option>
                 </select>
               </label>
               <label>

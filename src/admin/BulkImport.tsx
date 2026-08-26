@@ -28,6 +28,8 @@ type ExistingProduct = {
   brand_id: string;
   category_id: string;
   publication_status: "draft" | "published" | "archived";
+  default_pta_status: BulkVariant["ptaStatus"];
+  default_delivery_scope: BulkVariant["deliveryScope"];
   product_variants: Array<{
     id: string;
     sku: string;
@@ -74,7 +76,8 @@ function matchesVariant(
     normalized(existing.ram_display) === normalized(variant.ram) &&
     normalized(existing.storage_display) === normalized(variant.storage) &&
     normalized(existing.color_finish) === normalized(variant.color) &&
-    (variant.ptaStatus === "unknown" ||
+    (variant.ptaSource !== "explicit variant override" ||
+      variant.ptaStatus === "unknown" ||
       existing.pta_status === variant.ptaStatus) &&
     (variant.condition === "unknown" ||
       existing.condition === variant.condition)
@@ -123,7 +126,7 @@ export function BulkImport() {
         supabase
           .from("products")
           .select(
-            "id,title,slug,brand_id,category_id,publication_status,product_variants(id,sku,ram_display,storage_display,color_finish,price_minor,compare_at_price_minor,pta_status,condition,warranty_override,delivery_scope)",
+            "id,title,slug,brand_id,category_id,publication_status,default_pta_status,default_delivery_scope,product_variants(id,sku,ram_display,storage_display,color_finish,price_minor,compare_at_price_minor,pta_status,condition,warranty_override,delivery_scope)",
           ),
       ]);
       const queryError =
@@ -199,6 +202,17 @@ export function BulkImport() {
           if (matches.length > 1)
             variantBlocked.push("Ambiguous variant match");
           const match = matches.length === 1 ? matches[0] : null;
+          const preserveExistingPta = Boolean(
+            match &&
+            variant.ptaSource === "inherited by variant" &&
+            match.pta_status !== "unknown",
+          );
+          const effectivePtaStatus = preserveExistingPta
+            ? match!.pta_status
+            : variant.ptaStatus;
+          const effectivePtaSource = preserveExistingPta
+            ? "explicit variant override"
+            : variant.ptaSource;
           const skuResolved =
             variant.sku ??
             match?.sku ??
@@ -209,7 +223,8 @@ export function BulkImport() {
             match.price_minor === variant.priceMinor &&
             (variant.compareAtPriceMinor === null ||
               match.compare_at_price_minor === variant.compareAtPriceMinor) &&
-            (variant.ptaStatus === "unknown" ||
+            (variant.ptaSource !== "explicit variant override" ||
+              variant.ptaStatus === "unknown" ||
               match.pta_status === variant.ptaStatus) &&
             (variant.condition === "unknown" ||
               match.condition === variant.condition) &&
@@ -220,6 +235,8 @@ export function BulkImport() {
           );
           return {
             ...variant,
+            ptaStatus: effectivePtaStatus,
+            ptaSource: effectivePtaSource,
             warnings: variantBlocked,
             id: match?.id ?? null,
             skuResolved,
@@ -289,6 +306,8 @@ export function BulkImport() {
         short_description: product.shortDescription,
         seo_title: product.seoTitle,
         seo_description: product.seoDescription,
+        default_pta_status: product.defaultPtaStatus,
+        default_delivery_scope: product.defaultDeliveryScope,
         variants: product.variants.map((variant) => ({
           id: variant.id,
           action: variant.action,
@@ -451,8 +470,10 @@ export function BulkImport() {
                       <b>{normalizedPriceDisplay(variant)}</b>
                     </div>
                     <span>
-                      {variant.ptaStatus} · {variant.condition} ·{" "}
-                      {variant.deliveryScope ?? "delivery unresolved"}
+                      {variant.ptaStatus} ({variant.ptaSource}) ·{" "}
+                      {variant.condition} ·{" "}
+                      {variant.deliveryScope ?? "delivery unresolved"} (
+                      {variant.deliverySource})
                       {variant.inventory === null
                         ? " · inventory preserved/unresolved"
                         : ` · inventory ${variant.inventory}`}
