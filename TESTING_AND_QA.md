@@ -25,3 +25,6 @@ Phase 4 adds 16 tests covering draft invisibility, development isolation, publis
 Phase 4 visual evidence lives under `artifacts/screenshots/phase4/`. Fifteen homepage, Shop, slug-PDP, Admin Products, Admin Editor, and Admin Media views passed at 1440px, 768px, and 390px with no overflow, broken images, console errors, or page errors. Because no approved real catalog dataset exists, public-product and Admin presentation screenshots use a clearly labelled simulated published-real fixture; they are presentation evidence, not a claim of imported data.
 
 Publishable-key Phase 3A/3B remote regressions pass. Phase 4 remote schema/query verification is intentionally pending until the Owner applies `202608250001_phase_4_real_catalog.sql`; no database credential or service-role key was requested.
+## Phase 4 bulk catalog regression coverage
+
+The automated suite covers rough text and CSV parsing, grouped explicit colors without Cartesian expansion, missing facts, exact matching and ambiguity blocking, inventory preservation, integer PKR conversion, repeat-import idempotence, existing Motorola/Apple identity preservation, real/development taxonomy isolation, draft/media guards, and anonymous/non-admin denial.

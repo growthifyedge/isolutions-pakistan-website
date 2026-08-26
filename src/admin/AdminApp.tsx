@@ -8,6 +8,7 @@ import {
   CircleDollarSign,
   FileText,
   Image,
+  ListPlus,
   LayoutDashboard,
   LockKeyhole,
   Menu,
@@ -34,12 +35,14 @@ import {
 import { hasSupabaseEnvironment, supabase } from "../lib/supabase";
 import { MediaManager } from "./MediaManager";
 import { MediaLibrary } from "./MediaLibrary";
+import { BulkImport } from "./BulkImport";
 import "./admin.css";
 
 const nav = [
   ["Dashboard", "/admin", LayoutDashboard],
   ["Catalog", "/admin/products", Boxes],
   ["Media", "/admin/media", Image],
+  ["Bulk Import", "/admin/bulk-import", ListPlus],
   ["Homepage", "/admin/homepage", Sparkles],
   ["Orders", "", ShoppingBag],
   ["Promotions", "", CircleDollarSign],
@@ -671,6 +674,12 @@ export function AdminApp() {
   if (path === "/admin/login") return <Login />;
   let page: React.ReactNode = <Dashboard />;
   if (path === "/admin/products") page = <ProductList />;
+  else if (path === "/admin/bulk-import")
+    page = (
+      <AdminLayout section="Bulk Import">
+        <BulkImport />
+      </AdminLayout>
+    );
   else if (path === "/admin/taxonomy")
     page = (
       <AdminLayout section="Catalog">

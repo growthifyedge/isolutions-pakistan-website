@@ -1362,3 +1362,135 @@
     padding: 14px 18px 18px;
   }
 }
+.bulk-import textarea {
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--admin-border, #dfe3df);
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
+  line-height: 1.5;
+}
+.bulk-actions,
+.bulk-step,
+.bulk-product header,
+.bulk-variant,
+.bulk-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.bulk-actions {
+  justify-content: flex-end;
+  margin-bottom: 24px;
+}
+.bulk-actions label {
+  cursor: pointer;
+}
+.bulk-step {
+  padding: 14px 16px;
+  margin-top: 18px;
+  border-radius: 10px;
+  background: #f1f4ef;
+}
+.bulk-step span {
+  color: #617063;
+  font-size: 13px;
+}
+.bulk-preview {
+  display: grid;
+  gap: 14px;
+  margin: 16px 0;
+}
+.bulk-product {
+  border: 1px solid #dfe3df;
+  border-radius: 12px;
+  background: #fff;
+  padding: 16px;
+}
+.bulk-product header {
+  padding-bottom: 12px;
+}
+.bulk-product header small,
+.bulk-variant small {
+  display: block;
+  color: #69736b;
+  margin-top: 4px;
+}
+.bulk-status {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+.bulk-status.ready {
+  background: #e3f5e8;
+  color: #176b37;
+}
+.bulk-status.blocked {
+  background: #fff0e5;
+  color: #9a3e16;
+}
+.bulk-warning {
+  display: flex;
+  gap: 8px;
+  color: #9a3e16;
+  font-size: 13px;
+}
+.bulk-warning svg {
+  width: 16px;
+}
+.bulk-variant {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr 1fr auto;
+  border-top: 1px solid #edf0ed;
+  padding: 12px 0;
+  font-size: 13px;
+}
+.bulk-variant > div:nth-child(2) span,
+.bulk-variant > div:nth-child(2) b {
+  display: block;
+}
+.bulk-result {
+  justify-content: flex-start;
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 12px;
+  background: #e3f5e8;
+  color: #176b37;
+}
+.bulk-result div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+.bulk-result b {
+  width: 100%;
+}
+.admin-success {
+  color: #176b37;
+}
+@media (max-width: 760px) {
+  .bulk-step,
+  .bulk-product header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .bulk-variant {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .bulk-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .bulk-actions > * {
+    justify-content: center;
+  }
+}

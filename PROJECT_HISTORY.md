@@ -59,3 +59,6 @@
 - Established prototype governance and stage boundaries.
 - Built homepage, catalog, PDP, responsive navigation, mock filters, and explicit mock variant combinations.
 - Prepared the milestone for visual QA and Owner review.
+## 2026-08-27 — Phase 4 bulk catalog workflow
+
+Added Owner-authorized rough-text/CSV parsing, dry-run matching, explicit variant preview, and an authenticated atomic bulk-apply RPC. New catalog records remain real drafts; omitted facts and inventory are preserved or unresolved, and Phase 3B Media remains authoritative.

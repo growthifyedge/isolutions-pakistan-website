@@ -19,3 +19,6 @@
 - Related public variant, specification, and media policies explicitly require a published `real` parent product. Draft, archived, and development records remain public-invisible.
 - Public search/filter parameters are typed and executed in PostgreSQL. The browser receives only public catalog projections and has no mutation path.
 - Public storefront taxonomy uses `public_catalog_taxonomy()` rather than direct tables, preventing authenticated Admin read-all policies from widening public navigation/filter results.
+## Phase 4 bulk import boundary
+
+Bulk preview uses authenticated RLS reads. Writes are available only through `apply_catalog_bulk_import(jsonb)`, which checks `is_catalog_admin()`, revalidates real taxonomy/product/variant identities, and executes atomically. Anonymous execution is revoked; no privileged key is present in browser code.

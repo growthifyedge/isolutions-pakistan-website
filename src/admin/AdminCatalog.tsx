@@ -411,6 +411,31 @@ export function Phase4ProductEditor() {
   useEffect(() => {
     load();
   }, [load]);
+  const persistChangedVariantPrices = async () => {
+    if (!supabase) return "Supabase is not configured.";
+
+    for (const variant of variants) {
+      let priceMinor: number;
+      try {
+        priceMinor = parsePkrMajorToMinor(
+          variantPrices[variant.id] ??
+            pkrMajorInputFromMinor(variant.price_minor),
+        );
+      } catch (error) {
+        return error instanceof Error
+          ? error.message
+          : "Enter a valid PKR price.";
+      }
+
+      if (priceMinor === variant.price_minor) continue;
+      const { error } = await supabase
+        .from("product_variants")
+        .update({ price_minor: priceMinor })
+        .eq("id", variant.id);
+      if (error) return error.message;
+    }
+    return null;
+  };
   const save = async () => {
     if (!supabase) return;
     if (
@@ -446,6 +471,11 @@ export function Phase4ProductEditor() {
     if (result.error) setMessage(result.error.message);
     else if (!productId) location.href = `/admin/products/${result.data.id}`;
     else {
+      const variantPriceError = await persistChangedVariantPrices();
+      if (variantPriceError) {
+        setMessage(variantPriceError);
+        return;
+      }
       setMessage("Draft saved.");
       await load();
     }
@@ -508,20 +538,9 @@ export function Phase4ProductEditor() {
   };
   const saveVariantPrice = async (variantId: string) => {
     if (!supabase) return;
-    let priceMinor: number;
-    try {
-      priceMinor = parsePkrMajorToMinor(variantPrices[variantId] ?? "");
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Enter a valid PKR price.",
-      );
-      return;
-    }
-    const { error } = await supabase
-      .from("product_variants")
-      .update({ price_minor: priceMinor })
-      .eq("id", variantId);
-    setMessage(error?.message ?? "Variant price saved exactly.");
+    if (!variants.some((item) => item.id === variantId)) return;
+    const error = await persistChangedVariantPrices();
+    setMessage(error ?? "Variant price saved exactly.");
     if (!error) await load();
   };
   const adjustStock = async (variantId: string) => {

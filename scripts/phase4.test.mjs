@@ -5,6 +5,7 @@ import {
   formatPkrMinor,
   minimumActiveVariantPrice,
   parsePkrMajorToMinor,
+  pkrMajorInputFromMinor,
 } from "../src/lib/money.ts";
 
 const [migration, storefront, catalog, admin, app, phase3b, taxonomyRepair] =
@@ -26,6 +27,10 @@ const [migration, storefront, catalog, admin, app, phase3b, taxonomyRepair] =
       "utf8",
     ),
   ]);
+const priceRepair = await readFile(
+  "supabase/migrations/202608260002_phase_4_macbook_neo_price_repair.sql",
+  "utf8",
+);
 
 test("draft products remain public-invisible", () =>
   assert.match(migration, /publication_status = 'published'/));
@@ -83,6 +88,33 @@ test("exact minimum active variant pricing and PKR formatting", () => {
 test("compare-at price is returned only when greater than current price", () => {
   assert.match(migration, /compare_at_price_minor > v\.price_minor/);
   assert.match(catalog, /compareAtPriceMinor > variant\.priceMinor/);
+});
+test("variant create, save, reload, edit, and repeat-save preserve exact money", () => {
+  let storedMinor = parsePkrMajorToMinor("223000");
+  assert.equal(storedMinor, 22300000);
+  let adminInput = pkrMajorInputFromMinor(storedMinor);
+  assert.equal(adminInput, "223000");
+  storedMinor = parsePkrMajorToMinor(adminInput);
+  assert.equal(storedMinor, 22300000);
+  adminInput = "223000";
+  storedMinor = parsePkrMajorToMinor(adminInput);
+  assert.equal(pkrMajorInputFromMinor(storedMinor), "223000");
+  storedMinor = parsePkrMajorToMinor(pkrMajorInputFromMinor(storedMinor));
+  assert.equal(storedMinor, 22300000);
+  assert.match(admin, /const persistChangedVariantPrices = async/);
+  assert.match(admin, /priceMinor === variant\.price_minor/);
+  assert.match(
+    admin,
+    /const variantPriceError = await persistChangedVariantPrices\(\)/,
+  );
+  assert.doesNotMatch(admin, /parseFloat|Math\.round/);
+});
+test("MacBook Neo repair is guarded, idempotent, and verifies all five prices", () => {
+  assert.match(priceRepair, /v_current_price not in \(22299800, 22300000\)/);
+  assert.match(priceRepair, /set price_minor = 22300000/);
+  assert.match(priceRepair, /v_expected_count <> 5/);
+  for (const price of [22500000, 22300000, 25900000, 25600000])
+    assert.match(priceRepair, new RegExp(String(price)));
 });
 test("PTA unknown remains unresolved rather than non-PTA", () => {
   assert.match(migration, /pta_status = 'unknown'/);
