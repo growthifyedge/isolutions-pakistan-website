@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   generatedVariantSku,
+  matchingActiveRealTaxonomy,
   normalizeCapacity,
   parseBulkCatalog,
 } from "../src/lib/bulkCatalog.ts";
@@ -138,7 +139,10 @@ test("rough parser visibly marks uncertain lines for Owner review", () => {
   const uncertain = parseBulkCatalog(
     "Apple Device\nCategory: Smartphones\nPossibly special edition",
   );
-  assert.match(uncertain.products[0].warnings.join(" "), /Needs Owner Review/);
+  assert.match(
+    uncertain.products[0].warnings.join(" "),
+    /Owner Review Required/,
+  );
 });
 test("CSV supports partial documented columns without inventing facts", () => {
   const csv = parseBulkCatalog(
@@ -200,4 +204,71 @@ test("Parse and Preview catches failures and renders a visible error", () => {
     /role=\{result \|\| preview\.length \? "status" : "alert"\}/,
   );
   assert.match(admin, /type="button"/);
+});
+
+test("explicit Brand field overrides title inference and preserves the full title", () => {
+  const result = parseBulkCatalog(`TEST Bulk Import Phone
+Brand: Apple
+Category: Smartphones
+PTA Approved
+Brand New
+Karachi only
+128 GB Black/Blue 100000
+256 GB Black/Blue 120000`);
+  const product = result.products[0];
+  assert.equal(product.title, "TEST Bulk Import Phone");
+  assert.equal(product.brand, "Apple");
+  assert.equal(product.brandExplicit, true);
+  assert.doesNotMatch(product.warnings.join(" "), /Brand: Apple/);
+  assert.deepEqual(
+    product.variants.map(({ storage, color, priceMinor }) => ({
+      storage,
+      color,
+      priceMinor,
+    })),
+    [
+      { storage: "128 GB", color: "Black", priceMinor: 10000000 },
+      { storage: "128 GB", color: "Blue", priceMinor: 10000000 },
+      { storage: "256 GB", color: "Black", priceMinor: 12000000 },
+      { storage: "256 GB", color: "Blue", priceMinor: 12000000 },
+    ],
+  );
+  for (const variant of product.variants) {
+    assert.equal(variant.ptaStatus, "approved");
+    assert.equal(variant.condition, "brand_new");
+    assert.equal(variant.deliveryScope, "karachi_only");
+    assert.equal(variant.inventory, null);
+  }
+});
+
+test("real Apple matching is exact, active-only, and development-isolated", () => {
+  const taxonomy = [
+    { id: "real-apple", name: " Apple ", data_class: "real", is_active: true },
+    {
+      id: "dev-apple",
+      name: "Apple",
+      data_class: "development",
+      is_active: true,
+    },
+    { id: "inactive", name: "Apple", data_class: "real", is_active: false },
+    { id: "pineapple", name: "Pineapple", data_class: "real", is_active: true },
+  ];
+  assert.deepEqual(
+    matchingActiveRealTaxonomy(taxonomy, "apple").map((item) => item.id),
+    ["real-apple"],
+  );
+  assert.equal(matchingActiveRealTaxonomy(taxonomy, "Unknown").length, 0);
+  assert.match(admin, /explicit Brand required/);
+  assert.match(admin, /Ambiguous real brand match/);
+});
+
+test("multiple exact active real brand matches remain ambiguous", () => {
+  const matches = matchingActiveRealTaxonomy(
+    [
+      { name: "Apple", data_class: "real", is_active: true },
+      { name: " apple ", data_class: "real", is_active: true },
+    ],
+    "APPLE",
+  );
+  assert.equal(matches.length, 2);
 });

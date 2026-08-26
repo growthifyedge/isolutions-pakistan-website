@@ -11,6 +11,7 @@ import {
   BulkProduct,
   BulkVariant,
   generatedVariantSku,
+  matchingActiveRealTaxonomy,
   normalizedPriceDisplay,
   parseBulkCatalog,
 } from "../lib/bulkCatalog";
@@ -20,6 +21,7 @@ type Taxonomy = {
   name: string;
   slug: string;
   data_class: "real" | "development";
+  is_active: boolean;
 };
 type ExistingProduct = {
   id: string;
@@ -59,6 +61,8 @@ type PreviewProduct = Omit<BulkProduct, "variants"> & {
   variants: PreviewVariant[];
   blocked: string[];
   taxonomyNotes: string[];
+  brandAction: "REUSE BRAND" | "CREATE BRAND" | "NEEDS REVIEW";
+  categoryAction: "REUSE CATEGORY" | "CREATE CATEGORY" | "NEEDS REVIEW";
 };
 
 const normalized = (value: string | null | undefined) =>
@@ -121,8 +125,8 @@ export function BulkImport() {
         );
       }
       const [brandResult, categoryResult, productResult] = await Promise.all([
-        supabase.from("brands").select("id,name,slug,data_class"),
-        supabase.from("categories").select("id,name,slug,data_class"),
+        supabase.from("brands").select("id,name,slug,data_class,is_active"),
+        supabase.from("categories").select("id,name,slug,data_class,is_active"),
         supabase
           .from("products")
           .select(
@@ -137,24 +141,26 @@ export function BulkImport() {
       const products = (productResult.data ?? []) as ExistingProduct[];
       const rows = parsed.products.map((product): PreviewProduct => {
         const blocked = [...product.warnings];
-        const realBrands = brands.filter(
-          (item) =>
-            item.data_class === "real" &&
-            normalized(item.name) === normalized(product.brand),
-        );
+        const realBrands = matchingActiveRealTaxonomy(brands, product.brand);
         const developmentBrand = brands.some(
           (item) =>
             item.data_class === "development" &&
             normalized(item.name) === normalized(product.brand),
         );
         if (realBrands.length > 1) blocked.push("Ambiguous real brand match");
+        else if (realBrands.length === 0 && !product.brandExplicit)
+          blocked.push(
+            `Needs Owner Review: explicit Brand required for ${product.brand}`,
+          );
+        const brandAction =
+          realBrands.length === 1
+            ? "REUSE BRAND"
+            : product.brandExplicit && realBrands.length === 0
+              ? "CREATE BRAND"
+              : "NEEDS REVIEW";
         const brandId = realBrands.length === 1 ? realBrands[0].id : null;
         const realCategories = product.category
-          ? categories.filter(
-              (item) =>
-                item.data_class === "real" &&
-                normalized(item.name) === normalized(product.category),
-            )
+          ? matchingActiveRealTaxonomy(categories, product.category)
           : [];
         const developmentCategory = product.category
           ? categories.some(
@@ -165,6 +171,18 @@ export function BulkImport() {
           : false;
         if (realCategories.length > 1)
           blocked.push("Ambiguous real category match");
+        if (
+          product.category &&
+          realCategories.length === 0 &&
+          !product.categoryExplicit
+        )
+          blocked.push("Needs Owner Review: explicit Category required");
+        const categoryAction =
+          realCategories.length === 1
+            ? "REUSE CATEGORY"
+            : product.categoryExplicit && realCategories.length === 0
+              ? "CREATE CATEGORY"
+              : "NEEDS REVIEW";
         const categoryId =
           realCategories.length === 1 ? realCategories[0].id : null;
         const requestedSlug = product.slug ?? slugify(product.title);
@@ -262,6 +280,8 @@ export function BulkImport() {
           variants,
           blocked,
           taxonomyNotes,
+          brandAction,
+          categoryAction,
           action: blocked.length
             ? "BLOCKED"
             : existing
@@ -308,6 +328,8 @@ export function BulkImport() {
         seo_description: product.seoDescription,
         default_pta_status: product.defaultPtaStatus,
         default_delivery_scope: product.defaultDeliveryScope,
+        content: product.notes.length ? product.notes.join("\n") : null,
+        specifications: product.specifications,
         variants: product.variants.map((variant) => ({
           id: variant.id,
           action: variant.action,
@@ -442,6 +464,38 @@ export function BulkImport() {
                     {product.action}
                   </span>
                 </header>
+                <p className="bulk-meta">
+                  {product.brandAction} · {product.categoryAction}
+                </p>
+                <p className="bulk-meta">
+                  Defaults: PTA {product.defaultPtaStatus ?? "unresolved"} ·
+                  condition {product.defaultCondition ?? "unresolved"} ·
+                  warranty {product.defaultWarranty ?? "unresolved"} · delivery{" "}
+                  {product.defaultDeliveryScope ?? "unresolved"}
+                </p>
+                {product.notes.map((note) => (
+                  <p className="bulk-meta" key={`note-${note}`}>
+                    Owner note: {note}
+                  </p>
+                ))}
+                {product.specifications.map((specification) => (
+                  <p
+                    className="bulk-meta"
+                    key={`${specification.label}-${specification.value}`}
+                  >
+                    Specification: {specification.label} — {specification.value}
+                  </p>
+                ))}
+                {product.diagnostics
+                  .filter((item) => !item.blocksApply)
+                  .map((item) => (
+                    <p
+                      className="bulk-meta"
+                      key={`${item.line}-${item.reason}`}
+                    >
+                      {item.classification}: {item.line} — {item.reason}
+                    </p>
+                  ))}
                 {product.blocked.map((warning) => (
                   <p className="bulk-warning" key={warning}>
                     <AlertTriangle /> {warning}
@@ -471,7 +525,9 @@ export function BulkImport() {
                     </div>
                     <span>
                       {variant.ptaStatus} ({variant.ptaSource}) ·{" "}
-                      {variant.condition} ·{" "}
+                      {variant.condition} ({variant.conditionSource}) · warranty{" "}
+                      {variant.warranty ?? "unresolved"} (
+                      {variant.warrantySource}) ·{" "}
                       {variant.deliveryScope ?? "delivery unresolved"} (
                       {variant.deliverySource})
                       {variant.inventory === null
