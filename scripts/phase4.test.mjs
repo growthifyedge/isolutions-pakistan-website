@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [migration, storefront, catalog, admin, app, phase3b] = await Promise.all(
-  [
+const [migration, storefront, catalog, admin, app, phase3b, taxonomyRepair] =
+  await Promise.all([
     readFile(
       "supabase/migrations/202608250001_phase_4_real_catalog.sql",
       "utf8",
@@ -16,14 +16,29 @@ const [migration, storefront, catalog, admin, app, phase3b] = await Promise.all(
       "supabase/migrations/202608210001_phase_3b_cloudinary_media.sql",
       "utf8",
     ),
-  ],
-);
+    readFile(
+      "supabase/migrations/202608260001_phase_4_public_taxonomy_rpc.sql",
+      "utf8",
+    ),
+  ]);
 
 test("draft products remain public-invisible", () =>
   assert.match(migration, /publication_status = 'published'/));
 test("development and test data cannot leak into public catalog", () => {
   assert.match(migration, /data_class = 'real'/);
   assert.match(migration, /default 'development'/);
+});
+test("authenticated Admin storefront taxonomy remains real-only", () => {
+  assert.match(catalog, /rpc\("public_catalog_taxonomy"\)/);
+  assert.doesNotMatch(catalog, /\.from\("brands"\)|\.from\("categories"\)/);
+  assert.match(taxonomyRepair, /b\.data_class = 'real' and b\.is_active/);
+  assert.match(taxonomyRepair, /c\.data_class = 'real' and c\.is_active/);
+  assert.match(taxonomyRepair, /p\.data_class = 'real'/);
+  assert.match(taxonomyRepair, /p\.publication_status = 'published'/);
+  assert.match(
+    taxonomyRepair,
+    /grant execute on function public\.public_catalog_taxonomy\(\) to anon, authenticated/,
+  );
 });
 test("published real catalog query is database-backed", () => {
   assert.match(catalog, /rpc\("search_public_catalog"/);

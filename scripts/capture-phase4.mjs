@@ -171,6 +171,13 @@ for (const [name, path, width, height] of checks) {
       body: JSON.stringify([publicProduct]),
     }),
   );
+  await context.route("**/rest/v1/rpc/public_catalog_taxonomy", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ brands: [brand], categories: [category] }),
+    }),
+  );
   await context.route("**/rest/v1/brands*", (route) =>
     route.fulfill({
       status: 200,

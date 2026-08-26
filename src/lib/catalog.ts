@@ -86,25 +86,11 @@ export async function fetchPublicCatalog(filters: CatalogFilters = {}) {
 
 export async function fetchPublicTaxonomy() {
   if (!supabase) throw new Error("Supabase environment is not configured");
-  const client = supabase;
-  const [brandsResult, categoriesResult] = await Promise.all([
-    client
-      .from("brands")
-      .select("id,name,slug")
-      .eq("is_active", true)
-      .order("name"),
-    client
-      .from("categories")
-      .select("id,name,slug")
-      .eq("is_active", true)
-      .order("sort_order")
-      .order("name"),
-  ]);
-  if (brandsResult.error) throw brandsResult.error;
-  if (categoriesResult.error) throw categoriesResult.error;
-  return {
-    brands: brandsResult.data ?? [],
-    categories: categoriesResult.data ?? [],
+  const { data, error } = await supabase.rpc("public_catalog_taxonomy");
+  if (error) throw error;
+  return (data ?? { brands: [], categories: [] }) as {
+    brands: { id: string; name: string; slug: string }[];
+    categories: { id: string; name: string; slug: string }[];
   };
 }
 export function formatPkrMinor(value: number) {

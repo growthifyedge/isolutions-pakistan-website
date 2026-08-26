@@ -18,3 +18,4 @@
 - `search_public_catalog` is a read-only security-definer function with explicit published-real predicates. It exposes numeric availability without granting anonymous access to `inventory_movements`.
 - Related public variant, specification, and media policies explicitly require a published `real` parent product. Draft, archived, and development records remain public-invisible.
 - Public search/filter parameters are typed and executed in PostgreSQL. The browser receives only public catalog projections and has no mutation path.
+- Public storefront taxonomy uses `public_catalog_taxonomy()` rather than direct tables, preventing authenticated Admin read-all policies from widening public navigation/filter results.

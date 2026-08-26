@@ -1,5 +1,12 @@
 # Project history
 
+## 2026-08-26 — Authenticated storefront taxonomy isolation repair
+
+- Fixed development brand/category leakage seen when a verified Owner viewed the public storefront while signed in.
+- Replaced direct storefront taxonomy table reads with `public_catalog_taxonomy()`, an explicitly real-only published-catalog projection stable across anonymous and authenticated Admin sessions.
+- Preserved Admin read-all access, development fixtures, Motorola G77, the public catalog RPC, and all Phase 3B behavior.
+- Passed TypeScript, ESLint, 33 automated tests, and the production build. Remote activation requires the forward-only taxonomy RPC migration.
+
 ## 2026-08-25 — Phase 4 integration architecture implemented
 
 - Owner approved Phase 3B and authorized Phase 4 real catalog integration while keeping commerce outside scope.
