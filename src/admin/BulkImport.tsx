@@ -91,153 +91,182 @@ export function BulkImport() {
   const [message, setMessage] = useState("");
 
   const parseAndPreview = async () => {
-    if (!supabase || !source.trim()) return;
+    if (!source.trim()) {
+      setMessage(
+        "Paste rough catalog text or upload a CSV file before parsing.",
+      );
+      return;
+    }
+    if (!supabase) {
+      setMessage(
+        "Preview unavailable: Supabase environment is not configured.",
+      );
+      return;
+    }
     setWorking(true);
     setResult(null);
     setMessage("");
-    const parsed = parseBulkCatalog(source);
-    setFormat(parsed.format);
-    setParseErrors(parsed.errors);
-    const [brandResult, categoryResult, productResult] = await Promise.all([
-      supabase.from("brands").select("id,name,slug,data_class"),
-      supabase.from("categories").select("id,name,slug,data_class"),
-      supabase
-        .from("products")
-        .select(
-          "id,title,slug,brand_id,category_id,publication_status,product_variants(id,sku,ram_display,storage_display,color_finish,price_minor,compare_at_price_minor,pta_status,condition,warranty_override,delivery_scope)",
-        ),
-    ]);
-    const queryError =
-      brandResult.error ?? categoryResult.error ?? productResult.error;
-    if (queryError) {
-      setMessage(queryError.message);
-      setWorking(false);
-      return;
-    }
-    const brands = (brandResult.data ?? []) as Taxonomy[];
-    const categories = (categoryResult.data ?? []) as Taxonomy[];
-    const products = (productResult.data ?? []) as ExistingProduct[];
-    const rows = parsed.products.map((product): PreviewProduct => {
-      const blocked = [...product.warnings];
-      const realBrands = brands.filter(
-        (item) =>
-          item.data_class === "real" &&
-          normalized(item.name) === normalized(product.brand),
-      );
-      const developmentBrand = brands.some(
-        (item) =>
-          item.data_class === "development" &&
-          normalized(item.name) === normalized(product.brand),
-      );
-      if (realBrands.length > 1) blocked.push("Ambiguous real brand match");
-      const brandId = realBrands.length === 1 ? realBrands[0].id : null;
-      const realCategories = product.category
-        ? categories.filter(
-            (item) =>
-              item.data_class === "real" &&
-              normalized(item.name) === normalized(product.category),
-          )
-        : [];
-      const developmentCategory = product.category
-        ? categories.some(
-            (item) =>
-              item.data_class === "development" &&
-              normalized(item.name) === normalized(product.category),
-          )
-        : false;
-      if (realCategories.length > 1)
-        blocked.push("Ambiguous real category match");
-      const categoryId =
-        realCategories.length === 1 ? realCategories[0].id : null;
-      const requestedSlug = product.slug ?? slugify(product.title);
-      const candidates = product.slug
-        ? products.filter((item) => item.slug === product.slug)
-        : brandId
-          ? products.filter(
+    setPreview([]);
+    try {
+      const parsed = parseBulkCatalog(source);
+      setFormat(parsed.format);
+      setParseErrors(parsed.errors);
+      if (!parsed.products.length) {
+        throw new Error(
+          parsed.errors[0] ??
+            "No products could be parsed from the source data.",
+        );
+      }
+      const [brandResult, categoryResult, productResult] = await Promise.all([
+        supabase.from("brands").select("id,name,slug,data_class"),
+        supabase.from("categories").select("id,name,slug,data_class"),
+        supabase
+          .from("products")
+          .select(
+            "id,title,slug,brand_id,category_id,publication_status,product_variants(id,sku,ram_display,storage_display,color_finish,price_minor,compare_at_price_minor,pta_status,condition,warranty_override,delivery_scope)",
+          ),
+      ]);
+      const queryError =
+        brandResult.error ?? categoryResult.error ?? productResult.error;
+      if (queryError) throw queryError;
+      const brands = (brandResult.data ?? []) as Taxonomy[];
+      const categories = (categoryResult.data ?? []) as Taxonomy[];
+      const products = (productResult.data ?? []) as ExistingProduct[];
+      const rows = parsed.products.map((product): PreviewProduct => {
+        const blocked = [...product.warnings];
+        const realBrands = brands.filter(
+          (item) =>
+            item.data_class === "real" &&
+            normalized(item.name) === normalized(product.brand),
+        );
+        const developmentBrand = brands.some(
+          (item) =>
+            item.data_class === "development" &&
+            normalized(item.name) === normalized(product.brand),
+        );
+        if (realBrands.length > 1) blocked.push("Ambiguous real brand match");
+        const brandId = realBrands.length === 1 ? realBrands[0].id : null;
+        const realCategories = product.category
+          ? categories.filter(
               (item) =>
-                normalized(item.title) === normalized(product.title) &&
-                item.brand_id === brandId,
+                item.data_class === "real" &&
+                normalized(item.name) === normalized(product.category),
             )
           : [];
-      if (candidates.length > 1) blocked.push("Ambiguous product match");
-      const existing = candidates.length === 1 ? candidates[0] : null;
-      if (!existing && !product.category)
-        blocked.push("Category required for new product");
-      const taxonomyNotes: string[] = [];
-      if (developmentBrand)
-        taxonomyNotes.push(
-          "Development brand collision shown; a separate real brand will be created",
-        );
-      if (developmentCategory)
-        taxonomyNotes.push(
-          "Development category collision shown; a separate real category will be created",
-        );
-      const variants = product.variants.map((variant): PreviewVariant => {
-        const matches = variant.sku
-          ? (existing?.product_variants.filter(
-              (item) => item.sku === variant.sku,
-            ) ?? [])
-          : (existing?.product_variants.filter((item) =>
-              matchesVariant(item, variant),
-            ) ?? []);
-        const variantBlocked = [...variant.warnings];
-        if (matches.length > 1) variantBlocked.push("Ambiguous variant match");
-        const match = matches.length === 1 ? matches[0] : null;
-        const skuResolved =
-          variant.sku ??
-          match?.sku ??
-          generatedVariantSku(existing?.slug ?? requestedSlug, variant);
-        const unchanged = Boolean(
-          match &&
-          variant.inventory === null &&
-          match.price_minor === variant.priceMinor &&
-          (variant.compareAtPriceMinor === null ||
-            match.compare_at_price_minor === variant.compareAtPriceMinor) &&
-          (variant.ptaStatus === "unknown" ||
-            match.pta_status === variant.ptaStatus) &&
-          (variant.condition === "unknown" ||
-            match.condition === variant.condition) &&
-          (variant.warranty === null ||
-            match.warranty_override === variant.warranty) &&
-          (variant.deliveryScope === null ||
-            match.delivery_scope === variant.deliveryScope),
-        );
+        const developmentCategory = product.category
+          ? categories.some(
+              (item) =>
+                item.data_class === "development" &&
+                normalized(item.name) === normalized(product.category),
+            )
+          : false;
+        if (realCategories.length > 1)
+          blocked.push("Ambiguous real category match");
+        const categoryId =
+          realCategories.length === 1 ? realCategories[0].id : null;
+        const requestedSlug = product.slug ?? slugify(product.title);
+        const candidates = product.slug
+          ? products.filter((item) => item.slug === product.slug)
+          : brandId
+            ? products.filter(
+                (item) =>
+                  normalized(item.title) === normalized(product.title) &&
+                  item.brand_id === brandId,
+              )
+            : [];
+        if (candidates.length > 1) blocked.push("Ambiguous product match");
+        const existing = candidates.length === 1 ? candidates[0] : null;
+        if (!existing && !product.category)
+          blocked.push("Category required for new product");
+        const taxonomyNotes: string[] = [];
+        if (developmentBrand)
+          taxonomyNotes.push(
+            "Development brand collision shown; a separate real brand will be created",
+          );
+        if (developmentCategory)
+          taxonomyNotes.push(
+            "Development category collision shown; a separate real category will be created",
+          );
+        const variants = product.variants.map((variant): PreviewVariant => {
+          const matches = variant.sku
+            ? (existing?.product_variants.filter(
+                (item) => item.sku === variant.sku,
+              ) ?? [])
+            : (existing?.product_variants.filter((item) =>
+                matchesVariant(item, variant),
+              ) ?? []);
+          const variantBlocked = [...variant.warnings];
+          if (matches.length > 1)
+            variantBlocked.push("Ambiguous variant match");
+          const match = matches.length === 1 ? matches[0] : null;
+          const skuResolved =
+            variant.sku ??
+            match?.sku ??
+            generatedVariantSku(existing?.slug ?? requestedSlug, variant);
+          const unchanged = Boolean(
+            match &&
+            variant.inventory === null &&
+            match.price_minor === variant.priceMinor &&
+            (variant.compareAtPriceMinor === null ||
+              match.compare_at_price_minor === variant.compareAtPriceMinor) &&
+            (variant.ptaStatus === "unknown" ||
+              match.pta_status === variant.ptaStatus) &&
+            (variant.condition === "unknown" ||
+              match.condition === variant.condition) &&
+            (variant.warranty === null ||
+              match.warranty_override === variant.warranty) &&
+            (variant.deliveryScope === null ||
+              match.delivery_scope === variant.deliveryScope),
+          );
+          return {
+            ...variant,
+            warnings: variantBlocked,
+            id: match?.id ?? null,
+            skuResolved,
+            action: variantBlocked.length
+              ? "NEEDS REVIEW"
+              : unchanged
+                ? "UNCHANGED"
+                : match
+                  ? "UPDATE VARIANT"
+                  : "CREATE VARIANT",
+          };
+        });
+        if (variants.some((variant) => variant.warnings.length))
+          blocked.push("One or more variants require review");
         return {
-          ...variant,
-          warnings: variantBlocked,
-          id: match?.id ?? null,
-          skuResolved,
-          action: variantBlocked.length
-            ? "NEEDS REVIEW"
-            : unchanged
-              ? "UNCHANGED"
-              : match
-                ? "UPDATE VARIANT"
-                : "CREATE VARIANT",
+          ...product,
+          id: existing?.id ?? null,
+          brandId: brandId ?? (existing ? existing.brand_id : null),
+          categoryId:
+            categoryId ??
+            (existing && !product.category ? existing.category_id : null),
+          slugResolved: existing?.slug ?? requestedSlug,
+          variants,
+          blocked,
+          taxonomyNotes,
+          action: blocked.length
+            ? "BLOCKED"
+            : existing
+              ? "UPDATE PRODUCT"
+              : "CREATE PRODUCT",
         };
       });
-      if (variants.some((variant) => variant.warnings.length))
-        blocked.push("One or more variants require review");
-      return {
-        ...product,
-        id: existing?.id ?? null,
-        brandId: brandId ?? (existing ? existing.brand_id : null),
-        categoryId:
-          categoryId ??
-          (existing && !product.category ? existing.category_id : null),
-        slugResolved: existing?.slug ?? requestedSlug,
-        variants,
-        blocked,
-        taxonomyNotes,
-        action: blocked.length
-          ? "BLOCKED"
-          : existing
-            ? "UPDATE PRODUCT"
-            : "CREATE PRODUCT",
-      };
-    });
-    setPreview(rows);
-    setWorking(false);
+      setPreview(rows);
+      setMessage(
+        `Preview ready: ${rows.length} product${rows.length === 1 ? "" : "s"} parsed. No database writes performed.`,
+      );
+    } catch (error) {
+      const detail =
+        error instanceof Error
+          ? error.message
+          : typeof error === "object" && error && "message" in error
+            ? String(error.message)
+            : "Unknown parsing or preview error.";
+      setMessage(`Parse and preview failed: ${detail}`);
+    } finally {
+      setWorking(false);
+    }
   };
 
   const apply = async () => {
@@ -345,12 +374,19 @@ export function BulkImport() {
           className="admin-primary"
           onClick={parseAndPreview}
           disabled={working || !source.trim()}
+          type="button"
         >
           <Play /> Parse and preview
         </button>
       </div>
       {message && (
-        <p className={result ? "admin-success" : "admin-error"}>{message}</p>
+        <p
+          className={result || preview.length ? "admin-success" : "admin-error"}
+          role={result || preview.length ? "status" : "alert"}
+          aria-live="polite"
+        >
+          {message}
+        </p>
       )}
       {preview.length > 0 && (
         <>

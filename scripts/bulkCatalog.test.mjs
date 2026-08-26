@@ -148,3 +148,56 @@ test("CSV supports partial documented columns without inventing facts", () => {
   assert.equal(csv.products[0].variants[0].priceMinor, 3750000);
   assert.equal(csv.products[0].variants[0].inventory, null);
 });
+test("rough-text Parse and Preview produces the exact three-color dry run", () => {
+  const preview = parseBulkCatalog(`Apple 17 Pro Max
+Category: Smartphones
+256 GB Blue/Orange/Silver 472000
+Brand New
+Karachi only`);
+  assert.equal(preview.errors.length, 0);
+  assert.deepEqual(
+    preview.products[0].variants.map((variant) => ({
+      storage: variant.storage,
+      color: variant.color,
+      pricePkr: variant.pricePkr,
+      priceMinor: variant.priceMinor,
+    })),
+    [
+      {
+        storage: "256 GB",
+        color: "Blue",
+        pricePkr: "472000",
+        priceMinor: 47200000,
+      },
+      {
+        storage: "256 GB",
+        color: "Orange",
+        pricePkr: "472000",
+        priceMinor: 47200000,
+      },
+      {
+        storage: "256 GB",
+        color: "Silver",
+        pricePkr: "472000",
+        priceMinor: 47200000,
+      },
+    ],
+  );
+  for (const variant of preview.products[0].variants) {
+    assert.equal(variant.ptaStatus, "unknown");
+    assert.equal(variant.warranty, null);
+    assert.equal(variant.inventory, null);
+  }
+});
+
+test("Parse and Preview catches failures and renders a visible error", () => {
+  assert.match(admin, /try \{/);
+  assert.match(admin, /catch \(error\)/);
+  assert.match(admin, /finally \{/);
+  assert.match(admin, /Parse and preview failed:/);
+  assert.match(
+    admin,
+    /role=\{result \|\| preview\.length \? "status" : "alert"\}/,
+  );
+  assert.match(admin, /type="button"/);
+});
