@@ -13,6 +13,7 @@ import {
   LockKeyhole,
   Menu,
   PackageCheck,
+  ClipboardCheck,
   Plus,
   Search,
   Settings,
@@ -36,6 +37,7 @@ import { hasSupabaseEnvironment, supabase } from "../lib/supabase";
 import { MediaManager } from "./MediaManager";
 import { MediaLibrary } from "./MediaLibrary";
 import { BulkImport } from "./BulkImport";
+import { CatalogReadiness } from "./CatalogReadiness";
 import "./admin.css";
 
 const nav = [
@@ -43,6 +45,7 @@ const nav = [
   ["Catalog", "/admin/products", Boxes],
   ["Media", "/admin/media", Image],
   ["Bulk Import", "/admin/bulk-import", ListPlus],
+  ["Readiness", "/admin/catalog-readiness", ClipboardCheck],
   ["Homepage", "/admin/homepage", Sparkles],
   ["Orders", "", ShoppingBag],
   ["Promotions", "", CircleDollarSign],
@@ -678,6 +681,12 @@ export function AdminApp() {
     page = (
       <AdminLayout section="Bulk Import">
         <BulkImport />
+      </AdminLayout>
+    );
+  else if (path === "/admin/catalog-readiness")
+    page = (
+      <AdminLayout section="Readiness">
+        <CatalogReadiness />
       </AdminLayout>
     );
   else if (path === "/admin/taxonomy")

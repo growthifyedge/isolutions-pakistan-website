@@ -10,6 +10,8 @@ import { supabase } from "../lib/supabase";
 import {
   BulkProduct,
   BulkVariant,
+  BatchDefaults,
+  applyBatchDefaults,
   bulkInventoryPreview,
   generatedVariantSku,
   matchingActiveRealTaxonomy,
@@ -82,10 +84,11 @@ function matchesVariant(
     normalized(existing.ram_display) === normalized(variant.ram) &&
     normalized(existing.storage_display) === normalized(variant.storage) &&
     normalized(existing.color_finish) === normalized(variant.color) &&
-    (variant.ptaSource !== "explicit variant override" ||
+    (variant.ptaSource !== "Owner supplied explicitly" ||
       variant.ptaStatus === "unknown" ||
       existing.pta_status === variant.ptaStatus) &&
-    (variant.condition === "unknown" ||
+    (variant.conditionSource !== "Owner supplied explicitly" ||
+      variant.condition === "unknown" ||
       existing.condition === variant.condition)
   );
 }
@@ -98,6 +101,12 @@ export function BulkImport() {
   const [working, setWorking] = useState(false);
   const [result, setResult] = useState<Record<string, number> | null>(null);
   const [message, setMessage] = useState("");
+  const [batchDefaults, setBatchDefaults] = useState<BatchDefaults>({
+    condition: null,
+    deliveryScope: null,
+    warranty: null,
+    ptaStatus: null,
+  });
 
   const parseAndPreview = async () => {
     if (!source.trim()) {
@@ -118,6 +127,7 @@ export function BulkImport() {
     setPreview([]);
     try {
       const parsed = parseBulkCatalog(source);
+      parsed.products = applyBatchDefaults(parsed.products, batchDefaults);
       setFormat(parsed.format);
       setParseErrors(parsed.errors);
       if (!parsed.products.length) {
@@ -228,15 +238,48 @@ export function BulkImport() {
           );
           const preserveExistingPta = Boolean(
             match &&
-            variant.ptaSource === "inherited by variant" &&
+            variant.ptaSource !== "Owner supplied explicitly" &&
             match.pta_status !== "unknown",
+          );
+          const preserveExistingCondition = Boolean(
+            match &&
+            variant.conditionSource !== "Owner supplied explicitly" &&
+            match.condition !== "unknown",
+          );
+          const preserveExistingWarranty = Boolean(
+            match &&
+            variant.warrantySource !== "Owner supplied explicitly" &&
+            match.warranty_override,
+          );
+          const preserveExistingDelivery = Boolean(
+            match &&
+            variant.deliverySource !== "Owner supplied explicitly" &&
+            match.delivery_scope,
           );
           const effectivePtaStatus = preserveExistingPta
             ? match!.pta_status
             : variant.ptaStatus;
           const effectivePtaSource = preserveExistingPta
-            ? "explicit variant override"
+            ? "Owner supplied explicitly"
             : variant.ptaSource;
+          const effectiveCondition = preserveExistingCondition
+            ? match!.condition
+            : variant.condition;
+          const effectiveConditionSource = preserveExistingCondition
+            ? "Owner supplied explicitly"
+            : variant.conditionSource;
+          const effectiveWarranty = preserveExistingWarranty
+            ? match!.warranty_override
+            : variant.warranty;
+          const effectiveWarrantySource = preserveExistingWarranty
+            ? "Owner supplied explicitly"
+            : variant.warrantySource;
+          const effectiveDelivery = preserveExistingDelivery
+            ? match!.delivery_scope
+            : variant.deliveryScope;
+          const effectiveDeliverySource = preserveExistingDelivery
+            ? "Owner supplied explicitly"
+            : variant.deliverySource;
           const skuResolved =
             variant.sku ??
             match?.sku ??
@@ -247,20 +290,25 @@ export function BulkImport() {
             match.price_minor === variant.priceMinor &&
             (variant.compareAtPriceMinor === null ||
               match.compare_at_price_minor === variant.compareAtPriceMinor) &&
-            (variant.ptaSource !== "explicit variant override" ||
-              variant.ptaStatus === "unknown" ||
-              match.pta_status === variant.ptaStatus) &&
-            (variant.condition === "unknown" ||
-              match.condition === variant.condition) &&
-            (variant.warranty === null ||
-              match.warranty_override === variant.warranty) &&
-            (variant.deliveryScope === null ||
-              match.delivery_scope === variant.deliveryScope),
+            (effectivePtaSource === "unresolved" ||
+              match.pta_status === effectivePtaStatus) &&
+            (effectiveConditionSource === "unresolved" ||
+              match.condition === effectiveCondition) &&
+            (effectiveWarrantySource === "unresolved" ||
+              match.warranty_override === effectiveWarranty) &&
+            (effectiveDeliverySource === "unresolved" ||
+              match.delivery_scope === effectiveDelivery),
           );
           return {
             ...variant,
             ptaStatus: effectivePtaStatus,
             ptaSource: effectivePtaSource,
+            condition: effectiveCondition,
+            conditionSource: effectiveConditionSource,
+            warranty: effectiveWarranty,
+            warrantySource: effectiveWarrantySource,
+            deliveryScope: effectiveDelivery,
+            deliverySource: effectiveDeliverySource,
             warnings: variantBlocked,
             id: match?.id ?? null,
             skuResolved,
@@ -278,6 +326,10 @@ export function BulkImport() {
           blocked.push("One or more variants require review");
         return {
           ...product,
+          seoTitle: product.seoTitle ?? (existing ? null : product.title),
+          seoDescription:
+            product.seoDescription ??
+            (existing ? null : product.shortDescription),
           id: existing?.id ?? null,
           brandId: brandId ?? (existing ? existing.brand_id : null),
           categoryId:
@@ -335,6 +387,7 @@ export function BulkImport() {
         seo_description: product.seoDescription,
         default_pta_status: product.defaultPtaStatus,
         default_delivery_scope: product.defaultDeliveryScope,
+        default_warranty: product.defaultWarranty,
         content: product.notes.length ? product.notes.join("\n") : null,
         specifications: product.specifications,
         variants: product.variants.map((variant) => ({
@@ -402,6 +455,80 @@ export function BulkImport() {
         <b>1. Source data</b>
         <span>PKR major units · missing facts remain unresolved</span>
       </div>
+      <fieldset className="bulk-defaults">
+        <legend>Batch defaults</legend>
+        <p>
+          Optional Owner-supplied values. Explicit product and variant values
+          always win.
+        </p>
+        <label>
+          Condition
+          <select
+            value={batchDefaults.condition ?? ""}
+            onChange={(event) =>
+              setBatchDefaults({
+                ...batchDefaults,
+                condition: (event.target.value ||
+                  null) as BatchDefaults["condition"],
+              })
+            }
+          >
+            <option value="">Unresolved</option>
+            <option value="brand_new">Brand New</option>
+            <option value="used">Used</option>
+            <option value="open_box">Open Box</option>
+            <option value="refurbished">Refurbished</option>
+          </select>
+        </label>
+        <label>
+          Delivery scope
+          <select
+            value={batchDefaults.deliveryScope ?? ""}
+            onChange={(event) =>
+              setBatchDefaults({
+                ...batchDefaults,
+                deliveryScope: (event.target.value ||
+                  null) as BatchDefaults["deliveryScope"],
+              })
+            }
+          >
+            <option value="">Unresolved</option>
+            <option value="karachi_only">Karachi only</option>
+            <option value="nationwide">Nationwide</option>
+          </select>
+        </label>
+        <label>
+          Warranty
+          <input
+            value={batchDefaults.warranty ?? ""}
+            onChange={(event) =>
+              setBatchDefaults({
+                ...batchDefaults,
+                warranty: event.target.value.trimStart() || null,
+              })
+            }
+            placeholder="Unresolved"
+          />
+        </label>
+        <label>
+          PTA status
+          <select
+            value={batchDefaults.ptaStatus ?? ""}
+            onChange={(event) =>
+              setBatchDefaults({
+                ...batchDefaults,
+                ptaStatus: (event.target.value ||
+                  null) as BatchDefaults["ptaStatus"],
+              })
+            }
+          >
+            <option value="">Unresolved</option>
+            <option value="approved">PTA Approved</option>
+            <option value="not_approved">Non-PTA</option>
+            <option value="not_applicable">Not applicable</option>
+          </select>
+        </label>
+      </fieldset>
       <textarea
         aria-label="Bulk catalog source"
         value={source}
@@ -479,6 +606,10 @@ export function BulkImport() {
                   condition {product.defaultCondition ?? "unresolved"} ·
                   warranty {product.defaultWarranty ?? "unresolved"} · delivery{" "}
                   {product.defaultDeliveryScope ?? "unresolved"}
+                </p>
+                <p className="bulk-meta">
+                  SEO: title {product.seoTitle ?? "blank"} · description{" "}
+                  {product.seoDescription ?? "blank"}
                 </p>
                 {product.notes.map((note) => (
                   <p className="bulk-meta" key={`note-${note}`}>

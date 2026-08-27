@@ -6,7 +6,19 @@ export type ProductCondition =
   "brand_new" | "used" | "open_box" | "refurbished" | "unknown";
 export type DeliveryScope = "karachi_only" | "nationwide" | null;
 export type ValueSource =
-  "explicit variant override" | "inherited by variant" | "unresolved";
+  | "Owner supplied explicitly"
+  | "inherited from product"
+  | "inherited from batch default"
+  | "explicit variant override"
+  | "inherited by variant"
+  | "unresolved";
+
+export type BatchDefaults = {
+  condition: ProductCondition | null;
+  deliveryScope: DeliveryScope;
+  warranty: string | null;
+  ptaStatus: PtaStatus | null;
+};
 
 export type BulkDiagnostic = {
   line: string;
@@ -599,6 +611,71 @@ export function generatedVariantSku(productSlug: string, variant: BulkVariant) {
     .filter(Boolean)
     .map((part) => slugify(String(part)).toUpperCase())
     .join("-");
+}
+
+export function applyBatchDefaults(
+  products: BulkProduct[],
+  defaults: BatchDefaults,
+) {
+  return products.map((product) => ({
+    ...product,
+    variants: product.variants.map((variant) => {
+      const resolve = <T>(
+        value: T,
+        source: ValueSource,
+        productDefault: unknown,
+        batchDefault: T | null,
+      ) => ({
+        value:
+          source === "unresolved" && batchDefault != null
+            ? batchDefault
+            : value,
+        source:
+          source === "explicit variant override"
+            ? ("Owner supplied explicitly" as const)
+            : productDefault != null
+              ? ("inherited from product" as const)
+              : source === "unresolved" && batchDefault != null
+                ? ("inherited from batch default" as const)
+                : ("unresolved" as const),
+      });
+      const pta = resolve(
+        variant.ptaStatus,
+        variant.ptaSource,
+        product.defaultPtaStatus,
+        defaults.ptaStatus,
+      );
+      const condition = resolve(
+        variant.condition,
+        variant.conditionSource,
+        product.defaultCondition,
+        defaults.condition,
+      );
+      const warranty = resolve(
+        variant.warranty,
+        variant.warrantySource,
+        product.defaultWarranty,
+        defaults.warranty,
+      );
+      const delivery = resolve(
+        variant.deliveryScope,
+        variant.deliverySource,
+        product.defaultDeliveryScope,
+        defaults.deliveryScope,
+      );
+      return {
+        ...variant,
+        ptaStatus: pta.value,
+        ptaSource: pta.source,
+        condition: condition.value,
+        conditionSource: condition.source,
+        warranty: warranty.value,
+        warrantySource: warranty.source,
+        deliveryScope: delivery.value,
+        deliverySource: delivery.source,
+      };
+    }),
+  }));
 }
 
 export function bulkInventoryPreview(

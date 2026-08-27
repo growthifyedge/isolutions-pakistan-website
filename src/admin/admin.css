@@ -1374,6 +1374,43 @@
   font: inherit;
   line-height: 1.5;
 }
+.bulk-defaults {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+  padding: 18px;
+  border: 1px solid #dfe3e8;
+  border-radius: 14px;
+}
+.bulk-defaults legend {
+  font-weight: 800;
+  padding: 0 8px;
+}
+.bulk-defaults p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #667085;
+}
+.bulk-defaults label {
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.bulk-defaults input,
+.bulk-defaults select {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #dfe3e8;
+  border-radius: 8px;
+  background: white;
+}
+@media (max-width: 900px) {
+  .bulk-defaults {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 .bulk-actions,
 .bulk-step,
 .bulk-product header,
