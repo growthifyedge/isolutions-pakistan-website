@@ -10,6 +10,7 @@ import { supabase } from "../lib/supabase";
 import {
   BulkProduct,
   BulkVariant,
+  bulkInventoryPreview,
   generatedVariantSku,
   matchingActiveRealTaxonomy,
   normalizedPriceDisplay,
@@ -51,6 +52,7 @@ type PreviewVariant = BulkVariant & {
   action: string;
   id: string | null;
   skuResolved: string;
+  inventoryLabel: string;
 };
 type PreviewProduct = Omit<BulkProduct, "variants"> & {
   action: string;
@@ -220,6 +222,10 @@ export function BulkImport() {
           if (matches.length > 1)
             variantBlocked.push("Ambiguous variant match");
           const match = matches.length === 1 ? matches[0] : null;
+          const inventoryIntent = bulkInventoryPreview(
+            variant.inventory,
+            Boolean(match),
+          );
           const preserveExistingPta = Boolean(
             match &&
             variant.ptaSource === "inherited by variant" &&
@@ -258,6 +264,7 @@ export function BulkImport() {
             warnings: variantBlocked,
             id: match?.id ?? null,
             skuResolved,
+            inventoryLabel: inventoryIntent.label,
             action: variantBlocked.length
               ? "NEEDS REVIEW"
               : unchanged
@@ -529,10 +536,7 @@ export function BulkImport() {
                       {variant.warranty ?? "unresolved"} (
                       {variant.warrantySource}) ·{" "}
                       {variant.deliveryScope ?? "delivery unresolved"} (
-                      {variant.deliverySource})
-                      {variant.inventory === null
-                        ? " · inventory preserved/unresolved"
-                        : ` · inventory ${variant.inventory}`}
+                      {variant.deliverySource}) · {variant.inventoryLabel}
                     </span>
                     <span
                       className={`bulk-status ${variant.warnings.length ? "blocked" : "ready"}`}

@@ -601,6 +601,25 @@ export function generatedVariantSku(productSlug: string, variant: BulkVariant) {
     .join("-");
 }
 
+export function bulkInventoryPreview(
+  ownerQuantity: number | null,
+  existingVariant: boolean,
+) {
+  if (ownerQuantity !== null)
+    return {
+      label: `Inventory: ${ownerQuantity} (Owner supplied)`,
+      mode: "owner_supplied" as const,
+    };
+  if (existingVariant)
+    return {
+      label: "Inventory: preserve existing",
+      mode: "preserve_existing" as const,
+    };
+  return {
+    label: "Inventory: 10 (default for new variant)",
+    mode: "default_new" as const,
+  };
+}
 export function normalizedPriceDisplay(variant: BulkVariant) {
   return variant.priceMinor === null
     ? "Unresolved"
