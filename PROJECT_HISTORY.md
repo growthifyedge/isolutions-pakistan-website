@@ -62,3 +62,10 @@
 ## 2026-08-27 — Phase 4 bulk catalog workflow
 
 Added Owner-authorized rough-text/CSV parsing, dry-run matching, explicit variant preview, and an authenticated atomic bulk-apply RPC. New catalog records remain real drafts; omitted facts and inventory are preserved or unresolved, and Phase 3B Media remains authoritative.
+
+## 2026-08-29 — Firebase Hosting development setup prepared
+
+- Added Firebase Hosting SPA configuration for the Vite `dist` directory, including an `index.html` fallback for storefront and Admin Studio direct routes.
+- Confirmed the frontend consumes only browser-safe Vite configuration: Supabase URL, Supabase publishable key, and Cloudinary cloud name. `.env.local` remains ignored and no server secret is present in Hosting configuration.
+- No Firebase project ID, `.firebaserc`, authentication, Hosting URL, custom domain, or deployment was created because Firebase CLI was not installed or authenticated on this machine.
+- Once the Owner authorizes Firebase CLI sign-in/project selection, the development deployment command is `firebase deploy --only hosting` after `npm run build`. Production custom-domain launch remains pending; localhost remains available for local development.
