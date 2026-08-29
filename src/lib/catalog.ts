@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { minimumActiveVariantPrice } from "./money";
+import { nullIfEmpty } from "./catalogFilters";
 export { formatPkrMinor } from "./money";
 
 export type CatalogVariant = {
@@ -63,25 +64,31 @@ export type CatalogFilters = {
 const optional = <T>(value: T | undefined, fallback: null = null) =>
   value ?? fallback;
 
+export function publicCatalogRpcParameters(filters: CatalogFilters = {}) {
+  return {
+    p_search: optional(filters.search),
+    p_slug: optional(filters.slug),
+    p_category_slugs: nullIfEmpty(filters.categories),
+    p_brand_slugs: nullIfEmpty(filters.brands),
+    p_price_min: optional(filters.priceMin),
+    p_price_max: optional(filters.priceMax),
+    p_storage: nullIfEmpty(filters.storage),
+    p_ram: nullIfEmpty(filters.ram),
+    p_pta_status: nullIfEmpty(filters.ptaStatus),
+    p_in_stock: optional(filters.inStock),
+    p_delivery_scope: nullIfEmpty(filters.deliveryScope),
+    p_limit: filters.limit ?? 48,
+    p_offset: 0,
+  };
+}
+
 export async function fetchPublicCatalog(filters: CatalogFilters = {}) {
   if (!supabase) throw new Error("Supabase environment is not configured");
 
-  const { data, error } = await supabase.rpc("search_public_catalog", {
-    p_search: optional(filters.search),
-    p_slug: optional(filters.slug),
-    p_category_slugs: optional(filters.categories),
-
-    p_brand_slugs: optional(filters.brands),
-    p_price_min: optional(filters.priceMin),
-    p_price_max: optional(filters.priceMax),
-    p_storage: optional(filters.storage),
-    p_ram: optional(filters.ram),
-    p_pta_status: optional(filters.ptaStatus),
-    p_in_stock: optional(filters.inStock),
-    p_delivery_scope: optional(filters.deliveryScope),
-    p_limit: filters.limit ?? 48,
-    p_offset: 0,
-  });
+  const { data, error } = await supabase.rpc(
+    "search_public_catalog",
+    publicCatalogRpcParameters(filters),
+  );
   if (error) throw error;
   return (data ?? []) as CatalogProduct[];
 }

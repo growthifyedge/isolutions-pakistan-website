@@ -7,26 +7,33 @@ import {
   parsePkrMajorToMinor,
   pkrMajorInputFromMinor,
 } from "../src/lib/money.ts";
+import { nullIfEmpty } from "../src/lib/catalogFilters.ts";
 
-const [migration, storefront, catalog, admin, app, phase3b, taxonomyRepair] =
-  await Promise.all([
-    readFile(
-      "supabase/migrations/202608250001_phase_4_real_catalog.sql",
-      "utf8",
-    ),
-    readFile("src/StorefrontApp.tsx", "utf8"),
-    readFile("src/lib/catalog.ts", "utf8"),
-    readFile("src/admin/AdminCatalog.tsx", "utf8"),
-    readFile("src/App.tsx", "utf8"),
-    readFile(
-      "supabase/migrations/202608210001_phase_3b_cloudinary_media.sql",
-      "utf8",
-    ),
-    readFile(
-      "supabase/migrations/202608260001_phase_4_public_taxonomy_rpc.sql",
-      "utf8",
-    ),
-  ]);
+const [
+  migration,
+  storefront,
+  catalog,
+  admin,
+  app,
+  phase3b,
+  taxonomyRepair,
+  firebase,
+] = await Promise.all([
+  readFile("supabase/migrations/202608250001_phase_4_real_catalog.sql", "utf8"),
+  readFile("src/StorefrontApp.tsx", "utf8"),
+  readFile("src/lib/catalog.ts", "utf8"),
+  readFile("src/admin/AdminCatalog.tsx", "utf8"),
+  readFile("src/App.tsx", "utf8"),
+  readFile(
+    "supabase/migrations/202608210001_phase_3b_cloudinary_media.sql",
+    "utf8",
+  ),
+  readFile(
+    "supabase/migrations/202608260001_phase_4_public_taxonomy_rpc.sql",
+    "utf8",
+  ),
+  readFile("firebase.json", "utf8"),
+]);
 const priceRepair = await readFile(
   "supabase/migrations/202608260002_phase_4_macbook_neo_price_repair.sql",
   "utf8",
@@ -51,8 +58,35 @@ test("authenticated Admin storefront taxonomy remains real-only", () => {
   );
 });
 test("published real catalog query is database-backed", () => {
-  assert.match(catalog, /rpc\("search_public_catalog"/);
+  assert.match(catalog, /rpc\(\s*"search_public_catalog"/);
   assert.match(migration, /security definer/);
+});
+test("Shop preserves a published RPC array and renders every product", () => {
+  const response = [{ id: "one" }, { id: "two" }];
+  assert.equal(response.length, 2);
+  assert.match(
+    storefront,
+    /function Shop[\s\S]*fetchPublicCatalog\(filters\)[\s\S]*\.then\(setProducts\)[\s\S]*products\.map/,
+  );
+});
+test("an empty RPC array remains empty", () => {
+  const response = [];
+  assert.equal(response.length, 0);
+});
+test("default Shop state sends empty multi-select filters as null", () => {
+  assert.equal(nullIfEmpty([]), null);
+  assert.equal(nullIfEmpty([]), null);
+});
+test("selected Shop filters are preserved for the public RPC", () => {
+  assert.deepEqual(nullIfEmpty(["laptops"]), ["laptops"]);
+  assert.deepEqual(nullIfEmpty(["apple"]), ["apple"]);
+});
+test("Firebase Hosting keeps direct SPA routes on the production build", () => {
+  const hosting = JSON.parse(firebase).hosting;
+  assert.equal(hosting.public, "dist");
+  assert.deepEqual(hosting.rewrites, [
+    { source: "**", destination: "/index.html" },
+  ]);
 });
 test("product routing uses real slugs", () => {
   assert.match(storefront, /path\.startsWith\("\/product\/"\)/);
