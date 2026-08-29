@@ -35,6 +35,8 @@ type ExistingProduct = {
   publication_status: "draft" | "published" | "archived";
   default_pta_status: BulkVariant["ptaStatus"];
   default_delivery_scope: BulkVariant["deliveryScope"];
+  default_condition: BulkVariant["condition"];
+  default_warranty: string | null;
   product_variants: Array<{
     id: string;
     sku: string;
@@ -142,7 +144,7 @@ export function BulkImport() {
         supabase
           .from("products")
           .select(
-            "id,title,slug,brand_id,category_id,publication_status,default_pta_status,default_delivery_scope,product_variants(id,sku,ram_display,storage_display,color_finish,price_minor,compare_at_price_minor,pta_status,condition,warranty_override,delivery_scope)",
+            "id,title,slug,brand_id,category_id,publication_status,default_pta_status,default_condition,default_warranty,default_delivery_scope,product_variants(id,sku,ram_display,storage_display,color_finish,price_minor,compare_at_price_minor,pta_status,condition,warranty_override,delivery_scope)",
           ),
       ]);
       const queryError =
@@ -220,112 +222,217 @@ export function BulkImport() {
           taxonomyNotes.push(
             "Development category collision shown; a separate real category will be created",
           );
-        const variants = product.variants.map((variant): PreviewVariant => {
-          const matches = variant.sku
-            ? (existing?.product_variants.filter(
-                (item) => item.sku === variant.sku,
-              ) ?? [])
-            : (existing?.product_variants.filter((item) =>
-                matchesVariant(item, variant),
-              ) ?? []);
-          const variantBlocked = [...variant.warnings];
-          if (matches.length > 1)
-            variantBlocked.push("Ambiguous variant match");
-          const match = matches.length === 1 ? matches[0] : null;
-          const inventoryIntent = bulkInventoryPreview(
-            variant.inventory,
-            Boolean(match),
-          );
-          const preserveExistingPta = Boolean(
-            match &&
-            variant.ptaSource !== "Owner supplied explicitly" &&
-            match.pta_status !== "unknown",
-          );
-          const preserveExistingCondition = Boolean(
-            match &&
-            variant.conditionSource !== "Owner supplied explicitly" &&
-            match.condition !== "unknown",
-          );
-          const preserveExistingWarranty = Boolean(
-            match &&
-            variant.warrantySource !== "Owner supplied explicitly" &&
-            match.warranty_override,
-          );
-          const preserveExistingDelivery = Boolean(
-            match &&
-            variant.deliverySource !== "Owner supplied explicitly" &&
-            match.delivery_scope,
-          );
-          const effectivePtaStatus = preserveExistingPta
-            ? match!.pta_status
-            : variant.ptaStatus;
-          const effectivePtaSource = preserveExistingPta
-            ? "Owner supplied explicitly"
-            : variant.ptaSource;
-          const effectiveCondition = preserveExistingCondition
-            ? match!.condition
-            : variant.condition;
-          const effectiveConditionSource = preserveExistingCondition
-            ? "Owner supplied explicitly"
-            : variant.conditionSource;
-          const effectiveWarranty = preserveExistingWarranty
-            ? match!.warranty_override
-            : variant.warranty;
-          const effectiveWarrantySource = preserveExistingWarranty
-            ? "Owner supplied explicitly"
-            : variant.warrantySource;
-          const effectiveDelivery = preserveExistingDelivery
-            ? match!.delivery_scope
-            : variant.deliveryScope;
-          const effectiveDeliverySource = preserveExistingDelivery
-            ? "Owner supplied explicitly"
-            : variant.deliverySource;
-          const skuResolved =
-            variant.sku ??
-            match?.sku ??
-            generatedVariantSku(existing?.slug ?? requestedSlug, variant);
-          const unchanged = Boolean(
-            match &&
-            variant.inventory === null &&
-            match.price_minor === variant.priceMinor &&
-            (variant.compareAtPriceMinor === null ||
-              match.compare_at_price_minor === variant.compareAtPriceMinor) &&
-            (effectivePtaSource === "unresolved" ||
-              match.pta_status === effectivePtaStatus) &&
-            (effectiveConditionSource === "unresolved" ||
-              match.condition === effectiveCondition) &&
-            (effectiveWarrantySource === "unresolved" ||
-              match.warranty_override === effectiveWarranty) &&
-            (effectiveDeliverySource === "unresolved" ||
-              match.delivery_scope === effectiveDelivery),
-          );
-          return {
-            ...variant,
-            ptaStatus: effectivePtaStatus,
-            ptaSource: effectivePtaSource,
-            condition: effectiveCondition,
-            conditionSource: effectiveConditionSource,
-            warranty: effectiveWarranty,
-            warrantySource: effectiveWarrantySource,
-            deliveryScope: effectiveDelivery,
-            deliverySource: effectiveDeliverySource,
-            warnings: variantBlocked,
-            id: match?.id ?? null,
-            skuResolved,
-            inventoryLabel: inventoryIntent.label,
-            action: variantBlocked.length
-              ? "NEEDS REVIEW"
-              : unchanged
-                ? "UNCHANGED"
-                : match
-                  ? "UPDATE VARIANT"
-                  : "CREATE VARIANT",
-          };
-        });
+        const preserveExistingConditionDefault = Boolean(
+          existing &&
+          product.defaultConditionSource === "batch default" &&
+          existing.default_condition !== "unknown",
+        );
+        const preserveExistingDeliveryDefault = Boolean(
+          existing &&
+          product.defaultDeliverySource === "batch default" &&
+          existing.default_delivery_scope !== null,
+        );
+        const preserveExistingWarrantyDefault = Boolean(
+          existing &&
+          product.defaultWarrantySource === "batch default" &&
+          existing.default_warranty,
+        );
+        const preserveExistingPtaDefault = Boolean(
+          existing &&
+          product.defaultPtaSource === "batch default" &&
+          existing.default_pta_status !== "unknown",
+        );
+        const effectiveDefaults = {
+          condition: preserveExistingConditionDefault
+            ? existing!.default_condition
+            : product.defaultCondition,
+          conditionSource: preserveExistingConditionDefault
+            ? ("Owner supplied explicitly" as const)
+            : product.defaultConditionSource,
+          delivery: preserveExistingDeliveryDefault
+            ? existing!.default_delivery_scope
+            : product.defaultDeliveryScope,
+          deliverySource: preserveExistingDeliveryDefault
+            ? ("Owner supplied explicitly" as const)
+            : product.defaultDeliverySource,
+          warranty: preserveExistingWarrantyDefault
+            ? existing!.default_warranty
+            : product.defaultWarranty,
+          warrantySource: preserveExistingWarrantyDefault
+            ? ("Owner supplied explicitly" as const)
+            : product.defaultWarrantySource,
+          pta: preserveExistingPtaDefault
+            ? existing!.default_pta_status
+            : product.defaultPtaStatus,
+          ptaSource: preserveExistingPtaDefault
+            ? ("Owner supplied explicitly" as const)
+            : product.defaultPtaSource,
+        };
+        const variants = product.variants.map(
+          (parsedVariant): PreviewVariant => {
+            const variant = {
+              ...parsedVariant,
+              condition:
+                parsedVariant.conditionSource ===
+                  "inherited from batch default" &&
+                preserveExistingConditionDefault
+                  ? effectiveDefaults.condition!
+                  : parsedVariant.condition,
+              conditionSource:
+                parsedVariant.conditionSource ===
+                  "inherited from batch default" &&
+                preserveExistingConditionDefault
+                  ? ("inherited from product" as const)
+                  : parsedVariant.conditionSource,
+              deliveryScope:
+                parsedVariant.deliverySource ===
+                  "inherited from batch default" &&
+                preserveExistingDeliveryDefault
+                  ? effectiveDefaults.delivery
+                  : parsedVariant.deliveryScope,
+              deliverySource:
+                parsedVariant.deliverySource ===
+                  "inherited from batch default" &&
+                preserveExistingDeliveryDefault
+                  ? ("inherited from product" as const)
+                  : parsedVariant.deliverySource,
+              warranty:
+                parsedVariant.warrantySource ===
+                  "inherited from batch default" &&
+                preserveExistingWarrantyDefault
+                  ? effectiveDefaults.warranty
+                  : parsedVariant.warranty,
+              warrantySource:
+                parsedVariant.warrantySource ===
+                  "inherited from batch default" &&
+                preserveExistingWarrantyDefault
+                  ? ("inherited from product" as const)
+                  : parsedVariant.warrantySource,
+              ptaStatus:
+                parsedVariant.ptaSource === "inherited from batch default" &&
+                preserveExistingPtaDefault
+                  ? effectiveDefaults.pta!
+                  : parsedVariant.ptaStatus,
+              ptaSource:
+                parsedVariant.ptaSource === "inherited from batch default" &&
+                preserveExistingPtaDefault
+                  ? ("inherited from product" as const)
+                  : parsedVariant.ptaSource,
+            };
+            const matches = variant.sku
+              ? (existing?.product_variants.filter(
+                  (item) => item.sku === variant.sku,
+                ) ?? [])
+              : (existing?.product_variants.filter((item) =>
+                  matchesVariant(item, variant),
+                ) ?? []);
+            const variantBlocked = [...variant.warnings];
+            if (matches.length > 1)
+              variantBlocked.push("Ambiguous variant match");
+            const match = matches.length === 1 ? matches[0] : null;
+            const inventoryIntent = bulkInventoryPreview(
+              variant.inventory,
+              Boolean(match),
+            );
+            const preserveExistingPta = Boolean(
+              match &&
+              variant.ptaSource !== "Owner supplied explicitly" &&
+              match.pta_status !== "unknown",
+            );
+            const preserveExistingCondition = Boolean(
+              match &&
+              variant.conditionSource !== "Owner supplied explicitly" &&
+              match.condition !== "unknown",
+            );
+            const preserveExistingWarranty = Boolean(
+              match &&
+              variant.warrantySource !== "Owner supplied explicitly" &&
+              match.warranty_override,
+            );
+            const preserveExistingDelivery = Boolean(
+              match &&
+              variant.deliverySource !== "Owner supplied explicitly" &&
+              match.delivery_scope,
+            );
+            const effectivePtaStatus = preserveExistingPta
+              ? match!.pta_status
+              : variant.ptaStatus;
+            const effectivePtaSource = preserveExistingPta
+              ? "Owner supplied explicitly"
+              : variant.ptaSource;
+            const effectiveCondition = preserveExistingCondition
+              ? match!.condition
+              : variant.condition;
+            const effectiveConditionSource = preserveExistingCondition
+              ? "Owner supplied explicitly"
+              : variant.conditionSource;
+            const effectiveWarranty = preserveExistingWarranty
+              ? match!.warranty_override
+              : variant.warranty;
+            const effectiveWarrantySource = preserveExistingWarranty
+              ? "Owner supplied explicitly"
+              : variant.warrantySource;
+            const effectiveDelivery = preserveExistingDelivery
+              ? match!.delivery_scope
+              : variant.deliveryScope;
+            const effectiveDeliverySource = preserveExistingDelivery
+              ? "Owner supplied explicitly"
+              : variant.deliverySource;
+            const skuResolved =
+              variant.sku ??
+              match?.sku ??
+              generatedVariantSku(existing?.slug ?? requestedSlug, variant);
+            const unchanged = Boolean(
+              match &&
+              variant.inventory === null &&
+              match.price_minor === variant.priceMinor &&
+              (variant.compareAtPriceMinor === null ||
+                match.compare_at_price_minor === variant.compareAtPriceMinor) &&
+              (effectivePtaSource === "unresolved" ||
+                match.pta_status === effectivePtaStatus) &&
+              (effectiveConditionSource === "unresolved" ||
+                match.condition === effectiveCondition) &&
+              (effectiveWarrantySource === "unresolved" ||
+                match.warranty_override === effectiveWarranty) &&
+              (effectiveDeliverySource === "unresolved" ||
+                match.delivery_scope === effectiveDelivery),
+            );
+            return {
+              ...variant,
+              ptaStatus: effectivePtaStatus,
+              ptaSource: effectivePtaSource,
+              condition: effectiveCondition,
+              conditionSource: effectiveConditionSource,
+              warranty: effectiveWarranty,
+              warrantySource: effectiveWarrantySource,
+              deliveryScope: effectiveDelivery,
+              deliverySource: effectiveDeliverySource,
+              warnings: variantBlocked,
+              id: match?.id ?? null,
+              skuResolved,
+              inventoryLabel: inventoryIntent.label,
+              action: variantBlocked.length
+                ? "NEEDS REVIEW"
+                : unchanged
+                  ? "UNCHANGED"
+                  : match
+                    ? "UPDATE VARIANT"
+                    : "CREATE VARIANT",
+            };
+          },
+        );
         if (variants.some((variant) => variant.warnings.length))
           blocked.push("One or more variants require review");
         return {
           ...product,
+          defaultCondition: effectiveDefaults.condition,
+          defaultConditionSource: effectiveDefaults.conditionSource,
+          defaultDeliveryScope: effectiveDefaults.delivery,
+          defaultDeliverySource: effectiveDefaults.deliverySource,
+          defaultWarranty: effectiveDefaults.warranty,
+          defaultWarrantySource: effectiveDefaults.warrantySource,
+          defaultPtaStatus: effectiveDefaults.pta,
+          defaultPtaSource: effectiveDefaults.ptaSource,
           seoTitle: product.seoTitle ?? (existing ? null : product.title),
           seoDescription:
             product.seoDescription ??
@@ -386,8 +493,13 @@ export function BulkImport() {
         seo_title: product.seoTitle,
         seo_description: product.seoDescription,
         default_pta_status: product.defaultPtaStatus,
+        default_pta_source: product.defaultPtaSource,
+        default_condition: product.defaultCondition,
+        default_condition_source: product.defaultConditionSource,
         default_delivery_scope: product.defaultDeliveryScope,
+        default_delivery_source: product.defaultDeliverySource,
         default_warranty: product.defaultWarranty,
+        default_warranty_source: product.defaultWarrantySource,
         content: product.notes.length ? product.notes.join("\n") : null,
         specifications: product.specifications,
         variants: product.variants.map((variant) => ({
@@ -602,10 +714,14 @@ export function BulkImport() {
                   {product.brandAction} · {product.categoryAction}
                 </p>
                 <p className="bulk-meta">
-                  Defaults: PTA {product.defaultPtaStatus ?? "unresolved"} ·
-                  condition {product.defaultCondition ?? "unresolved"} ·
-                  warranty {product.defaultWarranty ?? "unresolved"} · delivery{" "}
-                  {product.defaultDeliveryScope ?? "unresolved"}
+                  Defaults: PTA {product.defaultPtaStatus ?? "unresolved"} (
+                  {product.defaultPtaSource}) · condition{" "}
+                  {product.defaultCondition ?? "unresolved"} (
+                  {product.defaultConditionSource}) · warranty{" "}
+                  {product.defaultWarranty ?? "unresolved"} (
+                  {product.defaultWarrantySource}) · delivery{" "}
+                  {product.defaultDeliveryScope ?? "unresolved"} (
+                  {product.defaultDeliverySource})
                 </p>
                 <p className="bulk-meta">
                   SEO: title {product.seoTitle ?? "blank"} · description{" "}

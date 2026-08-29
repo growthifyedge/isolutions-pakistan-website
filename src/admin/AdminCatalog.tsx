@@ -40,6 +40,8 @@ type Draft = {
   short_description: string;
   content: string;
   default_warranty: string;
+  default_condition:
+    "brand_new" | "used" | "open_box" | "refurbished" | "unknown";
   default_delivery_scope: "" | "karachi_only" | "nationwide";
   default_pta_status:
     "approved" | "not_approved" | "not_applicable" | "unknown";
@@ -79,6 +81,7 @@ const emptyDraft: Draft = {
   short_description: "",
   content: "",
   default_warranty: "",
+  default_condition: "unknown",
   default_delivery_scope: "",
   default_pta_status: "unknown",
   seo_title: "",
@@ -388,6 +391,7 @@ export function Phase4ProductEditor() {
       short_description: p.data.short_description ?? "",
       content: p.data.content ?? "",
       default_warranty: p.data.default_warranty ?? "",
+      default_condition: p.data.default_condition ?? "unknown",
       default_delivery_scope: p.data.default_delivery_scope ?? "",
       default_pta_status: p.data.default_pta_status ?? "unknown",
       seo_title: p.data.seo_title ?? "",
@@ -458,6 +462,7 @@ export function Phase4ProductEditor() {
       short_description: draft.short_description || null,
       content: draft.content || null,
       default_warranty: draft.default_warranty || null,
+      default_condition: draft.default_condition,
       default_delivery_scope: draft.default_delivery_scope || null,
       default_pta_status: draft.default_pta_status,
       seo_title: draft.seo_title || null,
@@ -713,6 +718,25 @@ export function Phase4ProductEditor() {
                     setDraft({ ...draft, default_warranty: e.target.value })
                   }
                 />
+              </label>
+              <label>
+                Default condition
+                <select
+                  value={draft.default_condition}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      default_condition: e.target
+                        .value as Draft["default_condition"],
+                    })
+                  }
+                >
+                  <option value="unknown">Unresolved</option>
+                  <option value="brand_new">Brand New</option>
+                  <option value="used">Used</option>
+                  <option value="open_box">Open Box</option>
+                  <option value="refurbished">Refurbished</option>
+                </select>
               </label>
               <label>
                 Default delivery scope

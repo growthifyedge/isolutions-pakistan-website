@@ -7,13 +7,14 @@ import {
   parseBulkCatalog,
 } from "../src/lib/bulkCatalog.ts";
 
-const [bulk, readiness, app] = await Promise.all([
+const [bulk, readiness, app, overview] = await Promise.all([
   readFile("src/admin/BulkImport.tsx", "utf8"),
   readFile(
-    "supabase/migrations/202608270005_phase_4_batch_defaults_readiness.sql",
+    "supabase/migrations/202608280001_phase_4_product_default_consistency.sql",
     "utf8",
   ),
   readFile("src/admin/CatalogReadiness.tsx", "utf8"),
+  readFile("src/admin/AdminCatalog.tsx", "utf8"),
 ]);
 const base = () =>
   parseBulkCatalog(
@@ -31,6 +32,17 @@ test("batch condition inheritance", () =>
     applyBatchDefaults(base(), defaults)[0].variants[0].conditionSource,
     "inherited from batch default",
   ));
+test("new product preview promotes selected batch defaults", () => {
+  const product = applyBatchDefaults(base(), defaults)[0];
+  assert.equal(product.defaultCondition, "brand_new");
+  assert.equal(product.defaultConditionSource, "batch default");
+  assert.equal(product.defaultDeliveryScope, "karachi_only");
+  assert.equal(product.defaultDeliverySource, "batch default");
+});
+test("preview displays effective default values and their sources", () => {
+  assert.match(bulk, /product\.defaultConditionSource/);
+  assert.match(bulk, /product\.defaultDeliverySource/);
+});
 test("batch delivery inheritance", () =>
   assert.equal(
     applyBatchDefaults(base(), defaults)[0].variants[0].deliveryScope,
@@ -89,6 +101,21 @@ test("one apply persists inherited defaults", () =>
   assert.match(
     readiness,
     /update public\.product_variants set[\s\S]*warranty_override/,
+  ));
+test("Apply persists product defaults and Product Overview reloads them", () => {
+  assert.match(readiness, /default_condition public\.product_condition/);
+  assert.match(readiness, /default_condition_source/);
+  assert.match(readiness, /default_delivery_source/);
+  assert.match(
+    overview,
+    /default_condition: p\.data\.default_condition \?\? "unknown"/,
+  );
+  assert.match(overview, /default_condition: draft\.default_condition/);
+});
+test("batch defaults only fill unresolved existing product defaults", () =>
+  assert.match(
+    readiness,
+    /default_condition_source' = 'batch default'[\s\S]*default_condition <> 'unknown'/,
   ));
 test("SEO title defaults exactly to Product Title", () =>
   assert.match(
