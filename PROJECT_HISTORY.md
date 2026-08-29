@@ -69,3 +69,9 @@ Added Owner-authorized rough-text/CSV parsing, dry-run matching, explicit varian
 - Confirmed the frontend consumes only browser-safe Vite configuration: Supabase URL, Supabase publishable key, and Cloudinary cloud name. `.env.local` remains ignored and no server secret is present in Hosting configuration.
 - No Firebase project ID, `.firebaserc`, authentication, Hosting URL, custom domain, or deployment was created because Firebase CLI was not installed or authenticated on this machine.
 - Once the Owner authorizes Firebase CLI sign-in/project selection, the development deployment command is `firebase deploy --only hosting` after `npm run build`. Production custom-domain launch remains pending; localhost remains available for local development.
+
+## 2026-08-30 â€” Firebase Hosting development live verified
+
+- Firebase Hosting development deployment is active at https://isolutions-development-cb1ea.web.app under verified project `isolutions-development-cb1ea` and alias `development`.
+- Owner live-verified `/`, `/shop`, `/admin`, `/admin/bulk-import`, and `/admin/catalog-readiness`, including Supabase-backed catalog reads, Cloudinary delivery, Admin authorization, and SPA direct routing.
+- This remains a development/testing deployment only. No production custom domain, Firebase Auth, Firebase Functions, Firestore, or commerce functionality was added; Supabase Auth and PostgreSQL RLS remain authoritative.

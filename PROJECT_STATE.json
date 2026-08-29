@@ -45,6 +45,22 @@
     "live_media_lifecycle_verified": true,
     "secrets_must_not_be_requested": true
   },
+  "firebase_development_hosting": {
+    "status": "active_live_verified",
+    "project_id": "isolutions-development-cb1ea",
+    "alias": "development",
+    "url": "https://isolutions-development-cb1ea.web.app",
+    "verified_routes": [
+      "/",
+      "/shop",
+      "/admin",
+      "/admin/bulk-import",
+      "/admin/catalog-readiness"
+    ],
+    "deployment_scope": "development_only",
+    "production_custom_domain": "pending",
+    "localhost_optional": true
+  },
   "catalog": {
     "runtime_mock_dependency_removed": true,
     "real_products_imported": 0,
@@ -56,5 +72,5 @@
     "must_remain_visually_unchanged": true,
     "catalog": "supabase_published_real_only"
   },
-  "last_updated": "2026-08-25"
+  "last_updated": "2026-08-30"
 }
