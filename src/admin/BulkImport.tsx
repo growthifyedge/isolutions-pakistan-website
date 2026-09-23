@@ -23,9 +23,15 @@ import {
   parseBulkCatalog,
   unresolvedVariantFacts,
 } from "../lib/bulkCatalog";
-import { normalizeStockLines } from "../lib/catalogSheet";
+import {
+  STAGING_PROFILES,
+  applyStagingProfile,
+  normalizeStockLines,
+  type StagingProfileId,
+} from "../lib/catalogSheet";
 import {
   buildCatalogWorkbook,
+  catalogStagingMissingFacts,
   catalogSheetToBulkParseResult,
   readCatalogWorkbook,
   validateCatalogSheet,
@@ -125,6 +131,7 @@ export function BulkImport() {
   const [source, setSource] = useState("");
   const [rawSource, setRawSource] = useState("");
   const [stockSource, setStockSource] = useState("");
+  const [stagingProfile, setStagingProfile] = useState<StagingProfileId>("none");
   const [preview, setPreview] = useState<PreviewProduct[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [format, setFormat] = useState("");
@@ -424,10 +431,15 @@ export function BulkImport() {
               ? "Owner supplied explicitly"
               : variant.deliverySource;
             const skuResolved = canonicalSku || match?.sku || "";
-            const missingFacts = unresolvedVariantFacts(variant, {
-              sku: skuResolved,
-              existingVariant: Boolean(match),
-            });
+            // v2 staging only blocks on genuinely required values; blank Warranty,
+            // PTA, Condition, BH and Cycle Count are allowed while staging.
+            const missingFacts =
+              parsed.format === "catalog_sheet"
+                ? catalogStagingMissingFacts(variant, skuResolved)
+                : unresolvedVariantFacts(variant, {
+                    sku: skuResolved,
+                    existingVariant: Boolean(match),
+                  });
             variantBlocked.push(
               ...missingFacts.map(
                 (fact) => `${variant.source}: Missing ${fact}`,
@@ -580,7 +592,10 @@ export function BulkImport() {
     const { rows } = normalizeStockLines(stockSource, {
       brands: reference.brands.map((name) => ({ name })),
     });
-    return { reference, ...validateCatalogSheet(rows, [], reference) };
+    return {
+      reference,
+      ...validateCatalogSheet(applyStagingProfile(rows, stagingProfile), [], reference),
+    };
   };
 
   const runCatalogStep = async (step: () => Promise<void>) => {
@@ -753,6 +768,26 @@ export function BulkImport() {
         <b>Bulk Upload v2 · Excel staging</b>
         <span>Raw stock → Excel → review → upload → preview · no database writes</span>
       </div>
+      <label className="bulk-profile">
+        Profile
+        <select
+          aria-label="Staging profile"
+          value={stagingProfile}
+          onChange={(event) => setStagingProfile(event.target.value as StagingProfileId)}
+        >
+          <option value="none">None / Mixed Stock</option>
+          {Object.entries(STAGING_PROFILES).map(([id, profile]) => (
+            <option value={id} key={id}>
+              {profile.label}
+            </option>
+          ))}
+        </select>
+        <small>
+          {stagingProfile === "none"
+            ? "Explicit row values only; blank PTA and Condition stay blank."
+            : `Fills blank values only (explicit row values always win): ${STAGING_PROFILES[stagingProfile].supplies.join(" · ")} · Stock stays 10 unless a Qty is given.`}
+        </small>
+      </label>
       <label className="bulk-raw-source">
         Raw stock lines
         <textarea

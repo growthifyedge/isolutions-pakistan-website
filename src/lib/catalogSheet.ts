@@ -465,3 +465,36 @@ export function normalizeStockLines(text: string, options: NormalizeStockOptions
   }
   return { rows };
 }
+
+export type StagingProfileId = "none" | "android_box_pack_pta";
+
+/** Optional, per-batch staging profiles. They only fill blank values and never override a row. */
+export const STAGING_PROFILES: Record<Exclude<StagingProfileId, "none">, { label: string; supplies: string[] }> = {
+  android_box_pack_pta: {
+    label: "Android Box Pack / PTA Approved",
+    supplies: ["Product Type: Mobile Phone", "Condition: Brand New", "PTA Status: PTA Approved", "Delivery Scope: Karachi Only"],
+  },
+};
+
+/**
+ * Applies a staging profile to blank fields only; explicit row values always win.
+ * Profile-supplied values are marked "default" so they stay visible for review.
+ */
+export function applyStagingProfile(rows: CatalogSheetRow[], profile: StagingProfileId): CatalogSheetRow[] {
+  if (profile === "none") return rows;
+  return rows.map((source) => {
+    const row: CatalogSheetRow = { ...source, fieldStatus: { ...source.fieldStatus }, reviewReasons: [...source.reviewReasons] };
+    const supply = <K extends "productType" | "condition" | "ptaStatus" | "deliveryScope">(field: K, value: CatalogSheetRow[K]) => {
+      if (row[field] !== null) return;
+      row[field] = value;
+      row.fieldStatus[field] = "default";
+    };
+    supply("productType", "Mobile Phone");
+    supply("condition", "brand_new");
+    supply("ptaStatus", "approved");
+    supply("deliveryScope", "karachi_only");
+    // PTA/condition are part of the generated SKU; regenerate only SKUs the Owner did not supply.
+    if (row.fieldStatus.sku === "inferred" && row.slug) row.sku = catalogSkuFor(row);
+    return row;
+  });
+}

@@ -516,6 +516,32 @@ export function catalogRowFromRecord(record: Partial<Record<ProductHeader, CellI
   return row;
 }
 
+// Existing category names each Product Type may resolve to. Only an exact single
+// match among active categories is used; categories are never created.
+const PRODUCT_TYPE_CATEGORY_NAMES: Record<CatalogProductType, string[]> = {
+  "Mobile Phone": ["mobile phones", "mobile phone", "smartphones", "smartphone", "phones"],
+  Tablet: ["tablets", "tablet", "ipad & tablets", "android tablets", "laptops & tablets"],
+  Accessory: ["accessories", "mobile accessories"],
+  Gadget: ["gadgets", "home gadgets"],
+};
+
+export function categoriesForProductType(productType: CatalogProductType, categories: string[]) {
+  const accepted = new Set(PRODUCT_TYPE_CATEGORY_NAMES[productType]);
+  return categories.filter((name) => accepted.has(lower(name)));
+}
+
+/**
+ * Values the v2 staging preview genuinely requires per variant. Warranty, PTA,
+ * Condition, Battery Health and Cycle Count may stay blank while staging.
+ */
+export function catalogStagingMissingFacts(variant: Pick<BulkVariant, "priceMinor" | "inventory">, sku: string) {
+  const missing: string[] = [];
+  if (!sku.trim()) missing.push("SKU");
+  if (variant.priceMinor === null || variant.priceMinor <= 0) missing.push("Price");
+  if (variant.inventory === null || !Number.isInteger(variant.inventory) || variant.inventory < 0) missing.push("Stock");
+  return missing;
+}
+
 /**
  * Cross-row and reference validation shared by Excel uploads and normalized raw stock.
  * Returns new row/specification objects; unknown or conflicting data is flagged, never fixed silently.
@@ -552,6 +578,21 @@ export function validateCatalogSheet(
       const canonical = categoryNames.get(lower(row.category));
       if (!canonical) flag(row, "category", `Category not found among active categories: "${row.category}"`);
       else row.category = canonical;
+    } else if (row.productType) {
+      const matches = categoriesForProductType(row.productType, reference.categories);
+      if (matches.length === 1) {
+        row.category = matches[0];
+        row.fieldStatus.category = "inferred";
+      } else if (matches.length > 1)
+        flag(row, "category", `Category is ambiguous for ${row.productType}: ${matches.join(" / ")}`);
+      else flag(row, "category", `No active category matches Product Type ${row.productType}`);
+    } else {
+      flag(row, "category", "Category cannot be resolved without a Product Type");
+    }
+    // Locked business rule: mobile phones deliver in Karachi only.
+    if (row.productType === "Mobile Phone" && row.deliveryScope === null) {
+      row.deliveryScope = "karachi_only";
+      row.fieldStatus.deliveryScope = "inferred";
     }
     if (row.priceMinor === null) flag(row, "priceMinor", "Price is required");
   }

@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import ExcelJS from "exceljs";
 import { normalizeStockLines } from "../src/lib/catalogSheet.ts";
+import { STAGING_PROFILES, applyStagingProfile } from "../src/lib/catalogSheet.ts";
 import {
   CATALOG_TEMPLATE_VERSION,
+  catalogStagingMissingFacts,
+  categoriesForProductType,
+  validateCatalogSheet,
   PRODUCT_HEADERS,
   SPECIFICATION_HEADERS,
   buildCatalogWorkbook,
@@ -68,8 +72,11 @@ test("4. normalized Android row survives write → read round-trip", async () =>
     assert.equal(row[field], source[field], field);
   assert.equal(row.model, "A16");
   assert.equal(row.productTitle, "Samsung A16");
-  for (const field of ["ptaStatus", "condition", "warranty", "category", "compareAtPriceMinor", "batteryHealth", "cycleCount", "action"])
+  for (const field of ["ptaStatus", "condition", "warranty", "compareAtPriceMinor", "batteryHealth", "cycleCount", "action"])
     assert.equal(row[field], null, field);
+  // Category resolves from Product Type to the one matching active category.
+  assert.equal(row.category, "Mobile Phones");
+  assert.equal(row.fieldStatus.category, "inferred");
   assert.equal(row.needsReview, false);
 });
 
@@ -225,4 +232,93 @@ test("owner-entered values: labels, brand prefix in model, percent BH, Mobile + 
   const preview = catalogSheetToBulkParseResult(data);
   assert.equal(preview.products[0].requestedAction, "Replace Existing");
   assert.equal(preview.products[0].variants[0].batteryHealth, 91);
+});
+
+// Real active categories as currently in the database (read-only check, 2026-09-24).
+const liveCategories = ["Accessories", "Laptops", "Mobile Accessories", "Smartphones"];
+const stage = (text, profile = "none", categories = liveCategories) => {
+  const ref = { brands: reference.brands, categories };
+  return validateCatalogSheet(applyStagingProfile(normalize(text), profile), [], ref).rows;
+};
+
+test("v2 A. Android Box Pack / PTA Approved profile fills blanks only", () => {
+  assert.equal(STAGING_PROFILES.android_box_pack_pta.label, "Android Box Pack / PTA Approved");
+  const [row] = stage("Samsung A16 6/128 Black; 42500", "android_box_pack_pta");
+  assert.equal(row.brand, "Samsung");
+  assert.equal(row.model, "A16");
+  assert.equal(row.productType, "Mobile Phone");
+  assert.equal(row.category, "Smartphones");
+  assert.equal(row.condition, "brand_new");
+  assert.equal(row.fieldStatus.condition, "default");
+  assert.equal(row.ptaStatus, "approved");
+  assert.equal(row.fieldStatus.ptaStatus, "default");
+  assert.equal(row.deliveryScope, "karachi_only");
+  assert.equal(row.stock, 10);
+  assert.equal(row.warranty, null);
+  assert.equal(row.sku, "SAMSUNG-A16-6-128-BLACK-PTA");
+  assert.equal(row.needsReview, false);
+  // Explicit row values always win over the profile.
+  const [explicit] = stage("iPhone 15 Pro 256 Natural; 265000; Used; Non-PTA; Qty 3", "android_box_pack_pta");
+  assert.equal(explicit.condition, "used");
+  assert.equal(explicit.ptaStatus, "not_approved");
+  assert.equal(explicit.fieldStatus.ptaStatus, "explicit");
+  assert.equal(explicit.stock, 3);
+});
+
+test("v2 B. mixed stock without a profile leaves PTA/Condition/Warranty blank without review", () => {
+  const [android] = stage("Samsung A16 6/128 Black; 42500");
+  assert.equal(android.ptaStatus, null);
+  assert.equal(android.condition, null);
+  assert.equal(android.category, "Smartphones");
+  assert.equal(android.needsReview, false);
+  const [iphone] = stage("iPhone 15 Pro 256 Natural; 265000; Used; Non-PTA; BH 89%; Cycles 312");
+  assert.equal(iphone.brand, "Apple");
+  assert.equal(iphone.model, "iPhone 15 Pro");
+  assert.equal(iphone.productType, "Mobile Phone");
+  assert.equal(iphone.category, "Smartphones");
+  assert.equal(iphone.condition, "used");
+  assert.equal(iphone.conditionGrade, "A++");
+  assert.equal(iphone.ptaStatus, "not_approved");
+  assert.equal(iphone.batteryHealth, 89);
+  assert.equal(iphone.cycleCount, 312);
+  assert.equal(iphone.deliveryScope, "karachi_only");
+  assert.equal(iphone.stock, 10);
+  assert.equal(iphone.warranty, null);
+  assert.equal(iphone.needsReview, false);
+});
+
+test("v2 category mapping uses existing categories only and flags ambiguity", () => {
+  assert.deepEqual(categoriesForProductType("Mobile Phone", liveCategories), ["Smartphones"]);
+  assert.deepEqual(categoriesForProductType("Accessory", liveCategories), ["Accessories", "Mobile Accessories"]);
+  assert.deepEqual(categoriesForProductType("Tablet", liveCategories), []);
+  const [ambiguous] = validateCatalogSheet(
+    [{ ...normalize("Samsung A16 6/128 Black; 42500")[0], productType: "Accessory" }],
+    [],
+    { brands: reference.brands, categories: liveCategories },
+  ).rows;
+  assert.equal(ambiguous.category, null);
+  assert.ok(ambiguous.reviewReasons.includes("Category is ambiguous for Accessory: Accessories / Mobile Accessories"));
+  const [tablet] = stage("Samsung Tab S9 8/128 Grey; 150000");
+  assert.equal(tablet.productType, "Tablet");
+  assert.ok(tablet.reviewReasons.includes("No active category matches Product Type Tablet"));
+  const [noType] = stage("Samsung 25W Charger; 3500");
+  assert.ok(noType.reviewReasons.includes("Category cannot be resolved without a Product Type"));
+});
+
+test("v2 uploaded Mobile Phone with blank delivery resolves to Karachi Only", async () => {
+  const data = await roundTrip(normalize("Samsung A16 6/128 Black; 42500"), (workbook) => {
+    const sheet = workbook.getWorksheet("Products");
+    sheet.getRow(2).getCell(column("Delivery Scope")).value = null;
+    sheet.getRow(2).getCell(column("Category")).value = null;
+  });
+  const [row] = data.rows;
+  assert.equal(row.deliveryScope, "karachi_only");
+  assert.equal(row.fieldStatus.deliveryScope, "inferred");
+  assert.equal(row.category, "Mobile Phones");
+  assert.equal(row.needsReview, false);
+});
+
+test("v2 preview requires only SKU, Price and Stock", () => {
+  assert.deepEqual(catalogStagingMissingFacts({ priceMinor: 4_250_000, inventory: 10 }, "SAMSUNG-A16"), []);
+  assert.deepEqual(catalogStagingMissingFacts({ priceMinor: null, inventory: -1 }, " "), ["SKU", "Price", "Stock"]);
 });
