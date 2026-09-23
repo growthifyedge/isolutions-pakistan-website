@@ -92,7 +92,9 @@ import {
   createStorefrontOrder,
   readStorefrontOrderConfirmation,
   saveStorefrontOrderConfirmation,
+  calculateDeliveryFeeMinor,
   FREE_STANDARD_DELIVERY_THRESHOLD_MINOR,
+  STANDARD_DELIVERY_FEE_MINOR,
   FAST_DELIVERY_SURCHARGE_MINOR,
   type ShippingMethod,
 } from "./lib/orders";
@@ -2589,12 +2591,10 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
   const subtotal = items.reduce((total, item) => total + item.priceMinor * item.quantity, 0);
   const qualifiesForFreeStandardDelivery = subtotal >= FREE_STANDARD_DELIVERY_THRESHOLD_MINOR;
   const amountToFreeStandardDeliveryMinor = Math.max(0, FREE_STANDARD_DELIVERY_THRESHOLD_MINOR - subtotal);
-  // Below the free-delivery threshold, no standard delivery fee is configured yet, so it stays unknown ("to be confirmed") rather than inventing one.
-  const standardDeliveryFeeMinor = qualifiesForFreeStandardDelivery ? 0 : null;
-  const deliveryFeeMinor = shippingMethod === "fast"
-    ? (qualifiesForFreeStandardDelivery ? FAST_DELIVERY_SURCHARGE_MINOR : null)
-    : standardDeliveryFeeMinor;
-  const knownTotalMinor = subtotal + (deliveryFeeMinor ?? 0);
+  const standardDeliveryFeeMinor = calculateDeliveryFeeMinor(subtotal, "standard");
+  const fastDeliveryFeeMinor = calculateDeliveryFeeMinor(subtotal, "fast");
+  const deliveryFeeMinor = shippingMethod === "fast" ? fastDeliveryFeeMinor : standardDeliveryFeeMinor;
+  const totalMinor = subtotal + deliveryFeeMinor;
   const knownScopes = items.map((item) => deliveryScopes[item.variantId]).filter((scope): scope is "karachi_only" | "nationwide" => Boolean(scope));
   const hasKarachiOnly = knownScopes.includes("karachi_only");
   const hasNationwide = knownScopes.includes("nationwide");
@@ -2751,15 +2751,17 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
                   <button className={`checkout-shipping-tile${shippingMethod === "standard" ? " is-selected" : ""}`} type="button" onClick={() => setShippingMethod("standard")} aria-pressed={shippingMethod === "standard"}>
                     <Truck aria-hidden="true" />
                     <div className="checkout-shipping-tile-body">
-                      <div className="checkout-shipping-tile-head"><span>Standard Delivery</span>{qualifiesForFreeStandardDelivery ? <em className="checkout-shipping-badge is-free">FREE</em> : <em className="checkout-shipping-badge is-tbc">To be confirmed</em>}</div>
-                      <p>{qualifiesForFreeStandardDelivery ? "Free delivery on orders Rs 10,000 or above." : "Standard delivery charges will be confirmed with your order."}</p>
+                      <div className="checkout-shipping-tile-head"><span>Standard Delivery</span>{qualifiesForFreeStandardDelivery ? <em className="checkout-shipping-badge is-free">FREE</em> : <em className="checkout-shipping-badge is-paid">{formatPkrMinor(standardDeliveryFeeMinor)}</em>}</div>
+                      <p>{qualifiesForFreeStandardDelivery ? "Free delivery on orders Rs 10,000 or above." : "Free on orders Rs 10,000 or above."}</p>
                     </div>
                   </button>
                   <button className={`checkout-shipping-tile${shippingMethod === "fast" ? " is-selected" : ""}`} type="button" onClick={() => setShippingMethod("fast")} aria-pressed={shippingMethod === "fast"}>
                     <Zap aria-hidden="true" />
                     <div className="checkout-shipping-tile-body">
-                      <div className="checkout-shipping-tile-head"><span>Fast Delivery <small className="checkout-shipping-priority">Priority</small></span><em className="checkout-shipping-badge is-paid">{formatPkrMinor(FAST_DELIVERY_SURCHARGE_MINOR)}</em></div>
-                      <p>Priority delivery for an additional {formatPkrMinor(FAST_DELIVERY_SURCHARGE_MINOR)}.</p>
+                      <div className="checkout-shipping-tile-head"><span>Fast Delivery <small className="checkout-shipping-priority">Priority</small></span><em className="checkout-shipping-badge is-paid">{formatPkrMinor(fastDeliveryFeeMinor)}</em></div>
+                      <p>{qualifiesForFreeStandardDelivery
+                        ? `Priority delivery for an additional ${formatPkrMinor(FAST_DELIVERY_SURCHARGE_MINOR)}.`
+                        : `${formatPkrMinor(STANDARD_DELIVERY_FEE_MINOR)} delivery + ${formatPkrMinor(FAST_DELIVERY_SURCHARGE_MINOR)} Fast surcharge.`}</p>
                     </div>
                   </button>
                 </div>
@@ -2792,19 +2794,11 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
                 <dl className="checkout-totals">
                   <div><dt>Subtotal</dt><dd>{formatPkrMinor(subtotal)}</dd></div>
                   <div><dt>Delivery Method</dt><dd>{shippingMethod === "fast" ? "Fast Delivery" : "Standard Delivery"}</dd></div>
-                  <div><dt>Delivery</dt><dd>
-                    {deliveryFeeMinor === 0
-                      ? "FREE"
-                      : deliveryFeeMinor !== null
-                        ? formatPkrMinor(deliveryFeeMinor)
-                        : shippingMethod === "fast"
-                          ? `To be confirmed (+${formatPkrMinor(FAST_DELIVERY_SURCHARGE_MINOR)} Fast Delivery)`
-                          : "To be confirmed"}
-                  </dd></div>
-                  <div className="checkout-total"><dt>{deliveryFeeMinor !== null ? "Total" : "Known Total"}</dt><dd>{formatPkrMinor(knownTotalMinor)}</dd></div>
+                  <div><dt>Delivery</dt><dd>{deliveryFeeMinor === 0 ? "FREE" : formatPkrMinor(deliveryFeeMinor)}</dd></div>
+                  <div className="checkout-total"><dt>Total</dt><dd>{formatPkrMinor(totalMinor)}</dd></div>
                 </dl>
                 <button className="checkout-place-order" form="checkout-details-form" type="submit" disabled={isSubmitting}>{isSubmitting ? "Placing Order..." : "Place Order"}</button>
-                <p className="checkout-order-helper">{deliveryFeeMinor !== null ? "Your delivery fee is confirmed above." : "Standard delivery charges will be confirmed after address verification."}</p>
+                <p className="checkout-order-helper">Your delivery fee is confirmed above.</p>
                 <div className="checkout-reassurance"><span><BadgeCheck aria-hidden="true" />Clear product condition</span><span><MapPinned aria-hidden="true" />Delivery eligibility shown clearly</span><span><MessageCircle aria-hidden="true" />Support available on WhatsApp</span></div>
               </div>
             </aside>
@@ -2832,16 +2826,10 @@ function OrderSuccessPage({ taxonomy }: { taxonomy: Taxonomy }) {
               <div><dt>Payment method</dt><dd>{confirmation.paymentMethod === "bank_transfer" ? "Bank Transfer" : "Cash on Delivery"}</dd></div>
               <div><dt>Subtotal</dt><dd>{formatPkrMinor(confirmation.subtotalMinor)}</dd></div>
               <div><dt>Delivery Method</dt><dd>{confirmation.shippingMethod === "fast" ? "Fast Delivery" : "Standard Delivery"}</dd></div>
-              <div><dt>Delivery</dt><dd>
-                {confirmation.deliveryFeeMinor === 0
-                  ? "FREE"
-                  : confirmation.deliveryFeeMinor !== null
-                    ? formatPkrMinor(confirmation.deliveryFeeMinor)
-                    : "To be confirmed"}
-              </dd></div>
-              <div className="order-success-total"><dt>{confirmation.deliveryFeeMinor !== null ? "Total" : "Known total"}</dt><dd>{formatPkrMinor(confirmation.totalMinor)}</dd></div>
+              <div><dt>Delivery</dt><dd>{confirmation.deliveryFeeMinor === 0 ? "FREE" : formatPkrMinor(confirmation.deliveryFeeMinor)}</dd></div>
+              <div className="order-success-total"><dt>Total</dt><dd>{formatPkrMinor(confirmation.totalMinor)}</dd></div>
             </dl>
-            {confirmation.shippingMethod === "fast" && <p className="order-success-shipping-note">Fast Delivery selected (+{formatPkrMinor(confirmation.shippingSurchargeMinor)} priority surcharge)</p>}
+            {confirmation.shippingMethod === "fast" && <p className="order-success-shipping-note">Fast Delivery selected (includes {formatPkrMinor(confirmation.shippingSurchargeMinor)} priority surcharge)</p>}
             <p className="order-success-payment-note">{confirmation.paymentMethod === "bank_transfer" ? "Bank transfer instructions will be confirmed by iSolutions Pakistan." : "Your order has been received. Our team will confirm delivery details."}</p>
             <div className="order-success-actions"><a href="/shop">Continue Shopping</a><a href={storefrontContact.whatsappUrl} target="_blank" rel="noreferrer">Need help? Chat with us</a></div>
           </> : <>
