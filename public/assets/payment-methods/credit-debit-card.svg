@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 44" role="img" aria-label="Credit / Debit Card">
+  <g fill="none" stroke="#082F55" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect x="5" y="9" width="30" height="22" rx="4"/><path d="M5 16h30M11 25h7"/></g>
+  <circle cx="31" cy="25" r="2" fill="#F0643A"/>
+  <text x="42" y="19" fill="#082F55" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="700">CREDIT /</text><text x="42" y="30" fill="#082F55" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="700">DEBIT CARD</text>
+</svg>

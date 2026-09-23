@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 44" role="img" aria-label="Installments">
+  <g fill="none" stroke="#082F55" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect x="6" y="8" width="28" height="25" rx="4"/><path d="M6 16h28M13 6v5m14-5v5M13 23h5m4 0h5m-14 5h5"/></g>
+  <circle cx="29" cy="28" r="2.2" fill="#F0643A"/>
+  <text x="42" y="25" fill="#082F55" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="700">INSTALLMENTS</text>
+</svg>

@@ -6,3 +6,10 @@ vite.config.d.ts
 .DS_Store
 .env.local
 .firebase/
+
+# Supabase CLI local link/temp metadata
+supabase/.temp/
+
+# Local-only tool config
+.claude/launch.json
+.claude/settings.local.json

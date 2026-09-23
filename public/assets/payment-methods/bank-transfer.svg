@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 44" role="img" aria-label="Bank Transfer">
+  <g fill="none" stroke="#082F55" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M5 15 20 7l15 8M8 17h24M10 17v12m7-12v12m7-12v12m7-12v12M6 31h28"/></g>
+  <path d="m25 23 4-4 4 4m-4-4v10" fill="none" stroke="#F0643A" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"/>
+  <text x="42" y="20" fill="#082F55" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="700">BANK</text><text x="42" y="31" fill="#082F55" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="700">TRANSFER</text>
+</svg>

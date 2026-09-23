@@ -22,6 +22,7 @@ export type CatalogVariant = {
 export type CatalogMedia = {
   id: string;
   variantId: string | null;
+  variantIds?: string[];
   publicId: string;
   url: string;
   alt: string;
@@ -39,12 +40,20 @@ export type CatalogProduct = {
   content: string | null;
   default_warranty: string | null;
   published_at: string;
-  brand: { id: string; name: string; slug: string };
+  is_flash_sale: boolean;
+  is_featured: boolean;
+  is_best_seller: boolean;
+  brand: { id: string; name: string; slug: string } | null;
   category: { id: string; name: string; slug: string };
   variants: CatalogVariant[];
   media: CatalogMedia[];
   specifications: { group: string | null; label: string; value: string }[];
 };
+
+export type FrequentlyBoughtTogetherProduct = Pick<
+  CatalogProduct,
+  "id" | "slug" | "title" | "brand" | "variants" | "media"
+>;
 
 export type CatalogFilters = {
   search?: string;
@@ -103,6 +112,16 @@ export async function fetchPublicTaxonomy() {
   };
 }
 
+export async function fetchFrequentlyBoughtTogether(productId: string, limit = 4) {
+  if (!supabase) throw new Error("Supabase environment is not configured");
+  const { data, error } = await supabase.rpc("frequently_bought_together", {
+    p_product_id: productId,
+    p_limit: Math.min(Math.max(limit, 1), 4),
+  });
+  if (error) throw error;
+  return (data ?? []) as FrequentlyBoughtTogetherProduct[];
+}
+
 export function validCompareAt(variant: CatalogVariant) {
   return variant.compareAtPriceMinor !== null &&
     variant.compareAtPriceMinor > variant.priceMinor
@@ -120,7 +139,7 @@ export function hasVariablePrice(product: CatalogProduct) {
   );
 }
 
-export function primaryMedia(product: CatalogProduct) {
+export function primaryMedia(product: Pick<CatalogProduct, "media">) {
   return (
     product.media.find((item) => item.isPrimary) ?? product.media[0] ?? null
   );

@@ -3,9 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   generatedVariantSku,
+  applyBatchDefaults,
   matchingActiveRealTaxonomy,
   normalizeCapacity,
   parseBulkCatalog,
+  requiresExplicitPricedVariant,
 } from "../src/lib/bulkCatalog.ts";
 
 const [rpc, admin, parser, media] = await Promise.all([
@@ -258,7 +260,8 @@ test("real Apple matching is exact, active-only, and development-isolated", () =
     ["real-apple"],
   );
   assert.equal(matchingActiveRealTaxonomy(taxonomy, "Unknown").length, 0);
-  assert.match(admin, /explicit Brand required/);
+  assert.doesNotMatch(admin, /explicit Brand required/);
+  assert.match(admin, /product\.brandExplicit/);
   assert.match(admin, /Ambiguous real brand match/);
 });
 
@@ -271,4 +274,49 @@ test("multiple exact active real brand matches remain ambiguous", () => {
     "APPLE",
   );
   assert.equal(matches.length, 2);
+});
+
+test("existing product default-only update with zero input variants succeeds", () => {
+  const parsed = parseBulkCatalog(
+    "iPhone 17e\nBrand: Apple",
+  ).products[0];
+  const [withDefaults] = applyBatchDefaults([parsed], {
+    condition: "brand_new",
+    deliveryScope: "karachi_only",
+    warranty: null,
+    ptaStatus: null,
+  });
+  assert.equal(withDefaults.variants.length, 0);
+  assert.equal(requiresExplicitPricedVariant(true, withDefaults.variants), false);
+  assert.equal(withDefaults.defaultConditionSource, "batch default");
+  assert.equal(withDefaults.defaultDeliverySource, "batch default");
+  assert.doesNotMatch(withDefaults.warnings.join(" "), /priced variant/);
+});
+
+test("new product with zero input variants remains blocked", () => {
+  const parsed = parseBulkCatalog(
+    "New Phone\nBrand: Apple\nCategory: Smartphones\nCondition: Brand New",
+  ).products[0];
+  assert.equal(requiresExplicitPricedVariant(false, parsed.variants), true);
+  assert.match(admin, /blocked\.push\("No explicit priced variant parsed"\)/);
+});
+
+test("default-only apply preserves existing variants, prices, and inventory", () => {
+  const existingVariants = [
+    { sku: "IP17E-256", price_minor: 19900000, inventory: 7 },
+  ];
+  const parsed = parseBulkCatalog(
+    "iPhone 17e\nBrand: Apple",
+  ).products[0];
+  const payloadVariants = parsed.variants.map((variant) => variant);
+  assert.deepEqual(payloadVariants, []);
+  assert.deepEqual(existingVariants, [
+    { sku: "IP17E-256", price_minor: 19900000, inventory: 7 },
+  ]);
+  assert.match(admin, /variants: product\.variants\.map/);
+  assert.match(
+    rpc,
+    /for v_variant in select value from jsonb_array_elements\(v_product -> 'variants'\)/,
+  );
+  assert.doesNotMatch(rpc, /delete from public\.product_variants/);
 });

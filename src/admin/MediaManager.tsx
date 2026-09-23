@@ -58,7 +58,8 @@ export function MediaManager({ productId }: { productId: string | null }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [replacementId, setReplacementId] = useState<string | null>(null);
-  const [variants, setVariants] = useState<{ id: string; sku: string }[]>([]);
+  const [variants, setVariants] = useState<{ id: string; sku: string; color_finish: string | null }[]>([]);
+  const [colorAssignments, setColorAssignments] = useState<Record<string, string[]>>({});
   const input = useRef<HTMLInputElement>(null);
 
   const loadMedia = useCallback(async () => {
@@ -72,10 +73,26 @@ export function MediaManager({ productId }: { productId: string | null }) {
     else setMedia((data ?? []) as ProductMedia[]);
     const { data: variantData } = await supabase
       .from("product_variants")
-      .select("id,sku")
+      .select("id,sku,color_finish")
       .eq("product_id", productId)
       .order("sort_order");
     setVariants(variantData ?? []);
+    const mediaIds = (data ?? []).map((item) => item.id);
+    if (mediaIds.length === 0) {
+      setColorAssignments({});
+      return;
+    }
+    const { data: assignmentData, error: assignmentError } = await supabase
+      .from("product_media_variant_assignments")
+      .select("media_id,variant_id")
+      .in("media_id", mediaIds);
+    if (assignmentError) setMessage(assignmentError.message);
+    else {
+      setColorAssignments((assignmentData ?? []).reduce<Record<string, string[]>>((current, assignment) => {
+        current[assignment.media_id] = [...(current[assignment.media_id] ?? []), assignment.variant_id];
+        return current;
+      }, {}));
+    }
   }, [productId]);
   useEffect(() => {
     void loadMedia();
@@ -203,6 +220,17 @@ export function MediaManager({ productId }: { productId: string | null }) {
     setMessage(error ? error.message : "Primary image updated.");
     if (!error) await loadMedia();
   }
+  async function assignColor(mediaId: string, color: string) {
+    if (!supabase) return;
+    setBusy(true);
+    const { error } = await supabase.rpc("set_product_media_color_assignment", {
+      p_media_id: mediaId,
+      p_color: color || null,
+    });
+    setBusy(false);
+    setMessage(error ? error.message : color ? `Image associated with ${color}.` : "Color association removed.");
+    if (!error) await loadMedia();
+  }
   async function reorder(index: number, direction: -1 | 1) {
     if (!supabase || !productId) return;
     const next = [...media];
@@ -234,6 +262,15 @@ export function MediaManager({ productId }: { productId: string | null }) {
   }
 
   const ready = cloudinaryConfigured && Boolean(productId);
+  const colors = [...new Set(variants.map((variant) => variant.color_finish).filter(Boolean))] as string[];
+  const colorForMedia = (mediaId: string) => {
+    const assignedIds = colorAssignments[mediaId] ?? [];
+    const assignedColors = [...new Set(variants
+      .filter((variant) => assignedIds.includes(variant.id))
+      .map((variant) => variant.color_finish)
+      .filter(Boolean))] as string[];
+    return assignedColors.length === 1 ? assignedColors[0] : "";
+  };
   return (
     <div className="media-manager">
       <div className="editor-section-title media-title">
@@ -331,22 +368,23 @@ export function MediaManager({ productId }: { productId: string | null }) {
                   />
                 </label>
                 <label>
-                  Variant assignment
+                  Color association
                   <select
-                    value={item.variant_id ?? ""}
+                    value={colorForMedia(item.id)}
                     onChange={(event) =>
-                      void update(item.id, {
-                        variant_id: event.target.value || null,
-                      })
+                      void assignColor(item.id, event.target.value)
                     }
                   >
-                    <option value="">All product variants</option>
-                    {variants.map((variant) => (
-                      <option value={variant.id} key={variant.id}>
-                        {variant.sku}
+                    <option value="">No color association</option>
+                    {colors.map((color) => (
+                      <option value={color} key={color}>
+                        {color}
                       </option>
                     ))}
                   </select>
+                  <small>
+                    {(colorAssignments[item.id] ?? []).length} associated variant{(colorAssignments[item.id] ?? []).length === 1 ? "" : "s"}
+                  </small>
                 </label>
                 <div className="media-actions">
                   <button

@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
   ChevronRight,
   Plus,
+  Pencil,
   Search,
   ShieldCheck,
+  Trash2,
+  X,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import {
@@ -49,6 +54,9 @@ type Draft = {
   seo_description: string;
   publication_status: "draft" | "published" | "archived";
   data_class: "development" | "real";
+  is_flash_sale: boolean;
+  is_featured: boolean;
+  is_best_seller: boolean;
 };
 type Variant = {
   id: string;
@@ -66,12 +74,25 @@ type Variant = {
   is_active: boolean;
   quantity?: number;
 };
+const variantIdentity = (variant: Variant) =>
+  [variant.storage_display, variant.ram_display, variant.color_finish]
+    .filter(Boolean)
+    .join(" / ") || variant.sku;
 type Specification = {
   id: string;
   specification_group: string | null;
   label: string;
   value: string;
   sort_order: number;
+};
+type RecommendationProduct = {
+  id: string;
+  title: string;
+  slug: string;
+  publication_status: "draft" | "published" | "archived";
+  data_class: "development" | "real";
+  brand: { name: string } | null;
+  product_variants: { price_minor: number }[];
 };
 const emptyDraft: Draft = {
   title: "",
@@ -88,6 +109,9 @@ const emptyDraft: Draft = {
   seo_description: "",
   publication_status: "draft",
   data_class: "development",
+  is_flash_sale: false,
+  is_featured: false,
+  is_best_seller: false,
 };
 export function Phase4ProductList() {
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -313,6 +337,7 @@ const tabs = [
   "Inventory",
   "Specifications",
   "Media",
+  "Frequently Bought Together",
   "SEO & Publishing",
 ];
 export function Phase4ProductEditor() {
@@ -331,7 +356,11 @@ export function Phase4ProductEditor() {
   const [variantPrices, setVariantPrices] = useState<Record<string, string>>(
     {},
   );
+  const [variantCompareAtPrices, setVariantCompareAtPrices] = useState<Record<string, string>>({});
   const [specs, setSpecs] = useState<Specification[]>([]);
+  const [recommendationOptions, setRecommendationOptions] = useState<RecommendationProduct[]>([]);
+  const [recommendationIds, setRecommendationIds] = useState<string[]>([]);
+  const [recommendationQuery, setRecommendationQuery] = useState("");
   const [message, setMessage] = useState("");
   const [newVariant, setNewVariant] = useState({
     sku: "",
@@ -339,6 +368,7 @@ export function Phase4ProductEditor() {
     storage_display: "",
     color_finish: "",
     price: "",
+    compare_at_price: "",
     pta_status: "unknown",
     condition: "unknown",
     delivery_scope: "",
@@ -349,9 +379,13 @@ export function Phase4ProductEditor() {
     label: "",
     value: "",
   });
+  const [variantPendingDelete, setVariantPendingDelete] = useState<Variant | null>(null);
+  const [variantDeleting, setVariantDeleting] = useState(false);
+  const [variantEditing, setVariantEditing] = useState<Variant | null>(null);
+  const [variantSaving, setVariantSaving] = useState(false);
   const load = useCallback(async () => {
     if (!supabase) return;
-    const [b, c] = await Promise.all([
+    const [b, c, catalog] = await Promise.all([
       supabase
         .from("brands")
         .select("id,name,slug,data_class,is_active")
@@ -360,11 +394,16 @@ export function Phase4ProductEditor() {
         .from("categories")
         .select("id,name,slug,data_class,is_active")
         .order("name"),
+      supabase
+        .from("products")
+        .select("id,title,slug,publication_status,data_class,brand:brands(name),product_variants(price_minor)")
+        .order("title"),
     ]);
     setBrands((b.data ?? []) as Option[]);
     setCategories((c.data ?? []) as Option[]);
+    setRecommendationOptions((catalog.data ?? []) as unknown as RecommendationProduct[]);
     if (!productId) return;
-    const [p, v, s, i] = await Promise.all([
+    const [p, v, s, i, r] = await Promise.all([
       supabase.from("products").select("*").eq("id", productId).single(),
       supabase
         .from("product_variants")
@@ -380,6 +419,13 @@ export function Phase4ProductEditor() {
         .from("admin_variant_inventory")
         .select("variant_id,quantity_on_hand")
         .eq("product_id", productId),
+      supabase
+        .from("product_recommendations")
+        .select("recommended_product_id,sort_order")
+        .eq("source_product_id", productId)
+        .eq("relation_type", "frequently_bought_together")
+        .eq("is_active", true)
+        .order("sort_order"),
     ]);
     if (p.error) {
       setMessage(p.error.message);
@@ -388,6 +434,10 @@ export function Phase4ProductEditor() {
     setDraft({
       ...emptyDraft,
       ...p.data,
+      is_flash_sale: p.data.is_flash_sale === true,
+      is_featured: p.data.is_featured === true,
+      is_best_seller: p.data.is_best_seller === true,
+      brand_id: p.data.brand_id ?? "",
       short_description: p.data.short_description ?? "",
       content: p.data.content ?? "",
       default_warranty: p.data.default_warranty ?? "",
@@ -414,16 +464,29 @@ export function Phase4ProductEditor() {
         ]),
       ),
     );
+    setVariantCompareAtPrices(
+      Object.fromEntries(
+        ((v.data ?? []) as Variant[]).map((variant) => [
+          variant.id,
+          variant.compare_at_price_minor === null
+            ? ""
+            : pkrMajorInputFromMinor(variant.compare_at_price_minor),
+        ]),
+      ),
+    );
     setSpecs((s.data ?? []) as Specification[]);
+    if (r.error) setMessage(r.error.message);
+    else setRecommendationIds((r.data ?? []).map((row) => row.recommended_product_id));
   }, [productId]);
   useEffect(() => {
     load();
   }, [load]);
-  const persistChangedVariantPrices = async () => {
+  const persistChangedVariantPricing = async () => {
     if (!supabase) return "Supabase is not configured.";
 
     for (const variant of variants) {
       let priceMinor: number;
+      let compareAtPriceMinor: number | null;
       try {
         priceMinor = parsePkrMajorToMinor(
           variantPrices[variant.id] ??
@@ -435,30 +498,77 @@ export function Phase4ProductEditor() {
           : "Enter a valid PKR price.";
       }
 
-      if (priceMinor === variant.price_minor) continue;
+      const compareAtInput = variantCompareAtPrices[variant.id] ??
+        (variant.compare_at_price_minor === null
+          ? ""
+          : pkrMajorInputFromMinor(variant.compare_at_price_minor));
+      try {
+        compareAtPriceMinor = compareAtInput.trim()
+          ? parsePkrMajorToMinor(compareAtInput)
+          : null;
+      } catch {
+        return "Enter a valid Compare-at Price PKR value.";
+      }
+      if (
+        compareAtPriceMinor !== null &&
+        compareAtPriceMinor <= priceMinor
+      ) {
+        return "Compare-at Price PKR must be greater than Price PKR.";
+      }
+
+      if (
+        priceMinor === variant.price_minor &&
+        compareAtPriceMinor === variant.compare_at_price_minor
+      ) continue;
       const { error } = await supabase
         .from("product_variants")
-        .update({ price_minor: priceMinor })
+        .update({
+          price_minor: priceMinor,
+          compare_at_price_minor: compareAtPriceMinor,
+        })
         .eq("id", variant.id);
       if (error) return error.message;
     }
     return null;
+  };
+  const persistRecommendations = async () => {
+    if (!supabase || !productId) return null;
+    const { error: deleteError } = await supabase
+      .from("product_recommendations")
+      .delete()
+      .eq("source_product_id", productId)
+      .eq("relation_type", "frequently_bought_together");
+    if (deleteError) return deleteError.message;
+    if (recommendationIds.length === 0) return null;
+    const { error: insertError } = await supabase
+      .from("product_recommendations")
+      .insert(recommendationIds.map((recommendedProductId, sortOrder) => ({
+        source_product_id: productId,
+        recommended_product_id: recommendedProductId,
+        relation_type: "frequently_bought_together",
+        sort_order: sortOrder,
+        is_active: true,
+      })));
+    return insertError?.message ?? null;
   };
   const save = async () => {
     if (!supabase) return;
     if (
       !draft.title.trim() ||
       !draft.slug.trim() ||
-      !draft.brand_id ||
       !draft.category_id
     ) {
-      setMessage("Title, slug, brand, and category are required.");
+      setMessage("Title, slug, and category are required.");
       return;
     }
     const payload = {
       ...draft,
+      is_flash_sale: draft.is_flash_sale,
+      is_featured: draft.is_featured,
+      is_best_seller: draft.is_best_seller,
       title: draft.title.trim(),
       slug: draft.slug.trim(),
+      brand_id: draft.brand_id || null,
       short_description: draft.short_description || null,
       content: draft.content || null,
       default_warranty: draft.default_warranty || null,
@@ -481,9 +591,14 @@ export function Phase4ProductEditor() {
     if (result.error) setMessage(result.error.message);
     else if (!productId) location.href = `/admin/products/${result.data.id}`;
     else {
-      const variantPriceError = await persistChangedVariantPrices();
+      const variantPriceError = await persistChangedVariantPricing();
       if (variantPriceError) {
         setMessage(variantPriceError);
+        return;
+      }
+      const recommendationError = await persistRecommendations();
+      if (recommendationError) {
+        setMessage(recommendationError);
         return;
       }
       setMessage("Draft saved.");
@@ -492,6 +607,16 @@ export function Phase4ProductEditor() {
   };
   const publish = async () => {
     if (!supabase || !productId) return;
+    const variantPriceError = await persistChangedVariantPricing();
+    if (variantPriceError) {
+      setMessage(variantPriceError);
+      return;
+    }
+    const recommendationError = await persistRecommendations();
+    if (recommendationError) {
+      setMessage(recommendationError);
+      return;
+    }
     const validation = await supabase.rpc("validate_product_for_publication", {
       p_product_id: productId,
     });
@@ -504,7 +629,12 @@ export function Phase4ProductEditor() {
     }
     const { error } = await supabase
       .from("products")
-      .update({ publication_status: "published" })
+      .update({
+        publication_status: "published",
+        is_flash_sale: draft.is_flash_sale,
+        is_featured: draft.is_featured,
+        is_best_seller: draft.is_best_seller,
+      })
       .eq("id", productId);
     setMessage(error?.message ?? "Published successfully.");
     if (!error) await load();
@@ -512,12 +642,25 @@ export function Phase4ProductEditor() {
   const addVariant = async () => {
     if (!supabase || !productId) return;
     let priceMinor: number;
+    let compareAtPriceMinor: number | null;
     try {
       priceMinor = parsePkrMajorToMinor(newVariant.price);
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Enter a valid PKR price.",
       );
+      return;
+    }
+    try {
+      compareAtPriceMinor = newVariant.compare_at_price.trim()
+        ? parsePkrMajorToMinor(newVariant.compare_at_price)
+        : null;
+    } catch {
+      setMessage("Enter a valid Compare-at Price PKR value.");
+      return;
+    }
+    if (compareAtPriceMinor !== null && compareAtPriceMinor <= priceMinor) {
+      setMessage("Compare-at Price PKR must be greater than Price PKR.");
       return;
     }
     const { error } = await supabase.from("product_variants").insert({
@@ -527,6 +670,7 @@ export function Phase4ProductEditor() {
       storage_display: newVariant.storage_display || null,
       color_finish: newVariant.color_finish || null,
       price_minor: priceMinor,
+      compare_at_price_minor: compareAtPriceMinor,
       pta_status: newVariant.pta_status,
       condition: newVariant.condition,
       delivery_scope: newVariant.delivery_scope || null,
@@ -539,6 +683,7 @@ export function Phase4ProductEditor() {
         storage_display: "",
         color_finish: "",
         price: "",
+        compare_at_price: "",
         pta_status: "unknown",
         condition: "unknown",
         delivery_scope: "",
@@ -549,9 +694,73 @@ export function Phase4ProductEditor() {
   const saveVariantPrice = async (variantId: string) => {
     if (!supabase) return;
     if (!variants.some((item) => item.id === variantId)) return;
-    const error = await persistChangedVariantPrices();
-    setMessage(error ?? "Variant price saved exactly.");
+    const error = await persistChangedVariantPricing();
+    setMessage(error ?? "Variant pricing saved exactly.");
     if (!error) await load();
+  };
+  const saveVariantDetails = async () => {
+    if (!supabase || !variantEditing || variantSaving) return;
+    const sku = variantEditing.sku.trim();
+    if (!sku) {
+      setMessage("Variant SKU is required.");
+      return;
+    }
+    setVariantSaving(true);
+    const { error } = await supabase
+      .from("product_variants")
+      .update({
+        sku,
+        storage_display: variantEditing.storage_display?.trim() || null,
+        ram_display: variantEditing.ram_display?.trim() || null,
+        color_finish: variantEditing.color_finish?.trim() || null,
+        pta_status: variantEditing.pta_status,
+        condition: variantEditing.condition,
+        delivery_scope: variantEditing.delivery_scope || null,
+      })
+      .eq("id", variantEditing.id);
+    setVariantSaving(false);
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    setVariantEditing(null);
+    setMessage("Variant details saved.");
+    await load();
+  };
+  const deleteVariant = async () => {
+    if (!supabase || !variantPendingDelete || variantDeleting) return;
+    setVariantDeleting(true);
+    const { data: media, error: mediaReadError } = await supabase
+      .from("product_media")
+      .select("id")
+      .eq("variant_id", variantPendingDelete.id);
+    if (mediaReadError) {
+      setMessage(mediaReadError.message);
+      setVariantDeleting(false);
+      return;
+    }
+    for (const item of media ?? []) {
+      const { error: mediaDeleteError } = await supabase.functions.invoke(
+        "cloudinary-delete-media",
+        { body: { mediaId: item.id } },
+      );
+      if (mediaDeleteError) {
+        setMessage(`Variant deletion stopped: ${mediaDeleteError.message}`);
+        setVariantDeleting(false);
+        return;
+      }
+    }
+    const { error } = await supabase.rpc("delete_product_variant", {
+      p_variant_id: variantPendingDelete.id,
+    });
+    setVariantDeleting(false);
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    setMessage(`Variant deleted: ${variantIdentity(variantPendingDelete)}.`);
+    setVariantPendingDelete(null);
+    await load();
   };
   const adjustStock = async (variantId: string) => {
     if (!supabase) return;
@@ -661,7 +870,7 @@ export function Phase4ProductEditor() {
                     setDraft({ ...draft, brand_id: e.target.value })
                   }
                 >
-                  <option value="">Select</option>
+                  <option value="">No brand</option>
                   {brands.map((x) => (
                     <option value={x.id} key={x.id}>
                       {x.name} · {x.data_class}
@@ -790,6 +999,23 @@ export function Phase4ProductEditor() {
                   <option value="real">Real — Owner-approved facts only</option>
                 </select>
               </label>
+              <fieldset className="homepage-placement wide">
+                <legend>Homepage Placement</legend>
+                <div>
+                  <label className="admin-checkbox">
+                    <input type="checkbox" checked={draft.is_flash_sale} onChange={(e) => setDraft({ ...draft, is_flash_sale: e.target.checked })} />
+                    <span>Flash Sale</span>
+                  </label>
+                  <label className="admin-checkbox">
+                    <input type="checkbox" checked={draft.is_featured} onChange={(e) => setDraft({ ...draft, is_featured: e.target.checked })} />
+                    <span>Featured Product</span>
+                  </label>
+                  <label className="admin-checkbox">
+                    <input type="checkbox" checked={draft.is_best_seller} onChange={(e) => setDraft({ ...draft, is_best_seller: e.target.checked })} />
+                    <span>Best Seller</span>
+                  </label>
+                </div>
+              </fieldset>
             </div>
           )}
           {tab === "Variants & Pricing" && (
@@ -819,6 +1045,20 @@ export function Phase4ProductEditor() {
                     value={newVariant.price}
                     onChange={(e) =>
                       setNewVariant({ ...newVariant, price: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Compare-at Price PKR
+                  <input
+                    type="number"
+                    min="0"
+                    value={newVariant.compare_at_price}
+                    onChange={(e) =>
+                      setNewVariant({
+                        ...newVariant,
+                        compare_at_price: e.target.value,
+                      })
                     }
                   />
                 </label>
@@ -922,9 +1162,7 @@ export function Phase4ProductEditor() {
                   <article key={v.id}>
                     <div>
                       <strong>
-                        {[v.storage_display, v.ram_display, v.color_finish]
-                          .filter(Boolean)
-                          .join(" / ") || v.sku}
+                        {variantIdentity(v)}
                       </strong>
                       <span>Explicit row</span>
                     </div>
@@ -946,16 +1184,33 @@ export function Phase4ProductEditor() {
                           }
                         />
                       </label>
+                      <label>
+                        Compare-at Price PKR
+                        <input
+                          inputMode="decimal"
+                          value={variantCompareAtPrices[v.id] ?? (v.compare_at_price_minor === null ? "" : pkrMajorInputFromMinor(v.compare_at_price_minor))}
+                          onChange={(event) =>
+                            setVariantCompareAtPrices({
+                              ...variantCompareAtPrices,
+                              [v.id]: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
                       <small>{formatPkrMinor(v.price_minor)}</small>
                       <button
                         className="admin-secondary"
                         onClick={() => saveVariantPrice(v.id)}
                       >
-                        Save price
+                        Save pricing
                       </button>
                     </div>
                     <span>{v.pta_status}</span>
                     <span>{v.quantity ?? 0} units</span>
+                    <div className="variant-actions">
+                      <button type="button" className="variant-edit" onClick={() => setVariantEditing({ ...v })} aria-label={`Edit variant ${variantIdentity(v)}`}><Pencil /></button>
+                      <button type="button" className="variant-delete" onClick={() => setVariantPendingDelete(v)} aria-label={`Delete variant ${variantIdentity(v)}`}><Trash2 /></button>
+                    </div>
                   </article>
                 ))}
               </div>
@@ -1003,7 +1258,7 @@ export function Phase4ProductEditor() {
               </div>
               <div className="form-grid">
                 <label>
-                  Group
+                  Specification Section
                   <input
                     value={newSpec.specification_group}
                     onChange={(e) =>
@@ -1015,7 +1270,7 @@ export function Phase4ProductEditor() {
                   />
                 </label>
                 <label>
-                  Label
+                  Specification Name
                   <input
                     value={newSpec.label}
                     onChange={(e) =>
@@ -1024,7 +1279,7 @@ export function Phase4ProductEditor() {
                   />
                 </label>
                 <label>
-                  Value
+                  Specification Value
                   <input
                     value={newSpec.value}
                     onChange={(e) =>
@@ -1037,7 +1292,7 @@ export function Phase4ProductEditor() {
                   disabled={!productId}
                   onClick={addSpec}
                 >
-                  <Plus /> Add specification
+                  <Plus /> Add Specification
                 </button>
               </div>
               <div className="variant-list">
@@ -1054,6 +1309,61 @@ export function Phase4ProductEditor() {
             </>
           )}
           {tab === "Media" && <MediaManager productId={productId} />}{" "}
+          {tab === "Frequently Bought Together" && (
+            <div className="recommendation-editor">
+              <div className="editor-section-title">
+                <h2>Frequently Bought Together</h2>
+                <p>Select products commonly purchased with this item. Add up to four; their order is used on the storefront.</p>
+              </div>
+              {!productId ? (
+                <p>Save this product before adding recommendations.</p>
+              ) : (
+                <>
+                  <label className="recommendation-search">
+                    <Search />
+                    <input
+                      aria-label="Search recommendation products"
+                      value={recommendationQuery}
+                      onChange={(event) => setRecommendationQuery(event.target.value)}
+                      placeholder="Search products by title, brand or slug"
+                    />
+                  </label>
+                  <div className="recommendation-selected">
+                    {recommendationIds.map((id, index) => {
+                      const item = recommendationOptions.find((option) => option.id === id);
+                      if (!item) return null;
+                      return (
+                        <article key={id}>
+                          <div><strong>{item.title}</strong><span>{item.brand?.name ?? "Unbranded"}</span></div>
+                          <span>{item.product_variants.length ? formatPkrMinor(Math.min(...item.product_variants.map((variant) => variant.price_minor))) : "No price"}</span>
+                          <div className="recommendation-order">
+                            <button type="button" disabled={index === 0} onClick={() => setRecommendationIds((items) => items.map((value, itemIndex) => itemIndex === index - 1 ? id : itemIndex === index ? items[index - 1] : value))} aria-label={`Move ${item.title} up`}><ArrowUp /></button>
+                            <button type="button" disabled={index === recommendationIds.length - 1} onClick={() => setRecommendationIds((items) => items.map((value, itemIndex) => itemIndex === index + 1 ? id : itemIndex === index ? items[index + 1] : value))} aria-label={`Move ${item.title} down`}><ArrowDown /></button>
+                            <button type="button" onClick={() => setRecommendationIds((items) => items.filter((value) => value !== id))} aria-label={`Remove ${item.title}`}><X /></button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                    {recommendationIds.length === 0 && <p>No recommendations selected.</p>}
+                  </div>
+                  <div className="recommendation-options">
+                    {recommendationOptions
+                      .filter((item) => item.data_class === "real" && item.publication_status === "published")
+                      .filter((item) => item.id !== productId && !recommendationIds.includes(item.id))
+                      .filter((item) => `${item.title} ${item.slug} ${item.brand?.name ?? ""}`.toLowerCase().includes(recommendationQuery.trim().toLowerCase()))
+                      .map((item) => (
+                        <button type="button" key={item.id} disabled={recommendationIds.length >= 4} onClick={() => setRecommendationIds((items) => items.includes(item.id) ? items : [...items, item.id])}>
+                          <span><strong>{item.title}</strong><small>{item.brand?.name ?? "Unbranded"} · {item.publication_status} · {item.data_class}</small></span>
+                          <span>{item.product_variants.length ? formatPkrMinor(Math.min(...item.product_variants.map((variant) => variant.price_minor))) : "No price"}</span>
+                          <Plus />
+                        </button>
+                      ))}
+                  </div>
+                  <p className="recommendation-count">{recommendationIds.length} of 4 selected. Use Save draft or Validate &amp; publish to persist changes.</p>
+                </>
+              )}
+            </div>
+          )}
           {tab === "SEO & Publishing" && (
             <div className="form-grid">
               <label className="wide">
@@ -1091,6 +1401,42 @@ export function Phase4ProductEditor() {
           )}
         </section>
       </div>
+      {variantPendingDelete && (
+        <div className="admin-dialog-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !variantDeleting) setVariantPendingDelete(null);
+        }}>
+          <section className="admin-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-variant-title" aria-describedby="delete-variant-description">
+            <div className="admin-confirm-icon"><Trash2 /></div>
+            <h2 id="delete-variant-title">Delete this variant?</h2>
+            <p id="delete-variant-description">This permanently removes the explicit variant and its associated inventory records.</p>
+            <strong>{variantIdentity(variantPendingDelete)}</strong>
+            <div>
+              <button type="button" className="admin-secondary" disabled={variantDeleting} onClick={() => setVariantPendingDelete(null)}>Cancel</button>
+              <button type="button" className="admin-destructive" disabled={variantDeleting} onClick={() => void deleteVariant()}>{variantDeleting ? "Deleting…" : "Delete variant"}</button>
+            </div>
+          </section>
+        </div>
+      )}
+      {variantEditing && (
+        <div className="admin-dialog-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !variantSaving) setVariantEditing(null);
+        }}>
+          <section className="admin-variant-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-variant-title">
+            <h2 id="edit-variant-title">Edit explicit variant</h2>
+            <p>Update only verified commercial identity fields. Inventory remains in the Inventory tab.</p>
+            <div className="form-grid">
+              <label className="wide">SKU<input value={variantEditing.sku} onChange={(event) => setVariantEditing({ ...variantEditing, sku: event.target.value })} /></label>
+              <label>Storage<input value={variantEditing.storage_display ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, storage_display: event.target.value || null })} /></label>
+              <label>RAM<input value={variantEditing.ram_display ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, ram_display: event.target.value || null })} /></label>
+              <label>Color / finish<input value={variantEditing.color_finish ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, color_finish: event.target.value || null })} /></label>
+              <label>PTA<select value={variantEditing.pta_status} onChange={(event) => setVariantEditing({ ...variantEditing, pta_status: event.target.value })}><option value="unknown">Unknown</option><option value="approved">Approved</option><option value="not_approved">Not approved</option><option value="not_applicable">Not applicable</option></select></label>
+              <label>Condition<select value={variantEditing.condition} onChange={(event) => setVariantEditing({ ...variantEditing, condition: event.target.value })}><option value="unknown">Unknown</option><option value="brand_new">Brand new</option><option value="used">Used</option><option value="open_box">Open box</option><option value="refurbished">Refurbished</option></select></label>
+              <label>Delivery<select value={variantEditing.delivery_scope ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, delivery_scope: event.target.value || null })}><option value="">Unresolved</option><option value="karachi_only">Karachi only</option><option value="nationwide">Nationwide</option></select></label>
+            </div>
+            <div><button type="button" className="admin-secondary" disabled={variantSaving} onClick={() => setVariantEditing(null)}>Cancel</button><button type="button" className="admin-primary" disabled={variantSaving} onClick={() => void saveVariantDetails()}>{variantSaving ? "Saving…" : "Save variant"}</button></div>
+          </section>
+        </div>
+      )}
     </>
   );
 }

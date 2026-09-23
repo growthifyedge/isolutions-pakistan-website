@@ -14,9 +14,13 @@ import {
   applyBatchDefaults,
   bulkInventoryPreview,
   generatedVariantSku,
+  matchingActiveRealCategoryTaxonomy,
   matchingActiveRealTaxonomy,
+  requiresExplicitPricedVariant,
   normalizedPriceDisplay,
+  normalizeRawCatalog,
   parseBulkCatalog,
+  unresolvedVariantFacts,
 } from "../lib/bulkCatalog";
 
 type Taxonomy = {
@@ -30,7 +34,7 @@ type ExistingProduct = {
   id: string;
   title: string;
   slug: string;
-  brand_id: string;
+  brand_id: string | null;
   category_id: string;
   publication_status: "draft" | "published" | "archived";
   default_pta_status: BulkVariant["ptaStatus"];
@@ -67,7 +71,7 @@ type PreviewProduct = Omit<BulkProduct, "variants"> & {
   variants: PreviewVariant[];
   blocked: string[];
   taxonomyNotes: string[];
-  brandAction: "REUSE BRAND" | "CREATE BRAND" | "NEEDS REVIEW";
+  brandAction: "REUSE BRAND" | "CREATE BRAND" | "NO BRAND" | "NEEDS REVIEW";
   categoryAction: "REUSE CATEGORY" | "CREATE CATEGORY" | "NEEDS REVIEW";
 };
 
@@ -97,6 +101,7 @@ function matchesVariant(
 
 export function BulkImport() {
   const [source, setSource] = useState("");
+  const [rawSource, setRawSource] = useState("");
   const [preview, setPreview] = useState<PreviewProduct[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [format, setFormat] = useState("");
@@ -104,14 +109,19 @@ export function BulkImport() {
   const [result, setResult] = useState<Record<string, number> | null>(null);
   const [message, setMessage] = useState("");
   const [batchDefaults, setBatchDefaults] = useState<BatchDefaults>({
+    brand: null,
+    category: null,
     condition: null,
     deliveryScope: null,
     warranty: null,
     ptaStatus: null,
+    inventory: null,
   });
 
-  const parseAndPreview = async () => {
-    if (!source.trim()) {
+  const parseAndPreview = async (
+    parsedInput?: ReturnType<typeof parseBulkCatalog>,
+  ) => {
+    if (!parsedInput && !source.trim()) {
       setMessage(
         "Paste rough catalog text or upload a CSV file before parsing.",
       );
@@ -128,7 +138,7 @@ export function BulkImport() {
     setMessage("");
     setPreview([]);
     try {
-      const parsed = parseBulkCatalog(source);
+      const parsed = parsedInput ?? parseBulkCatalog(source);
       parsed.products = applyBatchDefaults(parsed.products, batchDefaults);
       setFormat(parsed.format);
       setParseErrors(parsed.errors);
@@ -155,26 +165,24 @@ export function BulkImport() {
       const products = (productResult.data ?? []) as ExistingProduct[];
       const rows = parsed.products.map((product): PreviewProduct => {
         const blocked = [...product.warnings];
-        const realBrands = matchingActiveRealTaxonomy(brands, product.brand);
-        const developmentBrand = brands.some(
+        const realBrands = product.brandExplicit
+          ? matchingActiveRealTaxonomy(brands, product.brand)
+          : [];
+        const developmentBrand = product.brandExplicit && brands.some(
           (item) =>
             item.data_class === "development" &&
             normalized(item.name) === normalized(product.brand),
         );
         if (realBrands.length > 1) blocked.push("Ambiguous real brand match");
-        else if (realBrands.length === 0 && !product.brandExplicit)
-          blocked.push(
-            `Needs Owner Review: explicit Brand required for ${product.brand}`,
-          );
         const brandAction =
           realBrands.length === 1
             ? "REUSE BRAND"
             : product.brandExplicit && realBrands.length === 0
               ? "CREATE BRAND"
-              : "NEEDS REVIEW";
+              : "NO BRAND";
         const brandId = realBrands.length === 1 ? realBrands[0].id : null;
-        const realCategories = product.category
-          ? matchingActiveRealTaxonomy(categories, product.category)
+        let realCategories = product.category
+          ? matchingActiveRealCategoryTaxonomy(categories, product.category)
           : [];
         const developmentCategory = product.category
           ? categories.some(
@@ -183,6 +191,27 @@ export function BulkImport() {
                 normalized(item.name) === normalized(product.category),
             )
           : false;
+        const requestedSlug = product.slug ?? slugify(product.title);
+        const candidates = product.slug
+          ? products.filter((item) => item.slug === product.slug)
+          : products.filter(
+              (item) =>
+                normalized(item.title) === normalized(product.title) &&
+                item.brand_id === brandId,
+            );
+        if (candidates.length > 1) blocked.push("Ambiguous product match");
+        const existing = candidates.length === 1 ? candidates[0] : null;
+        const existingCategory = existing
+          ? categories.find((item) => item.id === existing.category_id) ?? null
+          : null;
+        if (
+          realCategories.length === 0 &&
+          existingCategory &&
+          product.category &&
+          (normalized(existingCategory.name) === normalized(product.category) ||
+            existingCategory.slug === slugify(product.category))
+        )
+          realCategories = [existingCategory];
         if (realCategories.length > 1)
           blocked.push("Ambiguous real category match");
         if (
@@ -199,18 +228,8 @@ export function BulkImport() {
               : "NEEDS REVIEW";
         const categoryId =
           realCategories.length === 1 ? realCategories[0].id : null;
-        const requestedSlug = product.slug ?? slugify(product.title);
-        const candidates = product.slug
-          ? products.filter((item) => item.slug === product.slug)
-          : brandId
-            ? products.filter(
-                (item) =>
-                  normalized(item.title) === normalized(product.title) &&
-                  item.brand_id === brandId,
-              )
-            : [];
-        if (candidates.length > 1) blocked.push("Ambiguous product match");
-        const existing = candidates.length === 1 ? candidates[0] : null;
+        if (requiresExplicitPricedVariant(Boolean(existing), product.variants))
+          blocked.push("No explicit priced variant parsed");
         if (!existing && !product.category)
           blocked.push("Category required for new product");
         const taxonomyNotes: string[] = [];
@@ -224,22 +243,22 @@ export function BulkImport() {
           );
         const preserveExistingConditionDefault = Boolean(
           existing &&
-          product.defaultConditionSource === "batch default" &&
+          product.defaultConditionSource === "unresolved" &&
           existing.default_condition !== "unknown",
         );
         const preserveExistingDeliveryDefault = Boolean(
           existing &&
-          product.defaultDeliverySource === "batch default" &&
+          product.defaultDeliverySource === "unresolved" &&
           existing.default_delivery_scope !== null,
         );
         const preserveExistingWarrantyDefault = Boolean(
           existing &&
-          product.defaultWarrantySource === "batch default" &&
+          product.defaultWarrantySource === "unresolved" &&
           existing.default_warranty,
         );
         const preserveExistingPtaDefault = Boolean(
           existing &&
-          product.defaultPtaSource === "batch default" &&
+          product.defaultPtaSource === "unresolved" &&
           existing.default_pta_status !== "unknown",
         );
         const effectiveDefaults = {
@@ -273,59 +292,57 @@ export function BulkImport() {
             const variant = {
               ...parsedVariant,
               condition:
-                parsedVariant.conditionSource ===
-                  "inherited from batch default" &&
+                parsedVariant.conditionSource === "unresolved" &&
                 preserveExistingConditionDefault
                   ? effectiveDefaults.condition!
                   : parsedVariant.condition,
               conditionSource:
-                parsedVariant.conditionSource ===
-                  "inherited from batch default" &&
+                parsedVariant.conditionSource === "unresolved" &&
                 preserveExistingConditionDefault
                   ? ("inherited from product" as const)
                   : parsedVariant.conditionSource,
               deliveryScope:
-                parsedVariant.deliverySource ===
-                  "inherited from batch default" &&
+                parsedVariant.deliverySource === "unresolved" &&
                 preserveExistingDeliveryDefault
                   ? effectiveDefaults.delivery
                   : parsedVariant.deliveryScope,
               deliverySource:
-                parsedVariant.deliverySource ===
-                  "inherited from batch default" &&
+                parsedVariant.deliverySource === "unresolved" &&
                 preserveExistingDeliveryDefault
                   ? ("inherited from product" as const)
                   : parsedVariant.deliverySource,
               warranty:
-                parsedVariant.warrantySource ===
-                  "inherited from batch default" &&
+                parsedVariant.warrantySource === "unresolved" &&
                 preserveExistingWarrantyDefault
                   ? effectiveDefaults.warranty
                   : parsedVariant.warranty,
               warrantySource:
-                parsedVariant.warrantySource ===
-                  "inherited from batch default" &&
+                parsedVariant.warrantySource === "unresolved" &&
                 preserveExistingWarrantyDefault
                   ? ("inherited from product" as const)
                   : parsedVariant.warrantySource,
               ptaStatus:
-                parsedVariant.ptaSource === "inherited from batch default" &&
+                parsedVariant.ptaSource === "unresolved" &&
                 preserveExistingPtaDefault
                   ? effectiveDefaults.pta!
                   : parsedVariant.ptaStatus,
               ptaSource:
-                parsedVariant.ptaSource === "inherited from batch default" &&
+                parsedVariant.ptaSource === "unresolved" &&
                 preserveExistingPtaDefault
                   ? ("inherited from product" as const)
                   : parsedVariant.ptaSource,
             };
-            const matches = variant.sku
-              ? (existing?.product_variants.filter(
-                  (item) => item.sku === variant.sku,
-                ) ?? [])
-              : (existing?.product_variants.filter((item) =>
+            const canonicalSku = generatedVariantSku(
+              existing?.slug ?? requestedSlug,
+              variant,
+            );
+            const matches =
+              existing?.product_variants.filter(
+                (item) =>
+                  item.sku === variant.sku ||
+                  item.sku === canonicalSku ||
                   matchesVariant(item, variant),
-                ) ?? []);
+              ) ?? [];
             const variantBlocked = [...variant.warnings];
             if (matches.length > 1)
               variantBlocked.push("Ambiguous variant match");
@@ -378,13 +395,23 @@ export function BulkImport() {
             const effectiveDeliverySource = preserveExistingDelivery
               ? "Owner supplied explicitly"
               : variant.deliverySource;
-            const skuResolved =
-              variant.sku ??
-              match?.sku ??
-              generatedVariantSku(existing?.slug ?? requestedSlug, variant);
+            const skuResolved = canonicalSku || match?.sku || "";
+            const missingFacts = unresolvedVariantFacts(variant, {
+              sku: skuResolved,
+              existingVariant: Boolean(match),
+            });
+            variantBlocked.push(
+              ...missingFacts.map(
+                (fact) => `${variant.source}: Missing ${fact}`,
+              ),
+            );
             const unchanged = Boolean(
               match &&
               variant.inventory === null &&
+              match.sku === skuResolved &&
+              normalized(match.ram_display) === normalized(variant.ram) &&
+              normalized(match.storage_display) === normalized(variant.storage) &&
+              normalized(match.color_finish) === normalized(variant.color) &&
               match.price_minor === variant.priceMinor &&
               (variant.compareAtPriceMinor === null ||
                 match.compare_at_price_minor === variant.compareAtPriceMinor) &&
@@ -421,6 +448,22 @@ export function BulkImport() {
             };
           },
         );
+        const seenSkus = new Set<string>();
+        const seenCombinations = new Set<string>();
+        for (const variant of variants) {
+          const combination = [variant.ram, variant.storage, variant.color]
+            .map((value) => normalized(value))
+            .join("|");
+          if (seenSkus.has(variant.skuResolved))
+            variant.warnings.push(`${variant.source}: Duplicate SKU in batch`);
+          if (seenCombinations.has(combination))
+            variant.warnings.push(
+              `${variant.source}: Duplicate structured variant in batch`,
+            );
+          seenSkus.add(variant.skuResolved);
+          seenCombinations.add(combination);
+          if (variant.warnings.length) variant.action = "NEEDS REVIEW";
+        }
         if (variants.some((variant) => variant.warnings.length))
           blocked.push("One or more variants require review");
         return {
@@ -446,7 +489,10 @@ export function BulkImport() {
           variants,
           blocked,
           taxonomyNotes,
-          brandAction,
+          brandAction:
+            !product.brandExplicit && existing?.brand_id
+              ? "REUSE BRAND"
+              : brandAction,
           categoryAction,
           action: blocked.length
             ? "BLOCKED"
@@ -470,6 +516,16 @@ export function BulkImport() {
     } finally {
       setWorking(false);
     }
+  };
+
+  const normalizeAndPreview = () => {
+    if (!rawSource.trim()) {
+      setMessage("Paste raw product data before normalizing it.");
+      return;
+    }
+    const normalized = normalizeRawCatalog(rawSource);
+    setSource(rawSource);
+    void parseAndPreview(normalized);
   };
 
   const apply = async () => {
@@ -503,6 +559,7 @@ export function BulkImport() {
         content: product.notes.length ? product.notes.join("\n") : null,
         specifications: product.specifications,
         variants: product.variants.map((variant) => ({
+          source: variant.source,
           id: variant.id,
           action: variant.action,
           sku: variant.skuResolved,
@@ -567,12 +624,61 @@ export function BulkImport() {
         <b>1. Source data</b>
         <span>PKR major units · missing facts remain unresolved</span>
       </div>
+      <div className="bulk-step">
+        <b>Smart Raw Import</b>
+        <span>Rule-based normalization only · no database writes until approval</span>
+      </div>
+      <label className="bulk-raw-source">
+        Raw Product Data
+        <textarea
+          aria-label="Raw product data"
+          value={rawSource}
+          onChange={(event) => setRawSource(event.target.value)}
+          placeholder={"Samsung A57 12/256 blue/grey @ 165000\nPTA Approved\n1 Year Warranty\n5000mAh Battery\n6.7 AMOLED Display\n50MP Camera"}
+        />
+      </label>
+      <div className="bulk-actions">
+        <button
+          className="admin-primary"
+          onClick={normalizeAndPreview}
+          disabled={working || !rawSource.trim()}
+          type="button"
+        >
+          <Play /> Normalize &amp; Preview
+        </button>
+      </div>
       <fieldset className="bulk-defaults">
         <legend>Batch defaults</legend>
         <p>
           Optional Owner-supplied values. Explicit product and variant values
           always win.
         </p>
+        <label>
+          Brand
+          <input
+            value={batchDefaults.brand ?? ""}
+            onChange={(event) =>
+              setBatchDefaults({
+                ...batchDefaults,
+                brand: event.target.value.trimStart() || null,
+              })
+            }
+            placeholder="Exact real brand name"
+          />
+        </label>
+        <label>
+          Category
+          <input
+            value={batchDefaults.category ?? ""}
+            onChange={(event) =>
+              setBatchDefaults({
+                ...batchDefaults,
+                category: event.target.value.trimStart() || null,
+              })
+            }
+            placeholder="Exact real category name"
+          />
+        </label>
         <label>
           Condition
           <select
@@ -640,13 +746,33 @@ export function BulkImport() {
             <option value="not_applicable">Not applicable</option>
           </select>
         </label>
+        <label>
+          Inventory
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={batchDefaults.inventory ?? ""}
+            onChange={(event) =>
+              setBatchDefaults({
+                ...batchDefaults,
+                inventory:
+                  event.target.value === "" ? null : Number(event.target.value),
+              })
+            }
+            placeholder="Unresolved"
+          />
+        </label>
       </fieldset>
-      <textarea
-        aria-label="Bulk catalog source"
-        value={source}
-        onChange={(event) => setSource(event.target.value)}
-        placeholder="Apple 17 Pro Max&#10;Category: Smartphones&#10;256 GB Blue/Orange/Silver 472000&#10;Brand New&#10;Karachi only"
-      />
+      <label className="bulk-raw-source">
+        Structured source data
+        <textarea
+          aria-label="Bulk catalog source"
+          value={source}
+          onChange={(event) => setSource(event.target.value)}
+          placeholder="Apple 17 Pro Max&#10;Category: Smartphones&#10;256 GB Blue/Orange/Silver 472000&#10;Brand New&#10;Karachi only"
+        />
+      </label>
       <div className="bulk-actions">
         <label className="admin-secondary">
           <FileUp /> Upload CSV
@@ -659,7 +785,7 @@ export function BulkImport() {
         </label>
         <button
           className="admin-primary"
-          onClick={parseAndPreview}
+          onClick={() => void parseAndPreview()}
           disabled={working || !source.trim()}
           type="button"
         >
@@ -699,7 +825,7 @@ export function BulkImport() {
                   <div>
                     <strong>{product.title}</strong>
                     <small>
-                      {product.brand} ·{" "}
+                      {product.brand || "No brand"} ·{" "}
                       {product.category ?? "Category unresolved"} ·{" "}
                       {product.slugResolved}
                     </small>
@@ -737,7 +863,7 @@ export function BulkImport() {
                     className="bulk-meta"
                     key={`${specification.label}-${specification.value}`}
                   >
-                    Specification: {specification.label} — {specification.value}
+                    Specification: {specification.group ? `${specification.group} · ` : ""}{specification.label} — {specification.value}
                   </p>
                 ))}
                 {product.diagnostics
@@ -776,6 +902,9 @@ export function BulkImport() {
                     <div>
                       <span>Entered: {variant.pricePkr ?? "unresolved"}</span>
                       <b>{normalizedPriceDisplay(variant)}</b>
+                      <small>
+                        Compare-at: {variant.compareAtPricePkr ?? "not supplied"}
+                      </small>
                     </div>
                     <span>
                       {variant.ptaStatus} ({variant.ptaSource}) ·{" "}

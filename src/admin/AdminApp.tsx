@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   LockKeyhole,
   Menu,
+  MessageSquareText,
   PackageCheck,
   ClipboardCheck,
   Plus,
@@ -38,6 +39,9 @@ import { MediaManager } from "./MediaManager";
 import { MediaLibrary } from "./MediaLibrary";
 import { BulkImport } from "./BulkImport";
 import { CatalogReadiness } from "./CatalogReadiness";
+import { ContactEnquiries } from "./ContactEnquiries";
+import { BundleManager } from "./BundleManager";
+import { AdminOrders } from "./AdminOrders";
 import "./admin.css";
 
 const nav = [
@@ -46,8 +50,9 @@ const nav = [
   ["Media", "/admin/media", Image],
   ["Bulk Import", "/admin/bulk-import", ListPlus],
   ["Readiness", "/admin/catalog-readiness", ClipboardCheck],
+  ["Enquiries", "/admin/contact-enquiries", MessageSquareText],
   ["Homepage", "/admin/homepage", Sparkles],
-  ["Orders", "", ShoppingBag],
+  ["Orders", "/admin/orders", ShoppingBag],
   ["Promotions", "", CircleDollarSign],
   ["Settings", "/admin/settings", Settings],
 ] as const;
@@ -689,6 +694,12 @@ export function AdminApp() {
         <CatalogReadiness />
       </AdminLayout>
     );
+  else if (path === "/admin/contact-enquiries")
+    page = (
+      <AdminLayout section="Enquiries">
+        <ContactEnquiries />
+      </AdminLayout>
+    );
   else if (path === "/admin/taxonomy")
     page = (
       <AdminLayout section="Catalog">
@@ -712,7 +723,18 @@ export function AdminApp() {
         <MediaLibrary />
       </AdminLayout>
     );
-  else if (path === "/admin/homepage") page = <Future title="Homepage" />;
+  else if (path === "/admin/homepage")
+    page = (
+      <AdminLayout section="Homepage">
+        <BundleManager />
+      </AdminLayout>
+    );
+  else if (path === "/admin/orders")
+    page = (
+      <AdminLayout section="Orders">
+        <AdminOrders />
+      </AdminLayout>
+    );
   else if (path === "/admin/settings") page = <Future title="Settings" />;
   return <AuthorizedAdmin>{page}</AuthorizedAdmin>;
 }

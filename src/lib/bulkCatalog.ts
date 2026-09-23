@@ -14,10 +14,13 @@ export type ValueSource =
   | "unresolved";
 
 export type BatchDefaults = {
+  brand: string | null;
+  category: string | null;
   condition: ProductCondition | null;
   deliveryScope: DeliveryScope;
   warranty: string | null;
   ptaStatus: PtaStatus | null;
+  inventory: number | null;
 };
 export type ProductDefaultSource =
   "Owner supplied explicitly" | "batch default" | "unresolved";
@@ -32,6 +35,7 @@ export type BulkDiagnostic = {
 
 export type BulkSpecification = {
   source: string;
+  group: string | null;
   label: string;
   value: string;
 };
@@ -125,6 +129,35 @@ export function matchingActiveRealTaxonomy<
   );
 }
 
+export function matchingActiveRealCategoryTaxonomy<
+  T extends {
+    name: string;
+    slug: string;
+    data_class: "real" | "development";
+    is_active: boolean;
+  },
+>(items: T[], requestedCategory: string) {
+  const requestedName = normalizedName(requestedCategory);
+  const requestedSlug = slugify(requestedCategory);
+  const equivalentNames: Record<string, string[]> = {
+    smartphones: ["mobile phones"],
+    "mobile phones": ["smartphones"],
+    tablets: ["ipad & tablets", "android tablets"],
+    "power banks": ["power bank"],
+    "audio & earbuds": ["audio", "earbuds"],
+  };
+  const acceptedNames = new Set([
+    requestedName,
+    ...(equivalentNames[requestedName] ?? []),
+  ]);
+  return items.filter(
+    (item) =>
+      item.data_class === "real" &&
+      item.is_active &&
+      (acceptedNames.has(normalizedName(item.name)) || item.slug === requestedSlug),
+  );
+}
+
 export function normalizeCapacity(value?: string | null) {
   const match = normalizeInput(value ?? "")
     .trim()
@@ -186,7 +219,7 @@ function makeProduct(title: string): BulkProduct {
   return {
     source: title,
     title,
-    brand: title.split(/\s+/)[0] ?? "",
+    brand: "",
     brandExplicit: false,
     category: null,
     categoryExplicit: false,
@@ -373,19 +406,17 @@ function parseCsv(text: string): BulkParseResult {
     );
     const title = clean(record.product_title ?? record.title);
     const brand = clean(record.brand);
-    if (!title || !brand) {
-      errors.push(
-        `CSV row ${rowIndex + 2}: product_title and brand are required; blocks apply.`,
-      );
+    if (!title) {
+      errors.push(`CSV row ${rowIndex + 2}: product_title is required; blocks apply.`);
       continue;
     }
-    const key = `${normalizedName(brand)}|${normalizedName(title)}|${clean(record.slug) ?? ""}`;
+    const key = `${normalizedName(brand ?? "")}|${normalizedName(title)}|${clean(record.slug) ?? ""}`;
     let product = products.get(key);
     if (!product) {
       product = makeProduct(title);
       product.source = `CSV row ${rowIndex + 2}`;
-      product.brand = brand;
-      product.brandExplicit = true;
+      product.brand = brand ?? "";
+      product.brandExplicit = Boolean(brand);
       product.category = clean(record.category);
       product.categoryExplicit = Boolean(product.category);
       product.slug = clean(record.slug) ? slugify(record.slug) : null;
@@ -408,6 +439,7 @@ function parseCsv(text: string): BulkParseResult {
       if (specification)
         product.specifications.push({
           source: `CSV row ${rowIndex + 2}`,
+          group: null,
           label: clean(record.specification_label) ?? "Owner specification",
           value: specification,
         });
@@ -443,34 +475,63 @@ function parseCsv(text: string): BulkParseResult {
 }
 
 const labelPattern =
-  /^(Brand|Category|Slug|SKU|Price|Compare at|RAM|Storage|Color|PTA|Condition|Warranty|Delivery|Inventory|Stock|Note|Specification|SEO Title|SEO Description|Description)\s*:\s*(.*)$/i;
+  /^(Product Title|Brand|Category|Slug|SKU|Price(?: PKR)?|Compare[- ]?at(?: Price)?(?: PKR)?|RAM|Storage|Color(?:\s*\/\s*Finish)?|PTA(?: Status)?|Condition|Warranty|Delivery(?: Scope)?|Inventory|Stock|Note|Specification|SEO Title|SEO Description|Description)\s*:\s*(.*)$/i;
+const canonicalLabel = (value: string) =>
+  normalizedName(value).replace(/[-_]+/g, " ").replace(/\s+/g, " ");
 
 function parseRough(text: string): BulkParseResult {
   const normalized = normalizeInput(text).replace(/\r\n?/g, "\n").trim();
   const blocks = normalized.split(/\n\s*\n+/).filter((block) => block.trim());
   const products: BulkProduct[] = [];
   const errors: string[] = [];
+  let lastStructuredProduct: BulkProduct | null = null;
   for (const [blockIndex, block] of blocks.entries()) {
     const lines = block
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
-    const heading = lines.shift();
-    if (!heading) continue;
-    if (labelPattern.test(heading)) {
+    const headingLine = lines.shift();
+    if (!headingLine) continue;
+    const headingPair = headingLine.match(labelPattern);
+    const ordinalVariantHeading = /^(?:variant\s*)?#?\d+[.)]?$/i.test(
+      headingLine,
+    );
+    const heading =
+      headingPair && canonicalLabel(headingPair[1]) === "product title"
+        ? clean(headingPair[2])
+        : ordinalVariantHeading && lastStructuredProduct
+          ? lastStructuredProduct.title
+        : headingLine;
+    if (!heading) {
+      errors.push(`Block ${blockIndex + 1}: Product Title is required; blocks apply.`);
+      continue;
+    }
+    if (headingPair && canonicalLabel(headingPair[1]) !== "product title") {
       errors.push(
-        `Block ${blockIndex + 1}: missing product title before "${heading}"; blocks apply.`,
+        `Block ${blockIndex + 1}: missing product title before "${headingLine}"; blocks apply.`,
       );
       continue;
     }
     const product = makeProduct(heading);
+    if (ordinalVariantHeading && lastStructuredProduct) {
+      product.brand = lastStructuredProduct.brand;
+      product.brandExplicit = lastStructuredProduct.brandExplicit;
+      product.category = lastStructuredProduct.category;
+      product.categoryExplicit = lastStructuredProduct.categoryExplicit;
+      product.slug = lastStructuredProduct.slug;
+      product.defaultPtaStatus = lastStructuredProduct.defaultPtaStatus;
+      product.defaultCondition = lastStructuredProduct.defaultCondition;
+      product.defaultWarranty = lastStructuredProduct.defaultWarranty;
+      product.defaultDeliveryScope = lastStructuredProduct.defaultDeliveryScope;
+    }
     const labeledDraft: VariantDraft = { source: `${heading} labeled fields` };
     const commercialLines: string[] = [];
     let hasLabeledVariant = false;
     for (const sourceLine of lines) {
+      if (/^variants?\s*:?$/i.test(sourceLine)) continue;
       const pair = sourceLine.match(labelPattern);
       if (pair) {
-        const label = normalizedName(pair[1]);
+        const label = canonicalLabel(pair[1]);
         const value = pair[2].trim();
         if (!value) {
           addDiagnostic(
@@ -482,7 +543,10 @@ function parseRough(text: string): BulkParseResult {
           );
           continue;
         }
-        if (label === "brand") {
+        if (label === "product title") {
+          if (normalizedName(value) !== normalizedName(product.title))
+            addDiagnostic(product, sourceLine, "Conflicting Product Title", "Owner Review Required", true);
+        } else if (label === "brand") {
           product.brand = value;
           product.brandExplicit = true;
         } else if (label === "category") {
@@ -505,6 +569,7 @@ function parseRough(text: string): BulkParseResult {
           const parts = value.split(/\s*(?:=|:)\s*/, 2);
           product.specifications.push({
             source: sourceLine,
+            group: null,
             label:
               parts.length === 2
                 ? parts[0]
@@ -515,22 +580,26 @@ function parseRough(text: string): BulkParseResult {
           [
             "sku",
             "price",
+            "price pkr",
             "compare at",
+            "compare at price",
+            "compare at price pkr",
             "ram",
             "storage",
             "color",
+            "color / finish",
             "inventory",
             "stock",
           ].includes(label)
         ) {
           hasLabeledVariant = true;
           if (label === "sku") labeledDraft.sku = value;
-          else if (label === "price") labeledDraft.pricePkr = value;
-          else if (label === "compare at")
+          else if (label === "price" || label === "price pkr") labeledDraft.pricePkr = value;
+          else if (label.startsWith("compare at"))
             labeledDraft.compareAtPricePkr = value;
           else if (label === "ram") labeledDraft.ram = value;
           else if (label === "storage") labeledDraft.storage = value;
-          else if (label === "color") labeledDraft.color = value;
+          else if (label === "color" || label === "color / finish") labeledDraft.color = value;
           else {
             const parsed = inventory(value);
             labeledDraft.inventory = parsed;
@@ -539,7 +608,7 @@ function parseRough(text: string): BulkParseResult {
                 "Inventory must be a non-negative whole number",
               );
           }
-        } else if (label === "pta") {
+        } else if (label === "pta" || label === "pta status") {
           const parsed = pta(value);
           if (hasLabeledVariant) labeledDraft.ptaStatus = parsed;
           else product.defaultPtaStatus = parsed === "unknown" ? null : parsed;
@@ -550,7 +619,7 @@ function parseRough(text: string): BulkParseResult {
         } else if (label === "warranty") {
           if (hasLabeledVariant) labeledDraft.warranty = value;
           else product.defaultWarranty = value;
-        } else if (label === "delivery") {
+        } else if (label === "delivery" || label === "delivery scope") {
           const parsed = delivery(value);
           if (hasLabeledVariant) labeledDraft.deliveryScope = parsed;
           else product.defaultDeliveryScope = parsed;
@@ -588,15 +657,210 @@ function parseRough(text: string): BulkParseResult {
     }
     if (hasLabeledVariant)
       product.variants.push(materializeVariant(product, labeledDraft));
-    if (!product.variants.length)
-      addDiagnostic(
-        product,
-        heading,
-        "No explicit priced variant parsed",
-        "unresolved field",
-        true,
-      );
     products.push(product);
+    if (!ordinalVariantHeading) lastStructuredProduct = product;
+  }
+  const grouped = new Map<string, BulkProduct>();
+  for (const product of products) {
+    const key = product.slug
+      ? `slug:${product.slug}`
+      : `identity:${normalizedName(product.brand)}|${normalizedName(product.title)}`;
+    const current = grouped.get(key);
+    if (!current) {
+      grouped.set(key, product);
+      continue;
+    }
+    const conflicts = [
+      ["Brand", current.brand, product.brand],
+      ["Category", current.category, product.category],
+      ["Slug", current.slug, product.slug],
+    ].filter(([, left, right]) => left && right && normalizedName(String(left)) !== normalizedName(String(right)));
+    for (const [field] of conflicts)
+      addDiagnostic(current, product.source, `Conflicting ${field} across variant rows`, "Owner Review Required", true);
+    current.brand ||= product.brand;
+    current.brandExplicit ||= product.brandExplicit;
+    current.category ||= product.category;
+    current.categoryExplicit ||= product.categoryExplicit;
+    current.slug ||= product.slug;
+    current.shortDescription ||= product.shortDescription;
+    current.seoTitle ||= product.seoTitle;
+    current.seoDescription ||= product.seoDescription;
+    current.defaultPtaStatus ||= product.defaultPtaStatus;
+    current.defaultCondition ||= product.defaultCondition;
+    current.defaultWarranty ||= product.defaultWarranty;
+    current.defaultDeliveryScope ||= product.defaultDeliveryScope;
+    current.notes.push(...product.notes);
+    current.specifications.push(...product.specifications);
+    current.diagnostics.push(...product.diagnostics);
+    current.variants.push(...product.variants);
+    current.warnings.push(...product.warnings);
+  }
+  return { format: "rough_text", products: [...grouped.values()], errors };
+}
+
+type RawContext = Pick<
+  BulkProduct,
+  | "brand"
+  | "brandExplicit"
+  | "category"
+  | "categoryExplicit"
+  | "defaultPtaStatus"
+  | "defaultPtaSource"
+  | "defaultCondition"
+  | "defaultConditionSource"
+  | "defaultWarranty"
+  | "defaultWarrantySource"
+  | "defaultDeliveryScope"
+  | "defaultDeliverySource"
+>;
+
+const rawBrands: Record<string, { brand: string; category?: string }> = {
+  samsung: { brand: "Samsung" }, vivo: { brand: "Vivo" },
+  "mi xiaomi": { brand: "Xiaomi" }, xiaomi: { brand: "Xiaomi" },
+  realme: { brand: "Realme" }, oppo: { brand: "Oppo" },
+  infinix: { brand: "Infinix" }, tecno: { brand: "Tecno" },
+  honor: { brand: "Honor" }, nokia: { brand: "Nokia" }, itel: { brand: "Itel" },
+  nothing: { brand: "Nothing" }, zte: { brand: "ZTE" },
+  "samsung tab": { brand: "Samsung", category: "Tablets" },
+};
+
+const rawColors = (value: string) => value.trim().replace(/^[,/\s]+|[,/\s]+$/g, "")
+  .split(/\s*\/\s*|\s*,\s*/).map((item) => item.trim()).filter(Boolean);
+
+function rawCategoryFor(title: string, contextCategory: string | null) {
+  if (contextCategory) return contextCategory;
+  const value = normalizedName(title);
+  if (/power\s*bank/.test(value)) return "Power Banks";
+  if (/buds?|earbuds?|headphones?/.test(value)) return "Audio & Earbuds";
+  if (/\b(tab|tablet)\b/.test(value)) return "Tablets";
+  return "Smartphones";
+}
+
+function applyRawFact(product: BulkProduct, line: string) {
+  if (/^PTA Approved$/i.test(line)) {
+    product.defaultPtaStatus = "approved";
+    product.defaultPtaSource = "Owner supplied explicitly";
+  } else if (/^(Non[- ]?PTA|Not Approved)$/i.test(line)) {
+    product.defaultPtaStatus = "not_approved";
+    product.defaultPtaSource = "Owner supplied explicitly";
+  } else if (/^(Brand New|Used|Open Box|Refurbished)$/i.test(line)) {
+    product.defaultCondition = condition(line);
+    product.defaultConditionSource = "Owner supplied explicitly";
+  } else if (/^(Karachi Only|Nationwide)$/i.test(line)) {
+    product.defaultDeliveryScope = delivery(line);
+    product.defaultDeliverySource = "Owner supplied explicitly";
+  } else if (/^Non[- ]?Warranty$/i.test(line)) {
+    product.defaultWarranty = "Non Warranty";
+    product.defaultWarrantySource = "Owner supplied explicitly";
+  } else if (/^\d+\s*Year Warranty$/i.test(line)) {
+    product.defaultWarranty = line;
+    product.defaultWarrantySource = "Owner supplied explicitly";
+  } else return false;
+  return true;
+}
+
+function rawSpecification(line: string): Omit<BulkSpecification, "source"> | null {
+  const battery = line.match(/^(\d+(?:\.\d+)?\s*mAh)\s+Battery$/i);
+  if (battery) return { group: "Battery", label: "Capacity", value: battery[1] };
+  const display = line.match(/^(\d+(?:\.\d+)?)\s+(.+?)\s+Display$/i);
+  if (display) return { group: "Display", label: "Display", value: `${display[1]} ${display[2]}` };
+  const camera = line.match(/^(\d+(?:\.\d+)?\s*MP)\s+Camera$/i);
+  if (camera) return { group: "Camera", label: "Main Camera", value: camera[1] };
+  return null;
+}
+
+/** Deterministic stock-list normalizer. Its result is intentionally consumed by the existing preview/apply pipeline. */
+export function normalizeRawCatalog(text: string): BulkParseResult {
+  const products: BulkProduct[] = [];
+  const errors: string[] = [];
+  const context: RawContext = {
+    brand: "", brandExplicit: false, category: null, categoryExplicit: false,
+    defaultPtaStatus: null, defaultPtaSource: "unresolved",
+    defaultCondition: null, defaultConditionSource: "unresolved",
+    defaultWarranty: null, defaultWarrantySource: "unresolved",
+    defaultDeliveryScope: null, defaultDeliverySource: "unresolved",
+  };
+  let current: BulkProduct | null = null;
+  for (const raw of normalizeInput(text).replace(/\r\n?/g, "\n").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const heading = rawBrands[normalizedName(line)];
+    if (heading) {
+      context.brand = heading.brand; context.brandExplicit = true;
+      context.category = heading.category ?? null; context.categoryExplicit = Boolean(heading.category);
+      current = null;
+      continue;
+    }
+    const factTarget = current ?? makeProduct("raw context");
+    Object.assign(factTarget, context);
+    if (applyRawFact(factTarget, line)) {
+      context.defaultPtaStatus = factTarget.defaultPtaStatus;
+      context.defaultPtaSource = factTarget.defaultPtaSource;
+      context.defaultCondition = factTarget.defaultCondition;
+      context.defaultConditionSource = factTarget.defaultConditionSource;
+      context.defaultWarranty = factTarget.defaultWarranty;
+      context.defaultWarrantySource = factTarget.defaultWarrantySource;
+      context.defaultDeliveryScope = factTarget.defaultDeliveryScope;
+      context.defaultDeliverySource = factTarget.defaultDeliverySource;
+      if (current) Object.assign(current, factTarget);
+      continue;
+    }
+    const specification = rawSpecification(line);
+    if (current && specification) {
+      current.specifications.push({ source: line, ...specification });
+      continue;
+    }
+    if (current && /\b(?:with|without)\s+buds?\s+gift\b/i.test(line)) {
+      current.notes.push(line);
+      addDiagnostic(current, line, "Owner note preserved verbatim", "preserved Owner note", false);
+      continue;
+    }
+    const at = line.indexOf("@");
+    if (at < 0) {
+      if (current) addDiagnostic(current, line, "Owner Review Required — unrecognized raw line", "Owner Review Required", true);
+      else errors.push(`Unrecognized raw line: ${line}`);
+      continue;
+    }
+    let before = line.slice(0, at).trim();
+    let after = line.slice(at + 1).trim();
+    let explicitPta: PtaStatus | undefined;
+    if (/\bNon[- ]?PTA\b/i.test(line)) {
+      explicitPta = "not_approved";
+      before = before.replace(/\bNon[- ]?PTA\b/gi, "").trim();
+      after = after.replace(/\bNon[- ]?PTA\b/gi, "").trim();
+    }
+    const configuration = before.match(/(\d+)\s*(?:GB)?\s*\/\s*(\d+)\s*(GB|TB)?\b/i);
+    const title = configuration ? before.slice(0, configuration.index).trim() : before;
+    if (!title) { errors.push(`Raw line has no product title: ${line}`); continue; }
+    const product = makeProduct(title);
+    Object.assign(product, context, {
+      source: line, slug: slugify(title), seoTitle: title, shortDescription: title, seoDescription: title,
+      category: rawCategoryFor(title, context.category), categoryExplicit: true,
+    });
+    const prefixColors = configuration ? rawColors(before.slice((configuration.index ?? 0) + configuration[0].length)) : [];
+    const priced = after.match(/^([\d,]+(?:\s*\/\s*[\d,]+)*)(?:\s+(.+))?$/);
+    const prices = priced ? priced[1].split("/").map((item) => item.trim()) : [];
+    const suffixColors = priced?.[2] ? rawColors(priced[2]) : [];
+    const ram = configuration ? `${configuration[1]} GB` : null;
+    const storage = configuration ? `${configuration[2]} ${configuration[3] ?? "GB"}` : null;
+    const add = (color: string | null, pricePkr: string | null, warning?: string) => product.variants.push(materializeVariant(product, {
+      source: line, ram, storage, color, pricePkr, ptaStatus: explicitPta, warnings: warning ? [warning] : [],
+    }));
+    if (!prices.length) (prefixColors.length ? prefixColors : [null]).forEach((color) => add(color, null));
+    else if (prices.length === 1) {
+      const colors = [...prefixColors, ...suffixColors];
+      if (colors.length) colors.forEach((color) => add(color, prices[0]));
+      else add(null, prices[0]);
+    }
+    else if (prices.length === 2 && prefixColors.length && suffixColors.length) {
+      prefixColors.forEach((color) => add(color, prices[0]));
+      suffixColors.forEach((color) => add(color, prices[1]));
+    } else {
+      add(null, null, "Ambiguous color-price mapping; needs Owner Review");
+      product.warnings.push("Ambiguous color-price mapping; needs Owner Review");
+    }
+    products.push(product);
+    current = product;
   }
   return { format: "rough_text", products, errors };
 }
@@ -617,12 +881,32 @@ export function parseBulkCatalog(text: string): BulkParseResult {
 }
 
 export function generatedVariantSku(productSlug: string, variant: BulkVariant) {
-  return [productSlug, variant.sku, variant.ram, variant.storage, variant.color]
+  const structuredIdentity = [variant.ram, variant.storage, variant.color].filter(Boolean);
+  if (!structuredIdentity.length && variant.sku) return variant.sku.trim();
+  const skuTokens = new Set(
+    (variant.sku ?? "").toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean),
+  );
+  const identityTokens = [
+    variant.ram?.match(/\d+/)?.[0],
+    variant.storage?.match(/\d+/)?.[0],
+    ...slugify(variant.color ?? "").toUpperCase().split("-").filter(Boolean),
+  ].filter(Boolean) as string[];
+  if (variant.sku && identityTokens.every((token) => skuTokens.has(token)))
+    return variant.sku.trim();
+  return [productSlug, ...structuredIdentity]
     .filter(Boolean)
     .map((part) => slugify(String(part)).toUpperCase())
     .join("-");
 }
 
+export function requiresExplicitPricedVariant(
+  existingProduct: boolean,
+  variants: BulkVariant[],
+) {
+  return (
+    !existingProduct && !variants.some((variant) => variant.priceMinor !== null)
+  );
+}
 export function applyBatchDefaults(
   products: BulkProduct[],
   defaults: BatchDefaults,
@@ -642,6 +926,10 @@ export function applyBatchDefaults(
       product.defaultDeliveryScope ?? defaults.deliveryScope;
     return {
       ...product,
+      brand: product.brand || defaults.brand || "",
+      brandExplicit: product.brandExplicit || Boolean(defaults.brand),
+      category: product.category || defaults.category,
+      categoryExplicit: product.categoryExplicit || Boolean(defaults.category),
       defaultPtaStatus: effectivePta,
       defaultPtaSource:
         product.defaultPtaStatus !== null
@@ -724,6 +1012,7 @@ export function applyBatchDefaults(
           warrantySource: warranty.source,
           deliveryScope: delivery.value,
           deliverySource: delivery.source,
+          inventory: variant.inventory ?? defaults.inventory,
         };
       }),
     };
@@ -744,10 +1033,28 @@ export function bulkInventoryPreview(
       label: "Inventory: preserve existing",
       mode: "preserve_existing" as const,
     };
-  return {
-    label: "Inventory: 10 (default for new variant)",
-    mode: "default_new" as const,
-  };
+  return { label: "Inventory: unresolved", mode: "unresolved" as const };
+}
+
+export function unresolvedVariantFacts(
+  variant: BulkVariant,
+  options: { sku: string; existingVariant: boolean },
+) {
+  const missing: string[] = [];
+  if (!options.sku.trim()) missing.push("SKU");
+  if (variant.priceMinor === null || variant.priceMinor <= 0) missing.push("Price");
+  if (variant.ptaStatus === "unknown") missing.push("PTA Status");
+  if (variant.condition === "unknown") missing.push("Condition");
+  if (!variant.warranty?.trim()) missing.push("Warranty");
+  if (!variant.deliveryScope) missing.push("Delivery");
+  if (
+    !options.existingVariant &&
+    (variant.inventory === null ||
+      !Number.isInteger(variant.inventory) ||
+      variant.inventory < 0)
+  )
+    missing.push("Inventory");
+  return missing;
 }
 export function normalizedPriceDisplay(variant: BulkVariant) {
   return variant.priceMinor === null
