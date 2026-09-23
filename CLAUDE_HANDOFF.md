@@ -2,7 +2,7 @@
 
 **Purpose:** This file is the authoritative continuation reference for the next Claude Code / ChatGPT session on this project. Read this before touching any code.
 
-**Last updated:** 2026-09-23
+**Last updated:** 2026-09-24
 
 > **Note on how this project gets shipped:** Git commit state and database/hosting deployment state are independent. This project's workflow applies Supabase migrations by pasting them into the live Supabase SQL Editor, and deploys Firebase Hosting via the Firebase CLI — both can happen without a Git commit existing for the change. Do not infer live deployment/migration status from `git log`/`git status` alone; verify the live systems directly (see Section 3).
 
@@ -23,7 +23,8 @@
 - Order success: `http://localhost:5173/order-success`
 - Admin: `http://localhost:5173/admin`
 - Admin Orders: `http://localhost:5173/admin/orders`
-- Firebase development URL: `https://isolutions-development-cb1ea.web.app` (Firebase project `isolutions-development-cb1ea`) — redeployed and confirmed live this session (user-confirmed: "Deployed all good").
+- Firebase development URL: `https://isolutions-development-cb1ea.web.app` (Firebase project `isolutions-development-cb1ea`) — last deployed with the delivery-fee frontend (see Section 3).
+- Admin Bulk Import: `http://localhost:5173/admin/bulk-import` (Bulk Upload v2 staging, see Section 16)
 - Supabase project ref: `acwatgxkcyrdxpcljxjb`
 
 ## 3. Current Deployment State
@@ -34,8 +35,9 @@
   - Read-only RPC probe with an empty customer name → `HTTP 400 customer_name_required` (11-arg function present, normal validation).
   - Brandless orderability probe (no insert — valid customer fields + deliberately invalid city, so every item is validated and the city check fails before any `INSERT`): brandless "Clear Mobile Case" → `delivery_city_invalid` (passed orderability), branded Apple charger control → `delivery_city_invalid`, nonexistent variant → `variant_not_orderable`. Only `202609230001` restores the optional-brand LEFT JOIN, so this confirms it is live.
   - Real test order **ISP-ORD-000003** (see Section 13) stored `delivery_fee_minor = 20000`, `shipping_surcharge_minor = 0`, `total_minor = 719900`.
-- **Firebase development hosting has NOT yet been redeployed with the delivery-fee frontend** (commit `6aec780`). Until it is, the hosted dev site still runs the previous checkout build, which does not display the Rs 200 base fee below Rs 10,000, while the live server already charges it. Deploy only when explicitly asked.
-- Git: all checkout/order/shipping work is committed locally on branch `feature/checkout-orders-shipping` (`ce92dd9`, `15c8e17`, `4534fa8`, `6aec780`, plus the docs commit). No Git remote is configured yet, so nothing has been pushed.
+- **Firebase development hosting was redeployed with the delivery-fee frontend** (build of commit `2e42146`, bundle `index-Dq8R6hFB.js`) and verified on the hosted site: Rs 9,999 Standard Rs 200 / Fast Rs 400, Rs 10,000 Standard FREE / Fast Rs 200, no "To be confirmed" text anywhere in the served bundle.
+- **The Bulk Upload v2 commits (`2ec8f00`, `32a34cd`, `d8a7859`) are NOT deployed.** They only change Admin Bulk Import; the storefront bundle is unaffected. Deploy only when explicitly asked.
+- Git: all work is committed locally on branch `feature/checkout-orders-shipping` — checkout/orders/shipping (`ce92dd9`, `15c8e17`, `4534fa8`, `6aec780`, `2e42146`) and Bulk Upload v2 (`2ec8f00`, `32a34cd`, `d8a7859`, plus the handoff update commit). `master` is untouched at `885059e`. **No Git remote is configured**, so nothing has been pushed.
 - Earlier history: `202609220003_checkout_shipping_methods.sql` (Standard/Fast shipping methods, 11-arg RPC) was applied live earlier and the Firebase dev site was redeployed with that build (user-confirmed "Deployed all good"). Its original below-threshold fee handling is superseded by `202609230001`.
 
 ## 4. Locked Business Rules
@@ -140,6 +142,10 @@ Applied to live Supabase (do not edit retroactively):
 - `supabase/migrations/202609220002_admin_order_status_workflow.sql`
 - `supabase/migrations/202609220003_checkout_shipping_methods.sql`
 - `supabase/migrations/202609230001_checkout_standard_delivery_fee.sql` (applied and live; current `create_storefront_order` definition)
+- `src/lib/catalogSheet.ts` — Bulk Upload v2 `CatalogSheetRow` contract, `normalizeStockLines()`, staging profiles (Section 16)
+- `src/lib/catalogWorkbook.ts` — Bulk Upload v2 Excel writer/reader, validation, category mapping, bridge into the Bulk Import preview (Section 16)
+- `src/admin/BulkImport.tsx` — Admin Bulk Import screen (legacy import + v2 Excel staging block)
+- `src/lib/bulkCatalog.ts` — legacy bulk parser/preview helpers (still used by the legacy import path)
 
 ## 11. Locked / Do Not Touch Without Explicit Instruction
 
@@ -159,7 +165,9 @@ Applied to live Supabase (do not edit retroactively):
 
 - `react-hooks/exhaustive-deps` warning in `src/StorefrontApp.tsx` (~line 2924 at last check) for a `useEffect` missing `collection.*` dependencies — pre-existing, not introduced by recent work
 - `lottie-web` direct-`eval` warnings during `vite build` (from the `lottie-web` package itself, not project code)
-- "Some chunks are larger than 500 kB after minification" build warning (pre-existing, not addressed — would need code-splitting if ever tackled)
+- "Some chunks are larger than 500 kB after minification" build warning (pre-existing, not addressed — would need code-splitting if ever tackled). `exceljs.min` (~930 kB) is its own lazily loaded Admin-only chunk.
+- `npm test`: **6 pre-existing failing tests** (source-text assertions that drifted from earlier committed code, e.g. they expect `persistChangedVariantPrices` but the code is `persistChangedVariantPricing`): `batchDefaultsReadiness` "inventory default 10 does not regress"; `bulkInventoryAutomation` "new variant with omitted inventory…" and "Bulk Preview renders default…"; `phase4` "storefront does not import the fictional mock catalog", "variants remain explicit rows…", "variant create, save, reload…". They fail identically on a clean checkout without the Bulk Upload v2 work. Not fixed yet — review each (stale vs real regression) before changing.
+- `npm audit`: moderate `uuid` advisory (GHSA-w5hq-g745-h8pq) via `exceljs` 4.4.0. It affects uuid v3/v5/v6 with a buffer argument; ExcelJS only calls `uuid` v4 without a buffer, so it is not reachable. Do not run `npm audit fix` (it downgrades ExcelJS to 3.4.0).
 
 ## 13. Latest Validation
 
@@ -178,7 +186,7 @@ Applied to live Supabase (do not edit retroactively):
   - Checkout, Order Success and Admin Orders all showed the same stored values
   - Order status set to **Cancelled** in Admin Orders; persistence after refresh verified
 - Brandless check: published brandless "Clear Mobile Case" passes server-side orderability (no order created)
-- Firebase development hosting → last deployed with the earlier shipping-methods build; the delivery-fee frontend (`6aec780`) is **not yet deployed**
+- Firebase development hosting → redeployed with the delivery-fee frontend and verified on the hosted site (Section 3)
 
 ## 14. Currently NOT Implemented / Future Only
 
@@ -196,7 +204,8 @@ Applied to live Supabase (do not edit retroactively):
 ## 15. Instructions for the Next Session
 
 - Read this file (`CLAUDE_HANDOFF.md`) first, before exploring the codebase.
-- Checkout, Orders, Shipping Methods and delivery fees (Sections 4–8) are FINAL / VERIFIED / LOCKED — do not redo them or re-apply their migrations. The only outstanding step is redeploying Firebase dev hosting with the delivery-fee frontend, when explicitly asked.
+- Checkout, Orders, Shipping Methods and delivery fees (Sections 4–8) are FINAL / VERIFIED / LOCKED and deployed — do not redo them or re-apply their migrations.
+- Current active work stream is **Bulk Upload v2** — see Section 16 for the state, locked rules and the exact next steps.
 - Inspect current code before editing — do not guess.
 - Do not rebuild, restart, or broadly refactor the existing architecture.
 - Do not redo work that's already complete (see Sections 4–10 for what's done).
@@ -206,3 +215,55 @@ Applied to live Supabase (do not edit retroactively):
 - Do not assume Git history reflects live deployment/migration state on this project — verify live systems directly (read-only) before concluding something is or isn't live.
 - Keep changes minimal and targeted to the specific request; don't touch the locked areas in Section 11 without explicit instruction.
 - Run `npm run lint` and `npm run build` after any meaningful code change.
+
+## 16. Bulk Upload v2 (Admin Bulk Import) — current state
+
+### Locked workflow
+Rough Data → Normalize → Generate fixed Excel → Owner review/edit → Upload Excel → Preview → Create / Replace Existing → Import → Upload Images → Publish
+
+### Completed (committed locally, not deployed, no DB changes)
+- **Phase 1A — stock normalizer** (`2ec8f00`): `src/lib/catalogSheet.ts`
+  - `CatalogSheetRow` contract + per-field status (`explicit` / `inferred` / `default` / `blank` / `needs_review`) + row review reasons
+  - `normalizeStockLines(text, { brands })` parses lines like `Samsung A16 6/128 Black; 42500` and `iPhone 15 Pro 256 Natural; 265000; Used; Non-PTA; BH 89%; Cycles 312` (also `@` separator, `Qty/Stock N`, `PTA Approved`, `Non-PTA`, `Brand New`/`Box Pack`, `Used`, `BH 89`/`BH 89%`, `Cycle`/`Cycles`, comma / `Rs` / `k` prices, brand heading lines)
+  - Model excludes brand; Product Title = Brand + Model; slug/SKU deterministic and case-insensitive; **canonical model casing** (iPhone, iPad, Galaxy, Redmi, Poco, Pixel, SE/FE/XL, 4G/5G, upper-cased codes like A16/S25/X7)
+  - Brands only from the supplied active-brand list (+ model families Galaxy→Samsung, Redmi/Poco→Xiaomi, iPhone/iPad/MacBook/AirPods→Apple, Pixel→Google, only if that brand is active). Unknown brand → Needs Review. Never creates brands.
+  - **Stock default = 10**; explicit Qty/Stock overrides
+  - **Used phones:** Condition base = `used`, Condition Grade = `A++`, optional Battery Health (1–100), optional Cycle Count (≥0), PTA Approved / Non-PTA. Blank BH/CC stay blank. No JV field.
+  - Generated SKU includes PTA/condition/BH/CC tokens, e.g. `APPLE-IPHONE-15-PRO-256-NATURAL-NONPTA-USED-BH89-C312`
+- **Phase 1B — Excel staging** (`32a34cd`): `src/lib/catalogWorkbook.ts`, `exceljs` 4.4.0 (dynamic import, separate chunk)
+  - Workbook sheets: **Products** (fixed 20 columns: Action, Product Type, Brand, Model / Product Title, RAM, Storage, Color, PTA Status, Condition, Battery Health, Cycle Count, Warranty, Delivery Scope, Price, Compare-at Price, Stock, SKU, Category, Slug, Notes), **Specifications** (Product Key = slug, Section, Specification Name, Specification Value), hidden **Lists** (DB brands/categories + fixed dropdown lists + template marker `isolutions-catalog-v1`)
+  - Text-formatted RAM/Storage/SKU/Slug, numeric PKR prices, frozen header, autofilter, dropdown validation, colour flags (red review / yellow inferred / orange required-blank)
+  - Reader: header matching case-insensitive; missing sheet/column or wrong template = blocking error; blank Stock → 10; unknown dropdown values / unknown brand or category → Needs Review; duplicate SKU (case-insensitive) and duplicate variant (incl. PTA/condition/BH/CC) → Needs Review; spec rows must reference a Products slug
+  - Admin UI (`/admin/bulk-import`, top block "Bulk Upload v2 · Excel staging"): raw stock textarea, **Normalize & Preview**, **Generate Excel**, **Download Blank Template**, **Upload Excel**; feeds the existing preview with **CREATE / REPLACE EXISTING / NEEDS REVIEW** product statuses
+  - **Excel/raw staging is preview only — Apply is disabled for staging data until Phase 2.** The legacy structured/CSV import path is unchanged.
+- **Staging validation + profiles** (`d8a7859`)
+  - Staging profile dropdown: **None / Mixed Stock** (default) and **Android Box Pack / PTA Approved** (fills blanks only: Product Type Mobile Phone, Condition Brand New, PTA Approved, Delivery Karachi Only; explicit row values always win; Stock stays 10 unless Qty given). Applies to the raw-stock path (and is written into generated Excel), not to uploaded Excel.
+  - Staging preview requires only SKU, Price, Stock (`catalogStagingMissingFacts`). **Blank Warranty / PTA / Condition / BH / CC do not block staging.**
+  - **Mobile Phone delivery auto-resolves to Karachi Only**; Mobile Phone + Nationwide → Needs Review.
+  - **Category mapping uses existing active DB categories only** (`categoriesForProductType` in `catalogWorkbook.ts`); exactly one match required, otherwise Needs Review. **No automatic category or brand creation.**
+- Tests: `scripts/stockNormalizer.test.mjs` (15) + `scripts/catalogWorkbook.test.mjs` (17) = **32/32 pass**. Run: `node --test scripts/stockNormalizer.test.mjs scripts/catalogWorkbook.test.mjs`
+- **Not yet browser-tested on the real Admin page** (needs an Owner admin sign-in). ExcelJS itself was verified in the browser (dev server + production build chunk).
+
+### LOCKED FINAL CATEGORY DESIGN (first task next session — not done yet)
+- Main categories: **Mobile Phones**, **Accessories**, **Gadgets**
+- Product Types: **Mobile Phone, Accessory, Gadget, Tablet, Laptop**
+- Intended mapping: Mobile Phone → Mobile Phones · Accessory → Accessories · Gadget → Gadgets · iPad / Tablet → Gadgets · MacBook / Laptop → Gadgets
+- **The live database does not match yet.** Active real categories seen via the public API on 2026-09-24: `Accessories`, `Laptops`, `Mobile Accessories`, `Smartphones` (no "Mobile Phones" or "Gadgets" category; "Accessories" vs "Mobile Accessories" is ambiguous). Admin may see additional inactive/development categories.
+- Code impact when resolved: update `PRODUCT_TYPE_CATEGORY_NAMES` in `src/lib/catalogWorkbook.ts` (Tablet/Laptop → Gadgets), add `Laptop` to `CatalogProductType` / `CATALOG_LISTS.productType`, and update tests. Category changes are a DB change (new migration or Owner-approved data change) and may affect storefront collections, filters and delivery-scope defaults — inspect `src/lib/collections.ts` and storefront category usage first. **Do not change categories without an explicit Owner decision.**
+
+### Locked rules for Phase 2 (not implemented yet)
+- **Replace Existing:** the latest imported variant set is final truth for that product; missing old variants become **inactive (`is_active = false`), never hard-deleted**; matching must include inactive variants so re-imported ones are reactivated; preserve product specs, media, SEO/content and historical order integrity (`order_items.variant_id` is `on delete restrict`; public reads, `search_public_catalog` and checkout already ignore inactive variants). Products not in the file are untouched.
+- **Specs:** product/model level, saved once per model, reused on later stock refresh; normal Replace Existing must not overwrite specs; new models will later need specification enrichment.
+- **Media:** manual image upload after import; existing media preserved; importer never deletes media.
+- **Blank optional values** stay blank and never erase existing optional values unless an explicit clear action exists; only the locked Stock = 10 default may be applied.
+- New products are created as drafts; publish only after validation (primary image required).
+
+### Next steps (in order)
+1. Finalize the category structure/mapping above (Owner decision + DB change + mapping code/tests).
+2. Browser-test the current Phase 1B staging page with an Owner admin sign-in (both profile examples, Generate Excel → edit → Upload → preview statuses, incl. REPLACE EXISTING for an existing product).
+3. Then design/implement Phase 2:
+   - DB support for Condition Grade (A++), Battery Health, Cycle Count on `product_variants` (+ variant uniqueness key including them) — new migration
+   - New `apply_catalog_bulk_import_v2` RPC with Create / Replace Existing (keep the current RPC for rollback)
+   - Safely deactivate missing variants (no hard delete); reactivate re-imported ones
+   - Enable actual Excel Apply/import in the UI
+   - Decide how blank PTA / Condition / Warranty are handled at import vs publish (the current RPC requires them)
