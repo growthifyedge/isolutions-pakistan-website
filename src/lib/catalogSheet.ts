@@ -14,8 +14,8 @@ export type FieldStatus =
 
 export type CatalogAction = "Create" | "Replace Existing";
 export type CatalogProductType = "Mobile Phone" | "Tablet" | "Accessory" | "Gadget";
-export type CatalogPtaStatus = "approved" | "not_approved";
-export type CatalogCondition = "brand_new" | "used";
+export type CatalogPtaStatus = "approved" | "not_approved" | "not_applicable";
+export type CatalogCondition = "brand_new" | "used" | "open_box" | "refurbished";
 export type CatalogConditionGrade = "A++";
 export type CatalogDeliveryScope = "karachi_only" | "nationwide";
 
@@ -119,7 +119,7 @@ const BARE_STORAGE_SIZES = new Set([16, 32, 64, 128, 256, 512]);
 
 const collapse = (value: string) => value.trim().replace(/\s+/g, " ");
 const lower = (value: string) => collapse(value).toLowerCase();
-const slugify = (value: string) =>
+export const catalogSlug = (value: string) =>
   lower(value).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const titleCase = (value: string) =>
   collapse(value).replace(/\S+/g, (word) => word[0].toUpperCase() + word.slice(1).toLowerCase());
@@ -140,7 +140,8 @@ function emptyStatus(): Record<CatalogField, FieldStatus> {
   };
 }
 
-function parsePrice(token: string): number | null {
+/** Parses a PKR major-unit price ("42,500", "Rs 42500", "42.5k") into minor units. */
+export function parseCatalogPrice(token: string): number | null {
   const match = token.trim().match(/^(?:rs\.?|pkr)?\s*(\d[\d,]*(?:\.\d+)?)\s*(k)?$/i);
   if (!match) return null;
   try {
@@ -216,7 +217,8 @@ function splitColors(value: string) {
     .map(titleCase);
 }
 
-function skuFor(row: CatalogSheetRow) {
+/** Deterministic SKU from slug + variant identity (PTA/condition/BH/CC included). */
+export function catalogSkuFor(row: Pick<CatalogSheetRow, "slug" | "ram" | "storage" | "color" | "ptaStatus" | "condition" | "batteryHealth" | "cycleCount">) {
   const capacity = (value: string | null) => {
     const match = value?.match(/^(\d+) (GB|TB)$/);
     if (!match) return null;
@@ -226,9 +228,9 @@ function skuFor(row: CatalogSheetRow) {
     row.slug,
     capacity(row.ram),
     capacity(row.storage),
-    row.color ? slugify(row.color) : null,
-    row.ptaStatus === "approved" ? "PTA" : row.ptaStatus === "not_approved" ? "NONPTA" : null,
-    row.condition === "used" ? "USED" : null,
+    row.color ? catalogSlug(row.color) : null,
+    row.ptaStatus === "approved" ? "PTA" : row.ptaStatus === "not_approved" ? "NONPTA" : row.ptaStatus === "not_applicable" ? "NA" : null,
+    row.condition === "used" ? "USED" : row.condition === "open_box" ? "OPENBOX" : row.condition === "refurbished" ? "REFURB" : null,
     row.batteryHealth !== null ? `BH${row.batteryHealth}` : null,
     row.cycleCount !== null ? `C${row.cycleCount}` : null,
   ]
@@ -279,7 +281,7 @@ function applyToken(attributes: Attributes, token: string): boolean {
   } else if (/^nationwide$/i.test(value)) {
     setOnce(attributes, "deliveryScope", "nationwide", "Delivery Scope");
   } else {
-    const price = parsePrice(value);
+    const price = parseCatalogPrice(value);
     if (price === null) return false;
     setOnce(attributes, "priceMinor", price, "Price");
   }
@@ -354,7 +356,7 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
   }
 
   const productTitle = model ? (brand ? `${brand} ${model}` : model) : null;
-  const slug = productTitle ? slugify(productTitle) || null : null;
+  const slug = productTitle ? catalogSlug(productTitle) || null : null;
   const colors = identity.colors.length ? identity.colors : [null];
   const reviewReasons = [...new Set(attributes.reviewReasons)];
 
@@ -409,7 +411,7 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
       reviewReasons,
     };
     if (slug) {
-      row.sku = skuFor(row);
+      row.sku = catalogSkuFor(row);
       fieldStatus.sku = brand ? "inferred" : "needs_review";
     }
     return row;

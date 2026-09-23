@@ -13,6 +13,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
     "@vitejs/plugin-react": "latest",
+    "exceljs": "^4.4.0",
     "lottie-react": "^3.1.2",
     "lucide-react": "latest",
     "react": "latest",

@@ -2,6 +2,7 @@ import { ChangeEvent, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  FileDown,
   FileUp,
   Play,
   Upload,
@@ -22,6 +23,14 @@ import {
   parseBulkCatalog,
   unresolvedVariantFacts,
 } from "../lib/bulkCatalog";
+import { normalizeStockLines } from "../lib/catalogSheet";
+import {
+  buildCatalogWorkbook,
+  catalogSheetToBulkParseResult,
+  readCatalogWorkbook,
+  validateCatalogSheet,
+  type CatalogReference,
+} from "../lib/catalogWorkbook";
 
 type Taxonomy = {
   id: string;
@@ -99,9 +108,23 @@ function matchesVariant(
   );
 }
 
+function downloadWorkbook(bytes: Uint8Array<ArrayBuffer>, filename: string) {
+  const url = URL.createObjectURL(
+    new Blob([bytes], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export function BulkImport() {
   const [source, setSource] = useState("");
   const [rawSource, setRawSource] = useState("");
+  const [stockSource, setStockSource] = useState("");
   const [preview, setPreview] = useState<PreviewProduct[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [format, setFormat] = useState("");
@@ -139,7 +162,8 @@ export function BulkImport() {
     setPreview([]);
     try {
       const parsed = parsedInput ?? parseBulkCatalog(source);
-      parsed.products = applyBatchDefaults(parsed.products, batchDefaults);
+      if (parsed.format !== "catalog_sheet")
+        parsed.products = applyBatchDefaults(parsed.products, batchDefaults);
       setFormat(parsed.format);
       setParseErrors(parsed.errors);
       if (!parsed.products.length) {
@@ -201,6 +225,10 @@ export function BulkImport() {
             );
         if (candidates.length > 1) blocked.push("Ambiguous product match");
         const existing = candidates.length === 1 ? candidates[0] : null;
+        if (product.requestedAction === "Create" && existing)
+          blocked.push("Action is Create but this product already exists");
+        if (product.requestedAction === "Replace Existing" && !existing && candidates.length === 0)
+          blocked.push("Action is Replace Existing but no matching product exists");
         const existingCategory = existing
           ? categories.find((item) => item.id === existing.category_id) ?? null
           : null;
@@ -434,7 +462,7 @@ export function BulkImport() {
               warrantySource: effectiveWarrantySource,
               deliveryScope: effectiveDelivery,
               deliverySource: effectiveDeliverySource,
-              warnings: variantBlocked,
+              warnings: [...new Set(variantBlocked)],
               id: match?.id ?? null,
               skuResolved,
               inventoryLabel: inventoryIntent.label,
@@ -451,7 +479,15 @@ export function BulkImport() {
         const seenSkus = new Set<string>();
         const seenCombinations = new Set<string>();
         for (const variant of variants) {
-          const combination = [variant.ram, variant.storage, variant.color]
+          const combination = [
+            variant.ram,
+            variant.storage,
+            variant.color,
+            variant.ptaStatus,
+            variant.condition,
+            variant.batteryHealth?.toString(),
+            variant.cycleCount?.toString(),
+          ]
             .map((value) => normalized(value))
             .join("|");
           if (seenSkus.has(variant.skuResolved))
@@ -494,11 +530,18 @@ export function BulkImport() {
               ? "REUSE BRAND"
               : brandAction,
           categoryAction,
-          action: blocked.length
-            ? "BLOCKED"
-            : existing
-              ? "UPDATE PRODUCT"
-              : "CREATE PRODUCT",
+          action:
+            parsed.format === "catalog_sheet"
+              ? blocked.length
+                ? "NEEDS REVIEW"
+                : existing
+                  ? "REPLACE EXISTING"
+                  : "CREATE"
+              : blocked.length
+                ? "BLOCKED"
+                : existing
+                  ? "UPDATE PRODUCT"
+                  : "CREATE PRODUCT",
         };
       });
       setPreview(rows);
@@ -518,6 +561,88 @@ export function BulkImport() {
     }
   };
 
+  const loadCatalogReference = async (): Promise<CatalogReference> => {
+    if (!supabase) throw new Error("Supabase environment is not configured.");
+    const [brandResult, categoryResult] = await Promise.all([
+      supabase.from("brands").select("name").eq("data_class", "real").eq("is_active", true),
+      supabase.from("categories").select("name").eq("data_class", "real").eq("is_active", true),
+    ]);
+    const error = brandResult.error ?? categoryResult.error;
+    if (error) throw error;
+    return {
+      brands: (brandResult.data ?? []).map((item) => item.name as string),
+      categories: (categoryResult.data ?? []).map((item) => item.name as string),
+    };
+  };
+
+  const normalizeStock = async () => {
+    const reference = await loadCatalogReference();
+    const { rows } = normalizeStockLines(stockSource, {
+      brands: reference.brands.map((name) => ({ name })),
+    });
+    return { reference, ...validateCatalogSheet(rows, [], reference) };
+  };
+
+  const runCatalogStep = async (step: () => Promise<void>) => {
+    setWorking(true);
+    setMessage("");
+    try {
+      await step();
+    } catch (error) {
+      setMessage(
+        `Excel staging failed: ${error instanceof Error ? error.message : "Unknown error."}`,
+      );
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const normalizeStockAndPreview = () =>
+    runCatalogStep(async () => {
+      const data = await normalizeStock();
+      await parseAndPreview(catalogSheetToBulkParseResult(data));
+    });
+
+  const generateExcel = () =>
+    runCatalogStep(async () => {
+      const { reference, rows, specifications } = await normalizeStock();
+      downloadWorkbook(
+        await buildCatalogWorkbook(rows, specifications, reference),
+        `isolutions-catalog-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+      setMessage(
+        `Excel generated: ${rows.length} row${rows.length === 1 ? "" : "s"}, ${rows.filter((row) => row.needsReview).length} needing review. No database writes performed.`,
+      );
+    });
+
+  const downloadTemplate = () =>
+    runCatalogStep(async () => {
+      downloadWorkbook(
+        await buildCatalogWorkbook([], [], await loadCatalogReference()),
+        "isolutions-catalog-template.xlsx",
+      );
+      setMessage("Blank catalog template downloaded.");
+    });
+
+  const uploadExcel = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    await runCatalogStep(async () => {
+      const data = await readCatalogWorkbook(
+        await file.arrayBuffer(),
+        await loadCatalogReference(),
+      );
+      if (data.fileErrors.length && !data.rows.length) {
+        setPreview([]);
+        setParseErrors(data.fileErrors);
+        setMessage(`Excel upload blocked: ${data.fileErrors.join(" ")}`);
+        return;
+      }
+      await parseAndPreview(catalogSheetToBulkParseResult(data));
+    });
+  };
+
   const normalizeAndPreview = () => {
     if (!rawSource.trim()) {
       setMessage("Paste raw product data before normalizing it.");
@@ -531,6 +656,7 @@ export function BulkImport() {
   const apply = async () => {
     if (
       !supabase ||
+      format === "catalog_sheet" ||
       preview.some((product) => product.blocked.length) ||
       parseErrors.length
     )
@@ -592,7 +718,10 @@ export function BulkImport() {
     if (file) setSource(await file.text());
   };
 
+  // Excel staging (Bulk Upload v2) is preview-only until the Phase 2 import RPC exists.
+  const stagingOnly = format === "catalog_sheet";
   const blocked =
+    stagingOnly ||
     parseErrors.length > 0 ||
     preview.some((product) => product.blocked.length > 0);
   const totals = preview.reduce(
@@ -619,6 +748,55 @@ export function BulkImport() {
             preview is approved.
           </p>
         </div>
+      </div>
+      <div className="bulk-step">
+        <b>Bulk Upload v2 · Excel staging</b>
+        <span>Raw stock → Excel → review → upload → preview · no database writes</span>
+      </div>
+      <label className="bulk-raw-source">
+        Raw stock lines
+        <textarea
+          aria-label="Raw stock lines"
+          value={stockSource}
+          onChange={(event) => setStockSource(event.target.value)}
+          placeholder={"Samsung A16 6/128 Black; 42500\niPhone 15 Pro 256 Natural; 265000; Used; Non-PTA; BH 89%; Cycles 312"}
+        />
+      </label>
+      <div className="bulk-actions">
+        <button
+          className="admin-primary"
+          onClick={() => void normalizeStockAndPreview()}
+          disabled={working || !stockSource.trim()}
+          type="button"
+        >
+          <Play /> Normalize &amp; Preview
+        </button>
+        <button
+          className="admin-secondary"
+          onClick={() => void generateExcel()}
+          disabled={working || !stockSource.trim()}
+          type="button"
+        >
+          <FileDown /> Generate Excel
+        </button>
+        <button
+          className="admin-secondary"
+          onClick={() => void downloadTemplate()}
+          disabled={working}
+          type="button"
+        >
+          <FileDown /> Download Blank Template
+        </button>
+        <label className="admin-secondary">
+          <FileUp /> Upload Excel
+          <input
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(event) => void uploadExcel(event)}
+            disabled={working}
+            hidden
+          />
+        </label>
       </div>
       <div className="bulk-step">
         <b>1. Source data</b>
@@ -913,12 +1091,21 @@ export function BulkImport() {
                       {variant.warrantySource}) ·{" "}
                       {variant.deliveryScope ?? "delivery unresolved"} (
                       {variant.deliverySource}) · {variant.inventoryLabel}
+                      {variant.conditionGrade ? ` · grade ${variant.conditionGrade}` : ""}
+                      {variant.batteryHealth != null ? ` · BH ${variant.batteryHealth}%` : ""}
+                      {variant.cycleCount != null ? ` · ${variant.cycleCount} cycles` : ""}
                     </span>
                     <span
                       className={`bulk-status ${variant.warnings.length ? "blocked" : "ready"}`}
                     >
                       {variant.action}
                     </span>
+                    {stagingOnly &&
+                      variant.warnings.map((warning) => (
+                        <p className="bulk-warning" key={warning}>
+                          <AlertTriangle /> {warning}
+                        </p>
+                      ))}
                   </div>
                 ))}
               </article>
@@ -927,9 +1114,11 @@ export function BulkImport() {
           <div className="bulk-step">
             <b>5. Apply approved batch</b>
             <span>
-              {blocked
-                ? "Resolve all blocked rows before apply"
-                : "Server authorization + atomic transaction"}
+              {stagingOnly
+                ? "Excel staging preview only · database import arrives in Phase 2"
+                : blocked
+                  ? "Resolve all blocked rows before apply"
+                  : "Server authorization + atomic transaction"}
             </span>
           </div>
           <button

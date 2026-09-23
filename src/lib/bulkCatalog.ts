@@ -60,6 +60,10 @@ export type BulkVariant = {
   deliverySource: ValueSource;
   inventory: number | null;
   warnings: string[];
+  // Catalog sheet (Bulk Upload v2) used-phone facts; preview/display only for now.
+  conditionGrade?: string | null;
+  batteryHealth?: number | null;
+  cycleCount?: number | null;
 };
 
 export type BulkProduct = {
@@ -86,10 +90,12 @@ export type BulkProduct = {
   diagnostics: BulkDiagnostic[];
   variants: BulkVariant[];
   warnings: string[];
+  // Catalog sheet (Bulk Upload v2) Action column: Create / Replace Existing / blank.
+  requestedAction?: "Create" | "Replace Existing" | null;
 };
 
 export type BulkParseResult = {
-  format: "rough_text" | "csv";
+  format: "rough_text" | "csv" | "catalog_sheet";
   products: BulkProduct[];
   errors: string[];
 };
