@@ -28,15 +28,15 @@
 
 ## 3. Current Deployment State
 
-- **Supabase migration `202609220003_checkout_shipping_methods.sql` is APPLIED to the live database.** Verified read-only, independent of Git: a probe `POST` to `https://acwatgxkcyrdxpcljxjb.supabase.co/rest/v1/rpc/create_storefront_order` with a body including `p_shipping_method` returned `HTTP 400 {"code":"P0001","message":"customer_name_required"}` — i.e. PostgREST matched and executed the new 11-arg function (the old 10-arg signature without `p_shipping_method` would instead have returned a 404 "function not found in schema cache" error). The migration runs as a single `begin;...commit;` transaction, so this also confirms the preceding `ALTER TABLE ... ADD COLUMN shipping_method, shipping_surcharge_minor` statements committed successfully. No data was mutated by this check (the probe intentionally fails Postgres-side validation before reaching any `INSERT`).
-- **Firebase development hosting has been redeployed** with this build. User confirmed successful deployment and testing ("Deployed all good") after local verification.
-- **Shipping-method implementation status: DEPLOYED** — schema, RPC, checkout UI, order-success, and Admin Orders display are all live.
-- Also verified locally against the real running dev server (`http://localhost:5173`, not static repros) before deployment:
-  - `npm run lint` — pass (1 pre-existing unrelated warning, see Section 12)
-  - `npm run build` (`tsc -b && vite build`) — pass
-  - Checkout UI (Delivery Method cards, free-delivery threshold logic, Fast Delivery surcharge, Order Summary states) — verified visually and via computed-state extraction, scenarios A–F all correct (see Section 5)
-- Latest live testing (post-deploy): confirmed successful by the user.
-- Note: `git log`/`git status` do **not** reflect this — the working tree may still show these files as uncommitted/untracked, and HEAD may still point at an older commit. That is expected under this project's manual-apply/deploy workflow (see the note above) and is not evidence the migration or deployment didn't happen. If a commit is wanted for this work, that's a separate, explicit ask.
+**Checkout status: FINAL / VERIFIED / LOCKED** (Checkout, Orders, Shipping Methods, delivery fees).
+
+- **Supabase migration `202609230001_checkout_standard_delivery_fee.sql` is APPLIED to the live database** (applied manually via the SQL Editor). Verified live, independent of Git:
+  - Read-only RPC probe with an empty customer name → `HTTP 400 customer_name_required` (11-arg function present, normal validation).
+  - Brandless orderability probe (no insert — valid customer fields + deliberately invalid city, so every item is validated and the city check fails before any `INSERT`): brandless "Clear Mobile Case" → `delivery_city_invalid` (passed orderability), branded Apple charger control → `delivery_city_invalid`, nonexistent variant → `variant_not_orderable`. Only `202609230001` restores the optional-brand LEFT JOIN, so this confirms it is live.
+  - Real test order **ISP-ORD-000003** (see Section 13) stored `delivery_fee_minor = 20000`, `shipping_surcharge_minor = 0`, `total_minor = 719900`.
+- **Firebase development hosting has NOT yet been redeployed with the delivery-fee frontend** (commit `6aec780`). Until it is, the hosted dev site still runs the previous checkout build, which does not display the Rs 200 base fee below Rs 10,000, while the live server already charges it. Deploy only when explicitly asked.
+- Git: all checkout/order/shipping work is committed locally on branch `feature/checkout-orders-shipping` (`ce92dd9`, `15c8e17`, `4534fa8`, `6aec780`, plus the docs commit). No Git remote is configured yet, so nothing has been pushed.
+- Earlier history: `202609220003_checkout_shipping_methods.sql` (Standard/Fast shipping methods, 11-arg RPC) was applied live earlier and the Firebase dev site was redeployed with that build (user-confirmed "Deployed all good"). Its original below-threshold fee handling is superseded by `202609230001`.
 
 ## 4. Locked Business Rules
 
@@ -45,19 +45,24 @@
 - Gadgets/accessories: nationwide Pakistan
 - Mixed cart containing any Karachi-only mobile: entire order becomes Karachi-only (no split shipments, no "Other city" option)
 
-**Shipping (implemented and deployed this session):**
-- Two methods: Standard Delivery, Fast Delivery
-- Standard Delivery is FREE when merchandise subtotal ≥ Rs 10,000 (1,000,000 minor units / paisa)
-- Below Rs 10,000, no standard base fee is configured anywhere in the project — delivery shows "To be confirmed" rather than an invented amount
-- Fast Delivery always adds a Rs 200 (20,000 minor units) surcharge, regardless of subtotal — it is never free, even on Rs 10,000+ orders
+**Shipping and delivery fees (FINAL / VERIFIED / LOCKED):**
+- Two methods: Standard Delivery, Fast Delivery. Fees are based on the merchandise subtotal before shipping.
+
+  | Subtotal | Standard Delivery | Fast Delivery |
+  |---|---|---|
+  | Below Rs 10,000 | Rs 200 | Rs 400 total (Rs 200 base + Rs 200 Fast surcharge) |
+  | Rs 10,000 or above | FREE | Rs 200 (Rs 0 base + Rs 200 Fast surcharge) |
+
+- Minor units (paisa): Rs 10,000 = 1,000,000; Rs 200 = 20,000; Rs 400 = 40,000
+- `delivery_fee_minor` is the final fee (base + surcharge) and is always known for new orders; `shipping_surcharge_minor` is 20,000 for Fast and 0 for Standard (already included in `delivery_fee_minor`)
 - Shipping method selection never changes geographic eligibility — Fast Delivery cannot bypass the Karachi-only rule
-- Constants live in `src/lib/orders.ts` (`FREE_STANDARD_DELIVERY_THRESHOLD_MINOR`, `FAST_DELIVERY_SURCHARGE_MINOR`) and are mirrored as literals inside the SQL RPC — client-submitted fees/totals are never trusted; the server recalculates everything from authoritative catalog prices
+- Constants live in `src/lib/orders.ts` (`FREE_STANDARD_DELIVERY_THRESHOLD_MINOR`, `STANDARD_DELIVERY_FEE_MINOR`, `FAST_DELIVERY_SURCHARGE_MINOR`, display helper `calculateDeliveryFeeMinor()`) and are mirrored as literals inside the SQL RPC — client-submitted fees/totals are never trusted; the server recalculates everything from authoritative catalog prices
 
 **Payments:**
 - Active: Cash on Delivery, Bank Transfer
 - Coming Soon (disabled tiles): Credit/Debit Card, Installments
 
-## 5. Checkout State
+## 5. Checkout State — FINAL / VERIFIED / LOCKED
 
 File: `src/StorefrontApp.tsx` (`CheckoutPage`, `OrderSuccessPage`)
 
@@ -65,29 +70,30 @@ File: `src/StorefrontApp.tsx` (`CheckoutPage`, `OrderSuccessPage`)
 - Customer Details: Full Name, WhatsApp/Phone, optional Email
 - Delivery Details: City (locked to Karachi and hidden dropdown when cart requires it; otherwise Karachi / Other city in Pakistan), conditional "City Name" field when Other city is selected, Area/Landmark, Full Delivery Address, Order Notes
 - Delivery eligibility notice (karachi / mixed / nationwide messaging) — unchanged, locked
-- **New: "Delivery Method" section** (between the eligibility notice and Payment Method) — two selectable cards:
-  - Standard Delivery: shows "FREE" (green badge) at/above threshold, or "To be confirmed" (neutral badge) below it
-  - Fast Delivery: always shows "Rs 200" (coral badge), "Priority" label
+- **"Delivery Method" section** (between the eligibility notice and Payment Method) — two selectable cards:
+  - Standard Delivery: "FREE" (green badge) at/above Rs 10,000; "Rs 200" (coral badge) below it, with "Free on orders Rs 10,000 or above."
+  - Fast Delivery ("Priority" label): "Rs 400" below Rs 10,000 with "Rs 200 delivery + Rs 200 Fast surcharge."; "Rs 200" at/above Rs 10,000 with "Priority delivery for an additional Rs 200."
   - A threshold hint line above the cards: "Add Rs X more to unlock FREE Standard Delivery." / "You've unlocked FREE Standard Delivery." once qualified
   - Default selection: Standard Delivery (never defaults to paid Fast)
 - Payment Method: Cash on Delivery / Bank Transfer selectable tiles; Credit/Debit Card and Installments shown disabled as "Coming soon"
-- Order Summary (right rail): Subtotal, Delivery Method, Delivery (FREE / Rs X / "To be confirmed" / "To be confirmed (+Rs 200 Fast Delivery)"), and a Total row labeled "Total" when the fee is fully known or "Known Total" when it isn't (never fabricates a final number when delivery is unconfirmed)
+- Order Summary (right rail): Subtotal, Delivery Method, Delivery (always a known final fee: FREE / Rs 200 / Rs 400), and Total (subtotal + delivery). Helper line: "Your delivery fee is confirmed above."
 - Place Order → calls `createStorefrontOrder()` (`src/lib/orders.ts`) → Supabase RPC `create_storefront_order` → on success, confirmation is saved to `sessionStorage`, cart is cleared (`clearStorefrontCart()`), redirect to `/order-success`
-- `/order-success`: reads the saved confirmation (privacy-scoped — only available immediately after checkout), shows Order number, Payment method, Subtotal, Delivery Method, Delivery status, Total/Known total, and (if Fast was selected) a dedicated "Fast Delivery selected (+Rs 200 priority surcharge)" note even when the overall delivery fee is still unconfirmed
+- `/order-success`: reads the saved confirmation (privacy-scoped — only available immediately after checkout), shows Order number, Payment method, Subtotal, Delivery Method, the server-calculated final Delivery fee (FREE / Rs X), Total, and (if Fast was selected) a "Fast Delivery selected (includes Rs 200 priority surcharge)" note
 
 ## 6. Order Backend
 
-Tables (from `202609200001_checkout_orders_phase_1.sql`, extended by `202609220003_checkout_shipping_methods.sql` — **applied and live**):
-- `public.orders` — customer/delivery/payment fields, `subtotal_minor`, `delivery_fee_minor` (nullable = unknown), `total_minor`, `status`, plus new `shipping_method` (`standard`/`fast`, check-constrained) and `shipping_surcharge_minor` (bigint, default 0)
+Tables (from `202609200001_checkout_orders_phase_1.sql`, extended by `202609220003_checkout_shipping_methods.sql`; RPC finalized by `202609230001_checkout_standard_delivery_fee.sql` — all **applied and live**):
+- `public.orders` — customer/delivery/payment fields, `subtotal_minor`, `delivery_fee_minor` (final fee = base + surcharge; always set for new orders, NULL only on legacy orders created before `202609230001`), `total_minor`, `status`, `shipping_method` (`standard`/`fast`, check-constrained) and `shipping_surcharge_minor` (bigint, default 0)
 - `public.order_items` — immutable per-line snapshots (title, SKU, variant attributes, price, delivery scope, image) captured at order time, independent of later catalog changes
 - `public.storefront_order_number_seq` → order numbers formatted `ISP-ORD-000001` style
 
 RPC: `public.create_storefront_order(...)`
 - `SECURITY DEFINER`, `set search_path = ''`, all references fully qualified
-- Validates: customer fields, email format, payment method, **shipping method** (new), item array shape/limits/duplicates
+- Validates: customer fields, email format, payment method, shipping method, item array shape/limits/duplicates
 - Resolves authoritative price/delivery-scope/publication/stock per variant server-side — client only sends `variant_id` + `quantity`
+- Optional brand: `LEFT JOIN brands` + `(brand_id IS NULL OR brand valid)` — restored by `202609230001` after `202609220003` had accidentally reverted it to an inner join
 - Enforces Karachi-only / nationwide / mixed classification from real delivery scopes, not client claims
-- Computes shipping fee server-side per the rules in Section 4 — client cannot submit a fee or total
+- Computes the final delivery fee server-side per the rules in Section 4 (base Rs 200 below Rs 10,000 / Rs 0 at or above, plus Rs 200 for Fast) — client cannot submit a fee or total
 - Inserts `orders` + `order_items` atomically, returns safe confirmation data (no general table access)
 - `anon`/`authenticated` only have `EXECUTE` on the RPC; direct `INSERT`/`UPDATE`/`DELETE`/general `SELECT` on `orders`/`order_items` is revoked. Admin (`is_catalog_admin()`) has `SELECT` on both and `UPDATE` on `orders` (status only, via RLS policy, not column-restricted at the DB level but the Admin UI only ever writes `status`)
 
@@ -103,7 +109,8 @@ File: `src/admin/AdminOrders.tsx`, route `/admin/orders`, security via existing 
 
 Current features:
 - Orders list, newest first; search by order #/customer/phone; filters for status/payment/city with clear-filters; loading/empty/filtered-empty/error+retry states
-- Order detail panel: Customer, Delivery (Destination, Classification, **Shipping Method** — new, Address, Area/Landmark, Notes), Order items (snapshot-based, never live product data), Totals (Subtotal, **Delivery Method** — new, **Delivery Fee** — new: FREE / Rs X / "To be confirmed" / "To be confirmed (+Rs 200 Fast Delivery)", Known total)
+- Order detail panel: Customer, Delivery (Destination, Classification, Shipping Method, Address, Area/Landmark, Notes), Order items (snapshot-based, never live product data), Totals (Subtotal, Delivery Method, Delivery Fee — the stored final fee: FREE / Rs X; legacy orders with no stored fee show "Not recorded (legacy order)" — and Total)
+- No manual delivery-fee editing (by design)
 - Status update dropdown (`new → confirmed → processing → completed → cancelled`), persists via Supabase update, confirmed to survive a page refresh
 - **Admin Order Detail header layout was fixed this project and must not be reverted.** Root cause history: the header previously broke because CSS Grid tracks with `fr` units hit a Chromium subpixel/zoom text-wrap bug, and separately because a **global, unscoped `header { ... }` selector in `src/styles.css`** (the storefront's own sticky-nav CSS) was leaking into `.order-detail > header` since the admin rule didn't explicitly override every property the global rule set. The fix in `src/admin/admin.css` (`.order-detail > header` block) now explicitly resets `display`, `height`, `grid-template-columns`, `padding`, `justify-content`, `align-items`, `box-shadow`, `z-index`, `background` so nothing from the global header rule can leak through again. **Do not remove these explicit resets, and do not reintroduce a grid/flex layout for this header without keeping full property resets.**
 
@@ -113,7 +120,8 @@ Applied to live Supabase (do not edit retroactively):
 - `202609200001_checkout_orders_phase_1.sql` — creates `orders`/`order_items`, order number sequence, original `create_storefront_order` RPC
 - `202609220001_checkout_optional_brand_fix.sql` — fixes brandless-product orderability (`LEFT JOIN brands`)
 - `202609220002_admin_order_status_workflow.sql` — adds `confirmed`/`processing`/`completed`/`cancelled` statuses
-- `202609220003_checkout_shipping_methods.sql` — **applied via the Supabase SQL Editor this session (confirmed live via read-only RPC probe, see Section 3).** Adds `shipping_method`/`shipping_surcharge_minor` columns + constraints, replaces `create_storefront_order` with an 11-arg version that accepts `p_shipping_method` and computes delivery fee server-side per Section 4
+- `202609220003_checkout_shipping_methods.sql` — adds `shipping_method`/`shipping_surcharge_minor` columns + constraints, replaces `create_storefront_order` with the 11-arg version that accepts `p_shipping_method`. (It unintentionally reverted the brand join to an inner join — fixed by the next migration.)
+- `202609230001_checkout_standard_delivery_fee.sql` — **applied via the Supabase SQL Editor and verified live (see Section 3).** `create or replace` of the same 11-arg `create_storefront_order` (signature, `SECURITY DEFINER`, `search_path = ''`, grants unchanged): sets the Rs 200 base delivery fee below Rs 10,000 so `delivery_fee_minor` is always known for new orders (Section 4), and restores the optional-brand `LEFT JOIN` so brandless published products remain orderable. Also updates the `delivery_fee_minor`/`shipping_surcharge_minor` column comments.
 
 **Rule for all future changes:** never edit an applied migration file. Always create a new migration with the next sequential timestamp prefix. Note that this project applies migrations via the Supabase SQL Editor, not necessarily `supabase db push` — a migration file being untracked/uncommitted in Git does not mean it hasn't been applied live; verify with a read-only check (e.g. probe the RPC/table via the REST API) rather than assuming from Git state.
 
@@ -122,7 +130,7 @@ Applied to live Supabase (do not edit retroactively):
 - `src/StorefrontApp.tsx` — storefront routes including `CheckoutPage`, `OrderSuccessPage`
 - `src/styles.css` — global storefront CSS (also loaded on `/admin` routes via `src/main.tsx` — see the header-leak note in Section 8 before adding any new bare-tag selectors here)
 - `src/lib/cart.ts` — client cart (localStorage key `isolutions-storefront-cart`)
-- `src/lib/orders.ts` — `createStorefrontOrder()`, shipping/order confirmation types, free-delivery/fast-surcharge constants
+- `src/lib/orders.ts` — `createStorefrontOrder()`, shipping/order confirmation types, delivery-fee constants and `calculateDeliveryFeeMinor()` display helper
 - `src/lib/storefrontContact.ts` — centralized WhatsApp contact config (locked design)
 - `src/admin/AdminOrders.tsx` — Admin Orders list/detail
 - `src/admin/AdminApp.tsx` — Admin shell/routing/auth wrapper
@@ -130,7 +138,8 @@ Applied to live Supabase (do not edit retroactively):
 - `supabase/migrations/202609200001_checkout_orders_phase_1.sql`
 - `supabase/migrations/202609220001_checkout_optional_brand_fix.sql`
 - `supabase/migrations/202609220002_admin_order_status_workflow.sql`
-- `supabase/migrations/202609220003_checkout_shipping_methods.sql` (applied and live)
+- `supabase/migrations/202609220003_checkout_shipping_methods.sql`
+- `supabase/migrations/202609230001_checkout_standard_delivery_fee.sql` (applied and live; current `create_storefront_order` definition)
 
 ## 11. Locked / Do Not Touch Without Explicit Instruction
 
@@ -141,13 +150,14 @@ Applied to live Supabase (do not edit retroactively):
 - WhatsApp floating button (`src/lib/storefrontContact.ts` is the single source of truth)
 - Homepage locked sections (legacy tech block and old laptop promo stay removed; Home About section stays restored)
 - Footer
+- Checkout, Orders, Shipping Methods and delivery-fee rules (Sections 4–8) — FINAL / VERIFIED / LOCKED
 - Checkout visual system / design language (`.checkout-card`, `.checkout-payment-tile`, `.checkout-shipping-*`, `.checkout-summary*` in `src/styles.css`)
 - Admin Order Detail header CSS fix (Section 8) — do not revert to a grid/flex layout without full property resets
 - All applied migrations (Section 9)
 
 ## 12. Known Non-Blocking Warnings
 
-- `react-hooks/exhaustive-deps` warning in `src/StorefrontApp.tsx` (~line 2936 at last check) for a `useEffect` missing `collection.*` dependencies — pre-existing, not introduced by recent work
+- `react-hooks/exhaustive-deps` warning in `src/StorefrontApp.tsx` (~line 2924 at last check) for a `useEffect` missing `collection.*` dependencies — pre-existing, not introduced by recent work
 - `lottie-web` direct-`eval` warnings during `vite build` (from the `lottie-web` package itself, not project code)
 - "Some chunks are larger than 500 kB after minification" build warning (pre-existing, not addressed — would need code-splitting if ever tackled)
 
@@ -155,16 +165,20 @@ Applied to live Supabase (do not edit retroactively):
 
 - `npm run lint` → pass, only the pre-existing warning above
 - `npm run build` (`tsc -b && vite build`) → pass, only pre-existing lottie-web/chunk-size warnings
-- Pre-deploy UI verification directly against `http://localhost:5173/checkout` (no static repros):
-  - Standard/Fast card selection, badges, threshold hint text
-  - Subtotal < Rs 10,000 + Standard → "To be confirmed"
-  - Subtotal < Rs 10,000 + Fast → "To be confirmed (+Rs 200 Fast Delivery)", no fabricated total
-  - Subtotal ≥ Rs 10,000 + Standard → FREE
-  - Subtotal ≥ Rs 10,000 + Fast → Rs 200, correct total
-  - Mobile-only cart + Fast selected → still Karachi-locked, Other city still hidden
-- Supabase shipping migration (`202609220003`) → **APPLIED** via SQL Editor; independently confirmed read-only via a REST probe of `create_storefront_order` (see Section 3) — no direct DB credential/introspection access was used or needed
-- Firebase development hosting → **deployed**, confirmed by the user ("Deployed all good")
-- Live end-to-end order placement and Admin Orders shipping-method display on the deployed/live environment → confirmed successful by the user
+- UI verification directly against `http://localhost:5173/checkout` (no static repros):
+  - Rs 9,999 + Standard → Delivery Rs 200, Total Rs 10,199
+  - Rs 9,999 + Fast → Delivery Rs 400, Total Rs 10,399
+  - Rs 10,000 + Standard → FREE, Total Rs 10,000
+  - Rs 10,000 + Fast → Delivery Rs 200, Total Rs 10,200
+  - Accessory-only cart → nationwide notice, both city options; mobile-only cart (+ Fast) → Karachi-locked, no Other city; mixed cart → Karachi-only mixed notice
+- Supabase migration `202609230001` → **APPLIED** via SQL Editor and verified live (read-only RPC probe + brandless orderability probe, see Section 3)
+- **Latest real verified order: ISP-ORD-000003** (live Supabase, placed via the real checkout)
+  - 1 × Apple 20W USB-C Charger, Karachi, Standard Delivery, Cash on Delivery
+  - Subtotal Rs 6,999 (authoritative DB price) · Delivery Rs 200 (`delivery_fee_minor = 20000`, `shipping_surcharge_minor = 0`) · Total Rs 7,199 (`total_minor = 719900`)
+  - Checkout, Order Success and Admin Orders all showed the same stored values
+  - Order status set to **Cancelled** in Admin Orders; persistence after refresh verified
+- Brandless check: published brandless "Clear Mobile Case" passes server-side orderability (no order created)
+- Firebase development hosting → last deployed with the earlier shipping-methods build; the delivery-fee frontend (`6aec780`) is **not yet deployed**
 
 ## 14. Currently NOT Implemented / Future Only
 
@@ -182,7 +196,7 @@ Applied to live Supabase (do not edit retroactively):
 ## 15. Instructions for the Next Session
 
 - Read this file (`CLAUDE_HANDOFF.md`) first, before exploring the codebase.
-- Shipping-methods work (Sections 4–8) is complete, applied, and deployed — do not redo it or re-apply the migration.
+- Checkout, Orders, Shipping Methods and delivery fees (Sections 4–8) are FINAL / VERIFIED / LOCKED — do not redo them or re-apply their migrations. The only outstanding step is redeploying Firebase dev hosting with the delivery-fee frontend, when explicitly asked.
 - Inspect current code before editing — do not guess.
 - Do not rebuild, restart, or broadly refactor the existing architecture.
 - Do not redo work that's already complete (see Sections 4–10 for what's done).
