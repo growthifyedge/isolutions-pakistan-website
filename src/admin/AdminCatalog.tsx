@@ -35,6 +35,7 @@ type ProductRow = {
   brand: { name: string } | null;
   category: { name: string } | null;
   product_variants: { id: string }[];
+  product_media: { is_primary: boolean; cloudinary_public_id: string | null }[];
 };
 type Draft = {
   id?: string;
@@ -125,7 +126,7 @@ export function Phase4ProductList() {
     supabase
       .from("products")
       .select(
-        "id,title,slug,publication_status,data_class,brand:brands(name),category:categories(name),product_variants(id)",
+        "id,title,slug,publication_status,data_class,brand:brands(name),category:categories(name),product_variants(id),product_media(is_primary,cloudinary_public_id)",
       )
       .order("updated_at", { ascending: false })
       .then(({ data, error }) => {
@@ -133,10 +134,17 @@ export function Phase4ProductList() {
         else setProducts((data ?? []) as unknown as ProductRow[]);
       });
   }, []);
-  const shown = products.filter((p) =>
-    `${p.title} ${p.slug} ${p.brand?.name ?? ""}`
-      .toLowerCase()
-      .includes(query.toLowerCase()),
+  // /admin/products?missing=images (linked after a Bulk Upload v2 import) lists products
+  // that still need their primary image before they can be published.
+  const missingImagesOnly =
+    new URLSearchParams(location.search).get("missing") === "images";
+  const shown = products.filter(
+    (p) =>
+      `${p.title} ${p.slug} ${p.brand?.name ?? ""}`
+        .toLowerCase()
+        .includes(query.toLowerCase()) &&
+      (!missingImagesOnly ||
+        !p.product_media.some((media) => media.is_primary && media.cloudinary_public_id)),
   );
   return (
     <>
@@ -168,6 +176,11 @@ export function Phase4ProductList() {
         <a className="admin-secondary" href="/admin/taxonomy">
           Brands & categories
         </a>
+        {missingImagesOnly && (
+          <a className="admin-secondary" href="/admin/products">
+            Missing images only · Show all
+          </a>
+        )}
       </div>
       {error && (
         <div className="validation-callout">

@@ -22,6 +22,7 @@
     "vite": "latest"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.2.17",
     "@eslint/js": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",

@@ -92,6 +92,8 @@ export type BulkProduct = {
   warnings: string[];
   // Catalog sheet (Bulk Upload v2) Action column: Create / Replace Existing / blank.
   requestedAction?: "Create" | "Replace Existing" | null;
+  // Catalog sheet only: Mobile Phone / Accessory / Gadget / Tablet / Laptop.
+  productType?: string | null;
 };
 
 export type BulkParseResult = {

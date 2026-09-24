@@ -823,6 +823,7 @@ export function catalogSheetToBulkParseResult(
       variants: rows.map(toBulkVariant),
       warnings,
       requestedAction: first.action,
+      productType: first.productType,
     };
   });
   const orphanErrors = data.specifications

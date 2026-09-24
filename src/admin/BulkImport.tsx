@@ -32,6 +32,14 @@ import {
   type StagingProfileId,
 } from "../lib/catalogSheet";
 import {
+  canApplyCatalogImport,
+  catalogImportConfirmation,
+  catalogImportCounts,
+  matchImportVariant,
+  type CatalogImportResult,
+  type ExistingVariantFacts,
+} from "../lib/catalogImport";
+import {
   buildCatalogWorkbook,
   catalogStagingMissingFacts,
   catalogSheetToBulkParseResult,
@@ -58,7 +66,7 @@ type ExistingProduct = {
   default_delivery_scope: BulkVariant["deliveryScope"];
   default_condition: BulkVariant["condition"];
   default_warranty: string | null;
-  product_variants: Array<{
+  product_variants: Array<ExistingVariantFacts & {
     id: string;
     sku: string;
     ram_display: string | null;
@@ -93,6 +101,8 @@ type PreviewProduct = Omit<BulkProduct, "variants"> & {
   taxonomyNotes: string[];
   brandAction: "REUSE BRAND" | "CREATE BRAND" | "NO BRAND" | "NEEDS REVIEW";
   categoryAction: "REUSE CATEGORY" | "CREATE CATEGORY" | "NEEDS REVIEW";
+  /** v2 Replace Existing: active variants missing from the file (they will be hidden). */
+  hiddenVariants: Array<{ sku: string; label: string }>;
 };
 
 const normalized = (value: string | null | undefined) =>
@@ -142,6 +152,7 @@ export function BulkImport() {
   const [format, setFormat] = useState("");
   const [working, setWorking] = useState(false);
   const [result, setResult] = useState<Record<string, number> | null>(null);
+  const [importResult, setImportResult] = useState<CatalogImportResult | null>(null);
   const [message, setMessage] = useState("");
   const [batchDefaults, setBatchDefaults] = useState<BatchDefaults>({
     brand: null,
@@ -170,6 +181,7 @@ export function BulkImport() {
     }
     setWorking(true);
     setResult(null);
+    setImportResult(null);
     setMessage("");
     setPreview([]);
     try {
@@ -190,7 +202,9 @@ export function BulkImport() {
         supabase
           .from("products")
           .select(
-            "id,title,slug,brand_id,category_id,publication_status,default_pta_status,default_condition,default_warranty,default_delivery_scope,product_variants(id,sku,ram_display,storage_display,color_finish,price_minor,compare_at_price_minor,pta_status,condition,warranty_override,delivery_scope)",
+            // product_variants(*) includes is_active and, once 202609240005 is applied,
+            // the used-phone facts that take part in v2 matching.
+            "id,title,slug,brand_id,category_id,publication_status,default_pta_status,default_condition,default_warranty,default_delivery_scope,product_variants(*)",
           ),
       ]);
       const queryError =
@@ -229,7 +243,8 @@ export function BulkImport() {
             )
           : false;
         const requestedSlug = product.slug ?? slugify(product.title);
-        const candidates = product.slug
+        // v2 product identity is Brand + Product Title, exactly as the import function checks.
+        const candidates = product.slug && !catalogSheet
           ? products.filter((item) => item.slug === product.slug)
           : products.filter(
               (item) =>
@@ -284,6 +299,16 @@ export function BulkImport() {
           blocked.push("No explicit priced variant parsed");
         if (!existing && !product.category)
           blocked.push("Category required for new product");
+        if (catalogSheet) {
+          // v2 never creates brands or categories and never changes a product's category.
+          if (!product.productType) blocked.push("Product Type is required");
+          if (product.brandExplicit && brandAction !== "REUSE BRAND")
+            blocked.push("Brand must be an existing active brand");
+          if (categoryAction !== "REUSE CATEGORY")
+            blocked.push("Category must be an existing active category");
+          if (existing && categoryId && existing.category_id !== categoryId)
+            blocked.push("Category differs from the existing product; import does not change categories");
+        }
         const taxonomyNotes: string[] = [];
         if (developmentBrand)
           taxonomyNotes.push(
@@ -385,14 +410,34 @@ export function BulkImport() {
                   : parsedVariant.ptaSource,
             };
             // SKUs are identifiers only: variants match on product identity +
-            // variant attributes, never on SKU.
-            const matches =
-              existing?.product_variants.filter((item) =>
-                matchesVariant(item, variant),
-              ) ?? [];
+            // variant attributes, never on SKU. v2 uses the import function's rules
+            // (including grade / battery health / cycle count, hidden variants too).
+            const catalogMatch = catalogSheet
+              ? matchImportVariant(existing?.product_variants ?? [], {
+                  ram: parsedVariant.ram,
+                  storage: parsedVariant.storage,
+                  color: parsedVariant.color,
+                  ptaStatus: parsedVariant.ptaStatus,
+                  condition: parsedVariant.condition,
+                  conditionGrade: parsedVariant.conditionGrade,
+                  batteryHealth: parsedVariant.batteryHealth,
+                  cycleCount: parsedVariant.cycleCount,
+                })
+              : null;
+            const matches = catalogMatch
+              ? catalogMatch.match
+                ? [catalogMatch.match]
+                : []
+              : existing?.product_variants.filter((item) =>
+                  matchesVariant(item, variant),
+                ) ?? [];
             const variantBlocked = [...variant.warnings];
-            if (matches.length > 1)
-              variantBlocked.push("Ambiguous variant match");
+            if (matches.length > 1 || catalogMatch?.ambiguous)
+              variantBlocked.push(
+                catalogSheet
+                  ? `${variant.source}: Matches more than one existing variant; add PTA, Condition, Battery Health or Cycle Count to tell them apart`
+                  : "Ambiguous variant match",
+              );
             const match = matches.length === 1 ? matches[0] : null;
             const inventoryIntent = bulkInventoryPreview(
               variant.inventory,
@@ -506,14 +551,23 @@ export function BulkImport() {
               id: match?.id ?? null,
               skuResolved,
               skuPrefix,
-              inventoryLabel: inventoryIntent.label,
+              // v2 always sets the final stock to the Excel value (10 when blank).
+              inventoryLabel: catalogSheet
+                ? `Stock → ${variant.inventory ?? 10}`
+                : inventoryIntent.label,
               action: variantBlocked.length
                 ? "NEEDS REVIEW"
-                : unchanged
-                  ? "UNCHANGED"
-                  : match
-                    ? "UPDATE VARIANT"
-                    : "CREATE VARIANT",
+                : catalogSheet
+                  ? match
+                    ? match.is_active === false
+                      ? "REACTIVATE VARIANT"
+                      : "UPDATE VARIANT"
+                    : "CREATE VARIANT"
+                  : unchanged
+                    ? "UNCHANGED"
+                    : match
+                      ? "UPDATE VARIANT"
+                      : "CREATE VARIANT",
             };
           },
         );
@@ -543,7 +597,21 @@ export function BulkImport() {
         }
         if (variants.some((variant) => variant.warnings.length))
           blocked.push("One or more variants require review");
+        // Replace Existing: active variants the file no longer lists will be hidden (never deleted).
+        const matchedIds = new Set(variants.map((variant) => variant.id).filter(Boolean));
+        const hiddenVariants =
+          catalogSheet && existing
+            ? existing.product_variants
+                .filter((item) => item.is_active !== false && !matchedIds.has(item.id))
+                .map((item) => ({
+                  sku: item.sku,
+                  label: [item.ram_display, item.storage_display, item.color_finish]
+                    .filter(Boolean)
+                    .join(" / ") || "Default",
+                }))
+            : [];
         return {
+          hiddenVariants,
           ...product,
           defaultCondition: effectiveDefaults.condition,
           defaultConditionSource: effectiveDefaults.conditionSource,
@@ -721,10 +789,69 @@ export function BulkImport() {
     void parseAndPreview(normalized);
   };
 
+  // Bulk Upload v2: one atomic call to apply_catalog_bulk_import_v2. The database
+  // re-validates everything and assigns SKUs; nothing is published.
+  const applyCatalogImport = async () => {
+    if (!supabase || !canApplyCatalogImport(format, preview, parseErrors)) return;
+    const counts = catalogImportCounts(preview);
+    if (!confirm(`Apply this import?\n\n${catalogImportConfirmation(counts)}`)) return;
+    setWorking(true);
+    setMessage("");
+    setResult(null);
+    setImportResult(null);
+    const supplied = (value: string | null | undefined) =>
+      value && value !== "unknown" ? value : null;
+    const batch = {
+      products: preview.map((product) => ({
+        action: product.action === "REPLACE EXISTING" ? "Replace Existing" : "Create",
+        source: product.source,
+        product_type: product.productType ?? null,
+        brand: product.brandExplicit ? product.brand : null,
+        title: product.title,
+        category: product.category,
+        specifications: product.specifications.map((specification) => ({
+          group: specification.group,
+          label: specification.label,
+          value: specification.value,
+        })),
+        variants: product.variants.map((variant) => ({
+          source: variant.source,
+          // Existing SKU for a matched variant; blank for a new one (assigned on import).
+          sku: variant.skuResolved || null,
+          ram: variant.ram,
+          storage: variant.storage,
+          color: variant.color,
+          price_minor: variant.priceMinor,
+          compare_at_price_minor: variant.compareAtPriceMinor,
+          stock: variant.inventory,
+          pta_status: supplied(variant.ptaStatus),
+          condition: supplied(variant.condition),
+          condition_grade: variant.conditionGrade ?? null,
+          battery_health_percent: variant.batteryHealth ?? null,
+          battery_cycle_count: variant.cycleCount ?? null,
+          warranty: variant.warranty,
+          delivery_scope: variant.deliveryScope,
+        })),
+      })),
+    };
+    const { data, error } = await supabase.rpc("apply_catalog_bulk_import_v2", {
+      p_batch: batch,
+    });
+    if (error) {
+      setMessage(`Import failed; nothing was changed. ${error.message}`);
+    } else {
+      setImportResult(data as CatalogImportResult);
+      setPreview([]);
+      setFormat("");
+      setMessage("Products imported successfully.");
+    }
+    setWorking(false);
+  };
+
   const apply = async () => {
+    if (format === "catalog_sheet") return applyCatalogImport();
     if (
       !supabase ||
-      format === "catalog_sheet" ||
       preview.some((product) => product.blocked.length) ||
       parseErrors.length
     )
@@ -787,12 +914,16 @@ export function BulkImport() {
     if (file) setSource(await file.text());
   };
 
-  // Excel staging (Bulk Upload v2) is preview-only until the Phase 2 import RPC exists.
+  // Excel v2 previews apply through apply_catalog_bulk_import_v2; Apply stays disabled
+  // while any product or row needs review.
   const stagingOnly = format === "catalog_sheet";
-  const blocked =
-    stagingOnly ||
-    parseErrors.length > 0 ||
-    preview.some((product) => product.blocked.length > 0);
+  const importCounts = stagingOnly ? catalogImportCounts(preview) : null;
+  const blocked = stagingOnly
+    ? !canApplyCatalogImport(format, preview, parseErrors)
+    : parseErrors.length > 0 ||
+      preview.some((product) => product.blocked.length > 0);
+  const missingImages =
+    importResult?.products.filter((product) => !product.has_primary_image) ?? [];
   const totals = preview.reduce(
     (summary, product) => {
       summary.products += 1;
@@ -1202,14 +1333,24 @@ export function BulkImport() {
                       ))}
                   </div>
                 ))}
+                {product.hiddenVariants.map((hidden) => (
+                  <div className="bulk-variant" key={`hide-${hidden.sku}`}>
+                    <div>
+                      <b>{hidden.label}</b>
+                      <small>{hidden.sku}</small>
+                    </div>
+                    <span>Not in this file: hidden from the store (kept with its SKU, stock and order history)</span>
+                    <span className="bulk-status blocked">HIDE VARIANT</span>
+                  </div>
+                ))}
               </article>
             ))}
           </div>
           <div className="bulk-step">
-            <b>5. Apply approved batch</b>
+            <b>5. {stagingOnly ? "Apply import" : "Apply approved batch"}</b>
             <span>
-              {stagingOnly
-                ? "Excel staging preview only · database import arrives in Phase 2"
+              {stagingOnly && importCounts
+                ? `Create ${importCounts.productsToCreate} · Replace ${importCounts.productsToReplace} products · Variants: create ${importCounts.variantsToCreate}, update ${importCounts.variantsToUpdate + importCounts.variantsToReactivate}, hide ${importCounts.variantsToHide} · Rows needing review: ${importCounts.rowsNeedingReview}`
                 : blocked
                   ? "Resolve all blocked rows before apply"
                   : "Server authorization + atomic transaction"}
@@ -1220,9 +1361,47 @@ export function BulkImport() {
             disabled={working || blocked}
             onClick={apply}
           >
-            <Upload /> Apply approved batch
+            <Upload /> {stagingOnly ? "Apply Import" : "Apply approved batch"}
           </button>
         </>
+      )}
+      {importResult && (
+        <div className="bulk-result">
+          <CheckCircle2 />
+          <div>
+            <b>Products imported successfully</b>
+            <span>Products created: {importResult.products_created}</span>
+            <span>Products replaced: {importResult.products_replaced}</span>
+            <span>Variants created: {importResult.variants_created}</span>
+            <span>
+              Variants updated: {importResult.variants_updated}
+              {importResult.variants_reactivated ? ` (+${importResult.variants_reactivated} brought back)` : ""}
+            </span>
+            <span>Variants hidden: {importResult.variants_hidden}</span>
+            <span>
+              Assigned SKUs:{" "}
+              {importResult.assigned_skus.length
+                ? importResult.assigned_skus.map((item) => item.sku).join(", ")
+                : "none (existing SKUs kept)"}
+            </span>
+            {importResult.compare_at_cleared.length > 0 && (
+              <span>
+                Compare-at cleared (no longer above the new price):{" "}
+                {importResult.compare_at_cleared.map((item) => item.sku).join(", ")}
+              </span>
+            )}
+            <span>Products missing images: {missingImages.length}</span>
+            <span>
+              Ready for the next step (images, then publish):{" "}
+              {importResult.products.map((product) => product.title).join(", ")}
+            </span>
+            {missingImages.length > 0 && (
+              <a className="admin-secondary" href="/admin/products?missing=images">
+                View Products Missing Images
+              </a>
+            )}
+          </div>
+        </div>
       )}
       {result && (
         <div className="bulk-result">

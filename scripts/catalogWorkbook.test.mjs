@@ -436,7 +436,9 @@ test("SKU: a duplicate supplied SKU needs review on every row", () => {
 
 test("SKU preview: matching never uses SKU; matched variant keeps its SKU; new variant shows the prefix only", () => {
   const source = readFileSync(new URL("../src/admin/BulkImport.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-  assert.ok(source.includes("existing?.product_variants.filter((item) =>\n                matchesVariant(item, variant),"));
+  // v2 rows match with the import function's rules; legacy rows keep attribute matching.
+  assert.ok(source.includes("matchImportVariant(existing?.product_variants ?? [], {"));
+  assert.ok(source.includes("existing?.product_variants.filter((item) =>\n                  matchesVariant(item, variant),"));
   assert.ok(!source.includes("item.sku === variant.sku"));
   assert.ok(!source.includes("generatedVariantSku"));
   assert.ok(source.includes('const skuResolved = match?.sku ?? "";'));
