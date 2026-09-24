@@ -7,13 +7,13 @@ import { parsePkrMajorToMinor } from "./money.ts";
 
 export type FieldStatus =
   | "explicit" // supplied in the source line
-  | "inferred" // derived deterministically (brand family, product type, title, slug, SKU)
+  | "inferred" // derived deterministically (brand family, product type, title, slug)
   | "default" // an Owner-locked default (Stock = 10, Used => A++)
   | "blank" // not supplied; stays blank, never guessed
   | "needs_review"; // unknown, ambiguous or conflicting
 
 export type CatalogAction = "Create" | "Replace Existing";
-export type CatalogProductType = "Mobile Phone" | "Tablet" | "Accessory" | "Gadget";
+export type CatalogProductType = "Mobile Phone" | "Accessory" | "Gadget" | "Tablet" | "Laptop";
 export type CatalogPtaStatus = "approved" | "not_approved" | "not_applicable";
 export type CatalogCondition = "brand_new" | "used" | "open_box" | "refurbished";
 export type CatalogConditionGrade = "A++";
@@ -217,27 +217,33 @@ function splitColors(value: string) {
     .map(titleCase);
 }
 
-/** Deterministic SKU from slug + variant identity (PTA/condition/BH/CC included). */
-export function catalogSkuFor(row: Pick<CatalogSheetRow, "slug" | "ram" | "storage" | "color" | "ptaStatus" | "condition" | "batteryHealth" | "cycleCount">) {
-  const capacity = (value: string | null) => {
-    const match = value?.match(/^(\d+) (GB|TB)$/);
-    if (!match) return null;
-    return match[2] === "TB" ? `${match[1]}-TB` : match[1];
-  };
-  return [
-    row.slug,
-    capacity(row.ram),
-    capacity(row.storage),
-    row.color ? catalogSlug(row.color) : null,
-    row.ptaStatus === "approved" ? "PTA" : row.ptaStatus === "not_approved" ? "NONPTA" : row.ptaStatus === "not_applicable" ? "NA" : null,
-    row.condition === "used" ? "USED" : row.condition === "open_box" ? "OPENBOX" : row.condition === "refurbished" ? "REFURB" : null,
-    row.batteryHealth !== null ? `BH${row.batteryHealth}` : null,
-    row.cycleCount !== null ? `C${row.cycleCount}` : null,
-  ]
-    .filter(Boolean)
-    .join("-")
-    .toUpperCase();
-}
+// Locked SKU system: the database assigns every new variant SKU when the variant is
+// inserted (2-letter prefix + 3-digit per-prefix sequence, e.g. MB001), so simultaneous
+// imports can never collide. The client never numbers SKUs; it only shows the expected
+// prefix. An existing variant keeps its SKU forever, and SKUs are never used to match variants.
+export type CatalogSkuPrefix = "MB" | "AC" | "GD" | "MC" | "IP";
+
+export const CATALOG_SKU_PATTERN = /^(MB|AC|GD|MC|IP)[0-9]{3}$/;
+
+export const CATALOG_SKU_PREFIX_BY_PRODUCT_TYPE: Record<CatalogProductType, CatalogSkuPrefix> = {
+  "Mobile Phone": "MB",
+  Accessory: "AC",
+  Gadget: "GD",
+  Laptop: "MC",
+  Tablet: "IP",
+};
+
+/** Mirrors public.catalog_sku_prefix(): the locked category slug decides the prefix. */
+export const CATALOG_SKU_PREFIX_BY_CATEGORY_SLUG: Record<string, CatalogSkuPrefix> = {
+  "mobile-phones": "MB",
+  "mobile-accessories": "AC",
+  gadgets: "GD",
+  laptops: "MC",
+  tablets: "IP",
+};
+
+/** Preview text for a new variant, e.g. "MB — assigned on import". */
+export const catalogSkuPending = (prefix: CatalogSkuPrefix) => `${prefix} — assigned on import`;
 
 type Attributes = Pick<
   CatalogSheetRow,
@@ -337,11 +343,14 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
   model = canonicalModel(model);
   if (!model) attributes.reviewReasons.push("Model missing");
 
-  const productType: CatalogProductType | null = /\b(?:ipad|tab|tablet|pad)\b/i.test(model)
-    ? "Tablet"
-    : identity.storage
-      ? "Mobile Phone"
-      : null;
+  // Laptops first: a MacBook line also carries a storage size.
+  const productType: CatalogProductType | null = /\b(?:macbook|laptop|notebook)\b/i.test(model)
+    ? "Laptop"
+    : /\b(?:ipad|tab|tablet|pad)\b/i.test(model)
+      ? "Tablet"
+      : identity.storage
+        ? "Mobile Phone"
+        : null;
   let deliveryScope = attributes.deliveryScope;
   let deliveryStatus: FieldStatus = deliveryScope ? "explicit" : "blank";
   if (productType === "Mobile Phone") {
@@ -410,10 +419,6 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
       needsReview: reviewReasons.length > 0,
       reviewReasons,
     };
-    if (slug) {
-      row.sku = catalogSkuFor(row);
-      fieldStatus.sku = brand ? "inferred" : "needs_review";
-    }
     return row;
   });
 }
@@ -427,7 +432,7 @@ export function catalogVariantKey(row: CatalogSheetRow) {
 
 /**
  * Normalizes rough stock lines ("Title RAM/Storage Color; Price; Used; Non-PTA; BH 89%; Cycles 312")
- * into fixed catalog sheet rows. A line that is exactly a known brand name sets the brand for the
+ * into fixed catalog sheet rows. SKUs stay blank: new variants get theirs on import. A line that is exactly a known brand name sets the brand for the
  * lines that follow it. Deterministic and side-effect free.
  */
 export function normalizeStockLines(text: string, options: NormalizeStockOptions): NormalizeStockResult {
@@ -452,16 +457,6 @@ export function normalizeStockLines(text: string, options: NormalizeStockOptions
       row.needsReview = true;
       row.reviewReasons.push(`Duplicate variant (same as line ${firstLine})`);
     } else seen.set(key, row.lineNumber);
-  }
-  const skuOwners = new Map<string, string>();
-  for (const row of rows) {
-    if (!row.sku) continue;
-    const owner = skuOwners.get(row.sku);
-    const key = catalogVariantKey(row);
-    if (owner !== undefined && owner !== key) {
-      row.needsReview = true;
-      row.reviewReasons.push(`Duplicate SKU ${row.sku}`);
-    } else skuOwners.set(row.sku, key);
   }
   return { rows };
 }
@@ -493,8 +488,6 @@ export function applyStagingProfile(rows: CatalogSheetRow[], profile: StagingPro
     supply("condition", "brand_new");
     supply("ptaStatus", "approved");
     supply("deliveryScope", "karachi_only");
-    // PTA/condition are part of the generated SKU; regenerate only SKUs the Owner did not supply.
-    if (row.fieldStatus.sku === "inferred" && row.slug) row.sku = catalogSkuFor(row);
     return row;
   });
 }

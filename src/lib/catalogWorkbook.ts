@@ -2,7 +2,6 @@ import type { Cell, DataValidation, Workbook, Worksheet } from "exceljs";
 import type { BulkParseResult, BulkProduct, BulkVariant } from "./bulkCatalog.ts";
 import {
   DEFAULT_IMPORT_STOCK,
-  catalogSkuFor,
   catalogSlug,
   catalogVariantKey,
   parseCatalogPrice,
@@ -59,7 +58,7 @@ const HEADER_FIELD: Record<ProductHeader, CatalogField> = {
 
 export const CATALOG_LISTS = {
   action: ["Create", "Replace Existing"] as CatalogAction[],
-  productType: ["Mobile Phone", "Tablet", "Accessory", "Gadget"] as CatalogProductType[],
+  productType: ["Mobile Phone", "Accessory", "Gadget", "Tablet", "Laptop"] as CatalogProductType[],
   ptaStatus: ["PTA Approved", "Non-PTA", "Not Applicable"],
   condition: ["Brand New", "Used", "Open Box", "Refurbished"],
   deliveryScope: ["Karachi Only", "Nationwide"],
@@ -81,8 +80,15 @@ const DELIVERY_LABEL: Record<CatalogDeliveryScope, string> = {
   nationwide: "Nationwide",
 };
 
-/** Current active real brands and categories (names), supplied by the caller. */
-export type CatalogReference = { brands: string[]; categories: string[] };
+/** An SKU already in the catalog and the slug of the product that owns it. */
+export type CatalogExistingSku = { sku: string; productSlug: string };
+
+/**
+ * Current active real brands and categories (names), supplied by the caller, plus every
+ * SKU already in the catalog (all products, active and inactive variants). Existing SKUs
+ * are only used to check a supplied SKU; new SKUs are assigned by the database on import.
+ */
+export type CatalogReference = { brands: string[]; categories: string[]; existingSkus?: CatalogExistingSku[] };
 
 export type CatalogSpecificationRow = {
   rowNumber: number;
@@ -114,7 +120,7 @@ const TEXT_COLUMNS: ProductHeader[] = ["RAM", "Storage", "SKU", "Slug"];
 const COLUMN_WIDTHS: Record<ProductHeader, number> = {
   Action: 16, "Product Type": 14, Brand: 14, "Model / Product Title": 26, RAM: 9, Storage: 10,
   Color: 16, "PTA Status": 15, Condition: 13, "Battery Health": 14, "Cycle Count": 12, Warranty: 18,
-  "Delivery Scope": 15, Price: 13, "Compare-at Price": 16, Stock: 8, SKU: 44, Category: 20, Slug: 30, Notes: 32,
+  "Delivery Scope": 15, Price: 13, "Compare-at Price": 16, Stock: 8, SKU: 10, Category: 20, Slug: 30, Notes: 32,
 };
 const VALIDATION_ROWS = 2000;
 
@@ -222,7 +228,7 @@ export async function buildCatalogWorkbook(
   }));
   styleHeader(products, PRODUCT_HEADERS.length);
   products.getCell("A1").note =
-    "Red = needs review · Yellow = inferred, please confirm · Orange = required but blank. Blank optional cells stay blank; blank Stock imports as 10.";
+    "Red = needs review · Yellow = inferred, please confirm · Orange = required but blank. Blank optional cells stay blank; blank Stock imports as 10. Leave SKU blank for new variants: it is assigned on import (MB/AC/GD/MC/IP + number).";
 
   for (const row of rows) {
     const excelRow = products.addRow(PRODUCT_HEADERS.map((header) => cellValueFor(row, header)));
@@ -504,39 +510,40 @@ export function catalogRowFromRecord(record: Partial<Record<ProductHeader, CellI
     needsReview: false,
     reviewReasons: reasons,
   };
+  // SKU is normally blank (assigned on import). A supplied SKU is checked in
+  // validateCatalogSheet and is only valid as the existing SKU of that product.
   const skuInput = text("SKU");
   if (skuInput) {
     row.sku = skuInput;
     status.sku = "explicit";
-  } else if (slug) {
-    row.sku = catalogSkuFor(row);
-    status.sku = "inferred";
   }
   row.needsReview = reasons.length > 0;
   return row;
 }
 
-// Existing category names each Product Type may resolve to. Only an exact single
-// match among active categories is used; categories are never created.
-const PRODUCT_TYPE_CATEGORY_NAMES: Record<CatalogProductType, string[]> = {
-  "Mobile Phone": ["mobile phones", "mobile phone", "smartphones", "smartphone", "phones"],
-  Tablet: ["tablets", "tablet", "ipad & tablets", "android tablets", "laptops & tablets"],
-  Accessory: ["accessories", "mobile accessories"],
-  Gadget: ["gadgets", "home gadgets"],
+// Locked category structure: Mobile Phones, Accessories and Gadgets at the top level,
+// with Laptops and Tablets as sub-categories of Gadgets. Each Product Type resolves to
+// exactly one existing active category; categories are never created.
+export const PRODUCT_TYPE_CATEGORY: Record<CatalogProductType, string> = {
+  "Mobile Phone": "Mobile Phones",
+  Accessory: "Accessories",
+  Gadget: "Gadgets",
+  Tablet: "Tablets",
+  Laptop: "Laptops",
 };
 
 export function categoriesForProductType(productType: CatalogProductType, categories: string[]) {
-  const accepted = new Set(PRODUCT_TYPE_CATEGORY_NAMES[productType]);
-  return categories.filter((name) => accepted.has(lower(name)));
+  const accepted = lower(PRODUCT_TYPE_CATEGORY[productType]);
+  return categories.filter((name) => lower(name) === accepted);
 }
 
 /**
  * Values the v2 staging preview genuinely requires per variant. Warranty, PTA,
- * Condition, Battery Health and Cycle Count may stay blank while staging.
+ * Condition, Battery Health and Cycle Count may stay blank while staging; SKU is
+ * blank for new variants because the database assigns it on import.
  */
-export function catalogStagingMissingFacts(variant: Pick<BulkVariant, "priceMinor" | "inventory">, sku: string) {
+export function catalogStagingMissingFacts(variant: Pick<BulkVariant, "priceMinor" | "inventory">) {
   const missing: string[] = [];
-  if (!sku.trim()) missing.push("SKU");
   if (variant.priceMinor === null || variant.priceMinor <= 0) missing.push("Price");
   if (variant.inventory === null || !Number.isInteger(variant.inventory) || variant.inventory < 0) missing.push("Stock");
   return missing;
@@ -577,7 +584,12 @@ export function validateCatalogSheet(
     if (row.category) {
       const canonical = categoryNames.get(lower(row.category));
       if (!canonical) flag(row, "category", `Category not found among active categories: "${row.category}"`);
-      else row.category = canonical;
+      else {
+        row.category = canonical;
+        const expected = row.productType ? PRODUCT_TYPE_CATEGORY[row.productType] : null;
+        if (expected && lower(expected) !== lower(canonical))
+          flag(row, "category", `Category "${canonical}" does not match Product Type ${row.productType} (expected ${expected})`);
+      }
     } else if (row.productType) {
       const matches = categoriesForProductType(row.productType, reference.categories);
       if (matches.length === 1) {
@@ -618,18 +630,34 @@ export function validateCatalogSheet(
     }
   }
 
-  const skuRows = new Map<string, CatalogSheetRow[]>();
   const variantRows = new Map<string, CatalogSheetRow>();
   for (const row of validated) {
-    if (row.sku) skuRows.set(row.sku.toLowerCase(), [...(skuRows.get(row.sku.toLowerCase()) ?? []), row]);
     const key = catalogVariantKey(row);
     const first = variantRows.get(key);
     if (first) flag(row, null, `Duplicate variant (same as ${first.sourceLine})`);
     else variantRows.set(key, row);
   }
-  for (const [sku, matches] of skuRows) {
+
+  // SKUs. Blank is normal: the database assigns the next SKU for the product's prefix on
+  // import. A supplied SKU is never generated or rewritten here; it is only accepted as an
+  // existing SKU of the same product (Replace Existing keeps it). Anything else needs review.
+  const existingSkuOwners = new Map(
+    (reference.existingSkus ?? []).map((item) => [item.sku.trim().toUpperCase(), item.productSlug] as const),
+  );
+  const suppliedSkus = new Map<string, CatalogSheetRow[]>();
+  for (const row of validated) {
+    if (!row.sku) continue;
+    const sku = row.sku.trim().toUpperCase();
+    const owner = existingSkuOwners.get(sku);
+    if (owner === undefined)
+      flag(row, "sku", `SKU ${sku} is not an existing catalog SKU; leave SKU blank for new variants (assigned on import)`);
+    else if (owner !== row.slug) flag(row, "sku", `SKU ${sku} belongs to another product (${owner})`);
+    else row.sku = sku;
+    suppliedSkus.set(sku, [...(suppliedSkus.get(sku) ?? []), row]);
+  }
+  for (const [sku, matches] of suppliedSkus) {
     if (matches.length < 2) continue;
-    for (const row of matches) flag(row, "sku", `Duplicate SKU ${sku.toUpperCase()} (${matches.map((item) => item.sourceLine).join(", ")})`);
+    for (const row of matches) flag(row, "sku", `Duplicate SKU ${sku} (${matches.map((item) => item.sourceLine).join(", ")})`);
   }
 
   const slugs = new Set(validated.map((row) => row.slug).filter(Boolean));

@@ -36,7 +36,9 @@ test("1. Android standard line normalizes into one clean sheet row", () => {
   assert.equal(row.fieldStatus.productType, "inferred");
   assert.equal(row.deliveryScope, "karachi_only");
   assert.equal(row.fieldStatus.deliveryScope, "inferred");
-  assert.equal(row.sku, "SAMSUNG-A16-6-128-BLACK");
+  // SKU stays blank: the database assigns it (e.g. MB001) when the variant is imported.
+  assert.equal(row.sku, null);
+  assert.equal(row.fieldStatus.sku, "blank");
   // Never guessed: PTA, condition, warranty, category and compare-at stay blank.
   for (const field of ["ptaStatus", "condition", "conditionGrade", "warranty", "category", "compareAtPriceMinor", "batteryHealth", "cycleCount", "action"]) {
     assert.equal(row[field], null, field);
@@ -95,7 +97,7 @@ test("4. used iPhone with Non-PTA, battery health and cycles", () => {
   assert.equal(row.batteryHealth, 89);
   assert.equal(row.cycleCount, 312);
   assert.equal(row.stock, 10);
-  assert.equal(row.sku, "APPLE-IPHONE-15-PRO-256-NATURAL-NONPTA-USED-BH89-C312");
+  assert.equal(row.sku, null);
   assert.equal(row.needsReview, false);
   const variants = one("iPhone 15 Pro 256 Natural; 265000; Used; Non-PTA; BH 89; Cycle 312");
   assert.equal(variants.batteryHealth, 89);
@@ -110,7 +112,7 @@ test("5. used phone without BH/CC keeps both blank", () => {
   assert.equal(row.cycleCount, null);
   assert.equal(row.fieldStatus.batteryHealth, "blank");
   assert.equal(row.fieldStatus.cycleCount, "blank");
-  assert.equal(row.sku, "APPLE-IPHONE-14-128-MIDNIGHT-PTA-USED");
+  assert.equal(row.sku, null);
   assert.equal(row.needsReview, false);
 });
 
@@ -154,7 +156,7 @@ test("9. a 100-line batch parses without collisions or review flags", () => {
   const rows = normalize(lines.join("\n"));
   assert.equal(rows.length, 100);
   assert.deepEqual(rows.filter((row) => row.needsReview).map((row) => `${row.lineNumber}: ${row.reviewReasons}`), []);
-  assert.equal(new Set(rows.map((row) => row.sku)).size, 100);
+  assert.ok(rows.every((row) => row.sku === null));
   assert.equal(new Set(rows.map(catalogVariantKey)).size, 100);
   assert.ok(rows.every((row) => row.brand && row.stock === 10 && row.priceMinor > 0));
 });
@@ -170,7 +172,7 @@ test("10. same model with several colours/configurations keeps one product ident
   assert.equal(new Set(rows.map((row) => row.slug)).size, 1);
   assert.deepEqual([...new Set(rows.map((row) => row.productTitle))], ["Samsung A16"]);
   assert.deepEqual(rows.map((row) => row.color), ["Black", "Blue", "Black", "Mint", "Silver"]);
-  assert.equal(new Set(rows.map((row) => row.sku)).size, 5);
+  assert.equal(new Set(rows.map(catalogVariantKey)).size, 5);
   assert.ok(rows.every((row) => !row.needsReview));
 });
 
@@ -207,8 +209,8 @@ test("12. the same model in different casing shares one slug and product identit
   assert.deepEqual([...new Set(rows.map((row) => row.slug))], ["apple-iphone-15-pro"]);
   assert.deepEqual([...new Set(rows.map((row) => row.productTitle))], ["Apple iPhone 15 Pro"]);
   assert.deepEqual([...new Set(rows.map((row) => row.model))], ["iPhone 15 Pro"]);
-  assert.equal(new Set(rows.map((row) => row.sku)).size, 4);
-  assert.ok(rows.every((row) => !row.needsReview && row.sku.startsWith("APPLE-IPHONE-15-PRO-")));
+  assert.equal(new Set(rows.map(catalogVariantKey)).size, 4);
+  assert.ok(rows.every((row) => !row.needsReview && row.sku === null));
 });
 
 test("duplicates, conflicts and missing prices are flagged, never resolved silently", () => {
@@ -220,10 +222,10 @@ test("duplicates, conflicts and missing prices are flagged, never resolved silen
   assert.ok(one("Samsung A16 6/128 Black; Used").reviewReasons.includes("Price missing"));
   assert.ok(one("Samsung A16 6/128 Black 42500").reviewReasons.includes("Missing ';' separator before price"));
   assert.ok(one("Samsung A16 6/128 Black; 42500; BH 120").reviewReasons.some((reason) => reason.startsWith("Battery Health out of range")));
-  // PTA and Non-PTA of the same configuration are distinct variants with distinct SKUs.
+  // PTA and Non-PTA of the same configuration are distinct variants.
   const pta = normalize("Samsung A16 6/128 Black; 42500; PTA Approved\nSamsung A16 6/128 Black; 39000; Non-PTA");
   assert.ok(pta.every((row) => !row.needsReview));
-  assert.notEqual(pta[0].sku, pta[1].sku);
+  assert.notEqual(catalogVariantKey(pta[0]), catalogVariantKey(pta[1]));
 });
 
 test("a brand heading line sets the brand for following lines", () => {
@@ -231,4 +233,23 @@ test("a brand heading line sets the brand for following lines", () => {
   assert.equal(rows.length, 2);
   assert.ok(rows.every((row) => row.brand === "Samsung" && !row.needsReview));
   assert.deepEqual(rows.map((row) => row.productTitle), ["Samsung A16", "Samsung A26"]);
+});
+
+test("13. MacBook / laptop lines are Laptop; iPad / tab lines are Tablet; neither is a phone", () => {
+  const macbook = one("MacBook Air 13 M3 256 Midnight; 330000");
+  assert.equal(macbook.brand, "Apple");
+  assert.equal(macbook.productType, "Laptop");
+  assert.equal(macbook.fieldStatus.productType, "inferred");
+  // Laptop delivery is never inferred; only mobile phones default to Karachi Only.
+  assert.equal(macbook.deliveryScope, null);
+  assert.equal(macbook.fieldStatus.deliveryScope, "blank");
+  const karachiMacbook = one("MacBook Neo 256 Indigo; 250000; Karachi Only");
+  assert.equal(karachiMacbook.productType, "Laptop");
+  assert.equal(karachiMacbook.deliveryScope, "karachi_only");
+  assert.equal(karachiMacbook.fieldStatus.deliveryScope, "explicit");
+  assert.equal(one("Samsung Laptop Book4 16/512 Grey; 280000").productType, "Laptop");
+  assert.equal(one("iPad Air 11 128 Blue; 190000").productType, "Tablet");
+  assert.equal(one("Samsung Tab S9 8/128 Grey; 150000").productType, "Tablet");
+  assert.equal(one("Samsung A16 6/128 Black; 42500").productType, "Mobile Phone");
+  assert.equal(one("Samsung 25W Charger; 3500").productType, null);
 });

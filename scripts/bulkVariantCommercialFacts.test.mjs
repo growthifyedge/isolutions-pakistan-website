@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   applyBatchDefaults,
-  generatedVariantSku,
   matchingActiveRealCategoryTaxonomy,
   parseBulkCatalog,
   unresolvedVariantFacts,
@@ -28,8 +27,10 @@ test("four complete explicit variants preview with canonical facts", () => {
   });
   assert.equal(parsed.errors.length, 0);
   assert.equal(product.variants.length, 4);
+  // Supplied SKUs are parsed as written; the preview only accepts them as the existing
+  // SKU of a matched variant (new variants get a database-assigned SKU).
   assert.deepEqual(
-    product.variants.map((variant) => generatedVariantSku(product.slug, variant)),
+    product.variants.map((variant) => variant.sku),
     [
       "MOTO-G77-8-256-BLACK",
       "MOTO-G77-8-256-GREEN",
@@ -38,13 +39,7 @@ test("four complete explicit variants preview with canonical facts", () => {
     ],
   );
   for (const variant of product.variants) {
-    assert.deepEqual(
-      unresolvedVariantFacts(variant, {
-        sku: generatedVariantSku(product.slug, variant),
-        existingVariant: false,
-      }),
-      [],
-    );
+    assert.deepEqual(unresolvedVariantFacts(variant, { existingVariant: false }), []);
     assert.ok(variant.priceMinor > 0);
     assert.ok(variant.compareAtPriceMinor > variant.priceMinor);
     assert.ok(Number.isInteger(variant.inventory));
@@ -58,10 +53,7 @@ test("preview reports exact missing publication facts before write", () => {
   );
   const variant = product.variants[0];
   assert.deepEqual(
-    unresolvedVariantFacts(variant, {
-      sku: generatedVariantSku("example-phone", variant),
-      existingVariant: false,
-    }),
+    unresolvedVariantFacts(variant, { existingVariant: false }),
     ["PTA Status", "Condition", "Warranty", "Delivery", "Inventory"],
   );
 });
@@ -193,4 +185,39 @@ test("preview reuses the matched existing product category", async () => {
   assert.match(preview, /item\.id === existing\.category_id/);
   assert.match(preview, /realCategories = \[existingCategory\]/);
   assert.match(preview, /"REUSE CATEGORY"/);
+});
+
+test("legacy import uses server-assigned SKUs (202609240004)", async () => {
+  const migration = await readFile(
+    "supabase/migrations/202609240004_legacy_bulk_import_server_sku.sql",
+    "utf8",
+  );
+  const bulkImport = await readFile("src/admin/BulkImport.tsx", "utf8");
+  const parser = await readFile("src/lib/bulkCatalog.ts", "utf8");
+  // New variants must arrive without a SKU; the old long-SKU checks and builder are gone.
+  assert.match(migration, /SKU is assigned automatically; leave it blank for a new variant/);
+  assert.doesNotMatch(migration, /SKU disagrees with structured/);
+  assert.doesNotMatch(migration, /Missing SKU/);
+  assert.match(migration, /drop function if exists public\.catalog_variant_sku/);
+  // The post-write sync never touches the SKU of an existing variant.
+  assert.doesNotMatch(migration, /set sku =/);
+  assert.match(migration, /set ram_display = nullif/);
+  assert.match(migration, /apply_catalog_bulk_import_phase4_legacy/);
+  assert.match(migration, /apply 202609240003_catalog_sku_sequences\.sql first/);
+  // Client: no SKU generation; SKU is not a required fact; new variants send a blank SKU.
+  assert.doesNotMatch(parser, /generatedVariantSku/);
+  assert.doesNotMatch(bulkImport, /generatedVariantSku/);
+  assert.doesNotMatch(parser, /missing\.push\("SKU"\)/);
+  assert.match(bulkImport, /const skuResolved = match\?\.sku \?\? "";/);
+});
+
+test("Admin editor never sends a SKU and shows existing SKUs read-only", async () => {
+  const admin = await readFile("src/admin/AdminCatalog.tsx", "utf8");
+  assert.doesNotMatch(admin, /sku: newVariant/);
+  assert.doesNotMatch(admin, /setNewVariant\(\{ \.\.\.newVariant, sku/);
+  assert.match(admin, /SKU assigned automatically\./);
+  assert.match(admin, /value=\{variantEditing\.sku\} readOnly/);
+  assert.doesNotMatch(admin, /setVariantEditing\(\{ \.\.\.variantEditing, sku/);
+  const update = admin.slice(admin.indexOf("const saveVariantDetails"), admin.indexOf("const deleteVariant"));
+  assert.doesNotMatch(update, /\bsku\b/);
 });

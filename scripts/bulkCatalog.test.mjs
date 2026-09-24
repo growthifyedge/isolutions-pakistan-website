@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
-  generatedVariantSku,
   applyBatchDefaults,
   matchingActiveRealTaxonomy,
   normalizeCapacity,
@@ -71,8 +70,8 @@ test("existing product matching uses slug then exact brand plus title", () => {
     /normalized\(item\.title\) === normalized\(product\.title\)/,
   );
 });
-test("existing variant matching uses SKU then exact explicit attributes", () => {
-  assert.match(admin, /item\.sku === variant\.sku/);
+test("existing variant matching uses exact explicit attributes, never SKU", () => {
+  assert.doesNotMatch(admin, /item\.sku === variant\.sku/);
   assert.match(admin, /matchesVariant\(item, variant\)/);
   assert.match(rpc, /ambiguous_variant_match/);
 });
@@ -93,13 +92,9 @@ test("repeated identical import reuses product and variant identities", () => {
   assert.match(rpc, /sku = v_variant ->> 'sku'/);
 });
 test("Motorola G77 cannot duplicate through normalized identity matching", () => {
-  const sku = generatedVariantSku("motorola-g77", {
-    ...parsed.products[0].variants[0],
-    ram: "8 GB",
-    storage: "256 GB",
-    color: "Black",
-  });
-  assert.equal(sku, "MOTOROLA-G77-8-GB-256-GB-BLACK");
+  // Variants match on normalized RAM / Storage / Color (plus explicit PTA/condition), not SKU.
+  assert.match(admin, /normalized\(existing\.ram_display\) === normalized\(variant\.ram\)/);
+  assert.match(admin, /normalized\(existing\.color_finish\) === normalized\(variant\.color\)/);
   assert.match(rpc, /brand_id = v_brand_id and lower\(btrim\(title\)\)/);
 });
 test("Apple MacBook Neo cannot duplicate and prices stay bigint", () => {

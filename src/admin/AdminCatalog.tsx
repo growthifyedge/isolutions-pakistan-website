@@ -363,7 +363,6 @@ export function Phase4ProductEditor() {
   const [recommendationQuery, setRecommendationQuery] = useState("");
   const [message, setMessage] = useState("");
   const [newVariant, setNewVariant] = useState({
-    sku: "",
     ram_display: "",
     storage_display: "",
     color_finish: "",
@@ -663,9 +662,10 @@ export function Phase4ProductEditor() {
       setMessage("Compare-at Price PKR must be greater than Price PKR.");
       return;
     }
+    // No SKU is sent: the database assigns the next sequential SKU for the
+    // product's category (e.g. MB001) when the variant is inserted.
     const { error } = await supabase.from("product_variants").insert({
       product_id: productId,
-      sku: newVariant.sku.trim(),
       ram_display: newVariant.ram_display || null,
       storage_display: newVariant.storage_display || null,
       color_finish: newVariant.color_finish || null,
@@ -675,10 +675,9 @@ export function Phase4ProductEditor() {
       condition: newVariant.condition,
       delivery_scope: newVariant.delivery_scope || null,
     });
-    setMessage(error?.message ?? "Explicit variant added.");
+    setMessage(error?.message ?? "Explicit variant added. SKU assigned automatically.");
     if (!error) {
       setNewVariant({
-        sku: "",
         ram_display: "",
         storage_display: "",
         color_finish: "",
@@ -700,16 +699,11 @@ export function Phase4ProductEditor() {
   };
   const saveVariantDetails = async () => {
     if (!supabase || !variantEditing || variantSaving) return;
-    const sku = variantEditing.sku.trim();
-    if (!sku) {
-      setMessage("Variant SKU is required.");
-      return;
-    }
     setVariantSaving(true);
+    // The SKU is never sent: existing SKUs are permanent and read-only.
     const { error } = await supabase
       .from("product_variants")
       .update({
-        sku,
         storage_display: variantEditing.storage_display?.trim() || null,
         ram_display: variantEditing.ram_display?.trim() || null,
         color_finish: variantEditing.color_finish?.trim() || null,
@@ -1030,12 +1024,8 @@ export function Phase4ProductEditor() {
               <div className="form-grid">
                 <label>
                   SKU
-                  <input
-                    value={newVariant.sku}
-                    onChange={(e) =>
-                      setNewVariant({ ...newVariant, sku: e.target.value })
-                    }
-                  />
+                  <input value="Assigned on save" disabled aria-disabled="true" />
+                  <small>SKU assigned automatically.</small>
                 </label>
                 <label>
                   Price PKR
@@ -1425,7 +1415,7 @@ export function Phase4ProductEditor() {
             <h2 id="edit-variant-title">Edit explicit variant</h2>
             <p>Update only verified commercial identity fields. Inventory remains in the Inventory tab.</p>
             <div className="form-grid">
-              <label className="wide">SKU<input value={variantEditing.sku} onChange={(event) => setVariantEditing({ ...variantEditing, sku: event.target.value })} /></label>
+              <label className="wide">SKU<input value={variantEditing.sku} readOnly aria-readonly="true" /><small>SKU assigned automatically and cannot be changed.</small></label>
               <label>Storage<input value={variantEditing.storage_display ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, storage_display: event.target.value || null })} /></label>
               <label>RAM<input value={variantEditing.ram_display ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, ram_display: event.target.value || null })} /></label>
               <label>Color / finish<input value={variantEditing.color_finish ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, color_finish: event.target.value || null })} /></label>

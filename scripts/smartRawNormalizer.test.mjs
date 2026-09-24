@@ -7,7 +7,7 @@ const product = (source) => normalizeRawCatalog(source).products[0];
 test("normalizes a shared-price color group", () => {
   const parsed = product("Samsung\nA07 4/64 black/green @ 34800");
   assert.equal(parsed.brand, "Samsung");
-  assert.equal(parsed.category, "Smartphones");
+  assert.equal(parsed.category, "Mobile Phones");
   assert.deepEqual(parsed.variants.map((item) => [item.ram, item.storage, item.color, item.pricePkr]), [
     ["4 GB", "64 GB", "black", "34800"], ["4 GB", "64 GB", "green", "34800"],
   ]);
@@ -36,9 +36,11 @@ test("keeps explicit non-PTA and Samsung tablet context", () => {
   assert.equal(tab.defaultWarranty, "Non Warranty");
 });
 
-test("flags a missing price and maps power banks outside Smartphones", () => {
+test("flags a missing price and maps power banks to Accessories", () => {
   const missing = product("Infinix\nHot 70 6/128 black/blue/silver/volt @");
   assert.ok(missing.variants.every((item) => item.warnings.includes("Price missing or invalid")));
   const powerBank = product("Itel\nITel Power Bank 100000 mAh @ 20200");
-  assert.equal(powerBank.category, "Power Banks");
+  assert.equal(powerBank.category, "Accessories");
+  assert.equal(product("Apple\nMacBook Air M3 16/512 Midnight @ 330000").category, "Laptops");
+  assert.equal(product("Apple\niPad Air 11 128 Blue @ 190000").category, "Tablets");
 });

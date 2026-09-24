@@ -145,12 +145,16 @@ export function matchingActiveRealCategoryTaxonomy<
 >(items: T[], requestedCategory: string) {
   const requestedName = normalizedName(requestedCategory);
   const requestedSlug = slugify(requestedCategory);
+  // Older category names resolve to the locked structure (Mobile Phones, Accessories,
+  // Gadgets > Laptops/Tablets) so the legacy parser never recreates outdated categories.
   const equivalentNames: Record<string, string[]> = {
     smartphones: ["mobile phones"],
     "mobile phones": ["smartphones"],
+    "mobile accessories": ["accessories"],
+    accessories: ["mobile accessories"],
     tablets: ["ipad & tablets", "android tablets"],
-    "power banks": ["power bank"],
-    "audio & earbuds": ["audio", "earbuds"],
+    "power banks": ["power bank", "accessories"],
+    "audio & earbuds": ["audio", "earbuds", "accessories"],
   };
   const acceptedNames = new Set([
     requestedName,
@@ -736,10 +740,11 @@ const rawColors = (value: string) => value.trim().replace(/^[,/\s]+|[,/\s]+$/g, 
 function rawCategoryFor(title: string, contextCategory: string | null) {
   if (contextCategory) return contextCategory;
   const value = normalizedName(title);
-  if (/power\s*bank/.test(value)) return "Power Banks";
-  if (/buds?|earbuds?|headphones?/.test(value)) return "Audio & Earbuds";
-  if (/\b(tab|tablet)\b/.test(value)) return "Tablets";
-  return "Smartphones";
+  if (/power\s*bank/.test(value)) return "Accessories";
+  if (/buds?|earbuds?|headphones?/.test(value)) return "Accessories";
+  if (/\b(macbook|laptop|notebook)\b/.test(value)) return "Laptops";
+  if (/\b(tab|tablet|ipad)\b/.test(value)) return "Tablets";
+  return "Mobile Phones";
 }
 
 function applyRawFact(product: BulkProduct, line: string) {
@@ -886,25 +891,6 @@ export function parseBulkCatalog(text: string): BulkParseResult {
     : parseRough(normalized);
 }
 
-export function generatedVariantSku(productSlug: string, variant: BulkVariant) {
-  const structuredIdentity = [variant.ram, variant.storage, variant.color].filter(Boolean);
-  if (!structuredIdentity.length && variant.sku) return variant.sku.trim();
-  const skuTokens = new Set(
-    (variant.sku ?? "").toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean),
-  );
-  const identityTokens = [
-    variant.ram?.match(/\d+/)?.[0],
-    variant.storage?.match(/\d+/)?.[0],
-    ...slugify(variant.color ?? "").toUpperCase().split("-").filter(Boolean),
-  ].filter(Boolean) as string[];
-  if (variant.sku && identityTokens.every((token) => skuTokens.has(token)))
-    return variant.sku.trim();
-  return [productSlug, ...structuredIdentity]
-    .filter(Boolean)
-    .map((part) => slugify(String(part)).toUpperCase())
-    .join("-");
-}
-
 export function requiresExplicitPricedVariant(
   existingProduct: boolean,
   variants: BulkVariant[],
@@ -1042,12 +1028,13 @@ export function bulkInventoryPreview(
   return { label: "Inventory: unresolved", mode: "unresolved" as const };
 }
 
+// SKU is not a required fact: new variants get a database-assigned SKU on import and
+// existing variants keep theirs.
 export function unresolvedVariantFacts(
   variant: BulkVariant,
-  options: { sku: string; existingVariant: boolean },
+  options: { existingVariant: boolean },
 ) {
   const missing: string[] = [];
-  if (!options.sku.trim()) missing.push("SKU");
   if (variant.priceMinor === null || variant.priceMinor <= 0) missing.push("Price");
   if (variant.ptaStatus === "unknown") missing.push("PTA Status");
   if (variant.condition === "unknown") missing.push("Condition");

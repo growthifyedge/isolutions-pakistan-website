@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import ExcelJS from "exceljs";
-import { normalizeStockLines } from "../src/lib/catalogSheet.ts";
+import { readFileSync } from "node:fs";
+import {
+  CATALOG_SKU_PATTERN,
+  CATALOG_SKU_PREFIX_BY_CATEGORY_SLUG,
+  CATALOG_SKU_PREFIX_BY_PRODUCT_TYPE,
+  catalogSkuPending,
+  normalizeStockLines,
+} from "../src/lib/catalogSheet.ts";
 import { STAGING_PROFILES, applyStagingProfile } from "../src/lib/catalogSheet.ts";
 import {
+  CATALOG_LISTS,
   CATALOG_TEMPLATE_VERSION,
   catalogStagingMissingFacts,
   categoriesForProductType,
@@ -17,7 +25,8 @@ import {
 
 const reference = {
   brands: ["Samsung", "Xiaomi", "Oppo", "Apple", "Vivo", "Infinix", "Tecno", "Realme"],
-  categories: ["Mobile Phones", "Tablets", "Chargers"],
+  // Locked category structure (Gadgets > Laptops / Tablets), as after 202609240001.
+  categories: ["Mobile Phones", "Accessories", "Gadgets", "Laptops", "Tablets"],
 };
 const normalize = (text) =>
   normalizeStockLines(text, { brands: reference.brands.map((name) => ({ name })) }).rows;
@@ -54,6 +63,7 @@ test("1-3. workbook has Products, Specifications and a hidden Lists sheet with e
   assert.deepEqual(lists.getRow(1).values.slice(1), ["Brands", "Categories", "Action", "Product Type", "PTA Status", "Condition", "Delivery Scope", "Template"]);
   assert.equal(lists.getCell("H2").value, CATALOG_TEMPLATE_VERSION);
   assert.equal(lists.getCell("A2").value, "Apple");
+  assert.deepEqual(lists.getColumn(4).values.slice(2), ["Mobile Phone", "Accessory", "Gadget", "Tablet", "Laptop"]);
   const products = workbook.getWorksheet("Products");
   assert.equal(products.views[0].state, "frozen");
   assert.ok(products.autoFilter);
@@ -92,7 +102,7 @@ test("5-6. used iPhone keeps BH/CC; blank BH/CC stay blank", async () => {
   assert.equal(used.ptaStatus, "not_approved");
   assert.equal(used.batteryHealth, 89);
   assert.equal(used.cycleCount, 312);
-  assert.equal(used.sku, "APPLE-IPHONE-15-PRO-256-NATURAL-NONPTA-USED-BH89-C312");
+  assert.equal(used.sku, null);
   assert.equal(used.priceMinor, 26_500_000);
   assert.equal(plain.batteryHealth, null);
   assert.equal(plain.cycleCount, null);
@@ -137,11 +147,11 @@ test("10. unknown brand needs review and is never created", async () => {
 test("11. duplicate SKU ignoring case needs review on every duplicate row", async () => {
   const data = await roundTrip(normalize("Samsung A16 6/128 Black; 42500\nSamsung A16 6/128 Blue; 42500"), (workbook) => {
     const sheet = workbook.getWorksheet("Products");
-    sheet.getRow(2).getCell(column("SKU")).value = "a16-dup";
-    sheet.getRow(3).getCell(column("SKU")).value = "A16-DUP";
+    sheet.getRow(2).getCell(column("SKU")).value = "mb001";
+    sheet.getRow(3).getCell(column("SKU")).value = "MB001";
   });
   assert.ok(data.rows.every((row) => row.needsReview && row.fieldStatus.sku === "needs_review"));
-  assert.ok(data.rows[0].reviewReasons.some((reason) => reason.startsWith("Duplicate SKU A16-DUP")));
+  assert.ok(data.rows[0].reviewReasons.some((reason) => reason.startsWith("Duplicate SKU MB001")));
 });
 
 test("11b. duplicate variant detection includes PTA and Condition", async () => {
@@ -150,7 +160,7 @@ test("11b. duplicate variant detection includes PTA and Condition", async () => 
   assert.ok(distinct.rows.every((row) => !row.reviewReasons.some((reason) => reason.startsWith("Duplicate"))));
   const duplicate = await roundTrip(rows, (workbook) => {
     workbook.getWorksheet("Products").getRow(3).getCell(column("PTA Status")).value = "PTA Approved";
-    workbook.getWorksheet("Products").getRow(3).getCell(column("SKU")).value = "A16-SECOND";
+    workbook.getWorksheet("Products").getRow(3).getCell(column("SKU")).value = "A16S2";
   });
   assert.ok(duplicate.rows[1].reviewReasons.includes("Duplicate variant (same as Products row 2)"));
 });
@@ -204,9 +214,9 @@ test("15. a 100-row workbook round-trips without collisions", async () => {
   });
   assert.equal(data.rows.length, 100);
   assert.deepEqual(data.rows.filter((row) => row.needsReview).map((row) => `${row.sourceLine}: ${row.reviewReasons}`), []);
-  assert.equal(new Set(data.rows.map((row) => row.sku.toLowerCase())).size, 100);
+  // New variants carry no SKU: the database assigns one per variant on import.
+  assert.ok(data.rows.every((row) => row.sku === null && row.fieldStatus.sku === "blank"));
   data.rows.forEach((row, index) => {
-    assert.equal(row.sku, source[index].sku);
     assert.equal(row.priceMinor, source[index].priceMinor);
     assert.equal(row.ptaStatus, "approved");
     assert.equal(row.category, "Mobile Phones");
@@ -234,10 +244,12 @@ test("owner-entered values: labels, brand prefix in model, percent BH, Mobile + 
   assert.equal(preview.products[0].variants[0].batteryHealth, 91);
 });
 
-// Real active categories as currently in the database (read-only check, 2026-09-24).
-const liveCategories = ["Accessories", "Laptops", "Mobile Accessories", "Smartphones"];
-const stage = (text, profile = "none", categories = liveCategories) => {
-  const ref = { brands: reference.brands, categories };
+// Active categories after migration 202609240001 (Gadgets > Laptops / Tablets).
+const lockedCategories = reference.categories;
+// Active categories in the live database before that migration (read-only check, 2026-09-24).
+const preMigrationCategories = ["Accessories", "Laptops", "Mobile Accessories", "Smartphones"];
+const stage = (text, profile = "none", categories = lockedCategories, existingSkus = []) => {
+  const ref = { brands: reference.brands, categories, existingSkus };
   return validateCatalogSheet(applyStagingProfile(normalize(text), profile), [], ref).rows;
 };
 
@@ -247,7 +259,7 @@ test("v2 A. Android Box Pack / PTA Approved profile fills blanks only", () => {
   assert.equal(row.brand, "Samsung");
   assert.equal(row.model, "A16");
   assert.equal(row.productType, "Mobile Phone");
-  assert.equal(row.category, "Smartphones");
+  assert.equal(row.category, "Mobile Phones");
   assert.equal(row.condition, "brand_new");
   assert.equal(row.fieldStatus.condition, "default");
   assert.equal(row.ptaStatus, "approved");
@@ -255,7 +267,7 @@ test("v2 A. Android Box Pack / PTA Approved profile fills blanks only", () => {
   assert.equal(row.deliveryScope, "karachi_only");
   assert.equal(row.stock, 10);
   assert.equal(row.warranty, null);
-  assert.equal(row.sku, "SAMSUNG-A16-6-128-BLACK-PTA");
+  assert.equal(row.sku, null);
   assert.equal(row.needsReview, false);
   // Explicit row values always win over the profile.
   const [explicit] = stage("iPhone 15 Pro 256 Natural; 265000; Used; Non-PTA; Qty 3", "android_box_pack_pta");
@@ -269,13 +281,13 @@ test("v2 B. mixed stock without a profile leaves PTA/Condition/Warranty blank wi
   const [android] = stage("Samsung A16 6/128 Black; 42500");
   assert.equal(android.ptaStatus, null);
   assert.equal(android.condition, null);
-  assert.equal(android.category, "Smartphones");
+  assert.equal(android.category, "Mobile Phones");
   assert.equal(android.needsReview, false);
   const [iphone] = stage("iPhone 15 Pro 256 Natural; 265000; Used; Non-PTA; BH 89%; Cycles 312");
   assert.equal(iphone.brand, "Apple");
   assert.equal(iphone.model, "iPhone 15 Pro");
   assert.equal(iphone.productType, "Mobile Phone");
-  assert.equal(iphone.category, "Smartphones");
+  assert.equal(iphone.category, "Mobile Phones");
   assert.equal(iphone.condition, "used");
   assert.equal(iphone.conditionGrade, "A++");
   assert.equal(iphone.ptaStatus, "not_approved");
@@ -287,20 +299,59 @@ test("v2 B. mixed stock without a profile leaves PTA/Condition/Warranty blank wi
   assert.equal(iphone.needsReview, false);
 });
 
-test("v2 category mapping uses existing categories only and flags ambiguity", () => {
-  assert.deepEqual(categoriesForProductType("Mobile Phone", liveCategories), ["Smartphones"]);
-  assert.deepEqual(categoriesForProductType("Accessory", liveCategories), ["Accessories", "Mobile Accessories"]);
-  assert.deepEqual(categoriesForProductType("Tablet", liveCategories), []);
-  const [ambiguous] = validateCatalogSheet(
-    [{ ...normalize("Samsung A16 6/128 Black; 42500")[0], productType: "Accessory" }],
+test("v2 category mapping: each Product Type resolves to exactly one locked category", () => {
+  // 1-5. Mobile Phone, Accessory, Gadget, Tablet, Laptop
+  assert.deepEqual(categoriesForProductType("Mobile Phone", lockedCategories), ["Mobile Phones"]);
+  assert.deepEqual(categoriesForProductType("Accessory", lockedCategories), ["Accessories"]);
+  assert.deepEqual(categoriesForProductType("Gadget", lockedCategories), ["Gadgets"]);
+  assert.deepEqual(categoriesForProductType("Tablet", lockedCategories), ["Tablets"]);
+  assert.deepEqual(categoriesForProductType("Laptop", lockedCategories), ["Laptops"]);
+  assert.deepEqual(CATALOG_LISTS.productType, ["Mobile Phone", "Accessory", "Gadget", "Tablet", "Laptop"]);
+  const byType = (productType) =>
+    validateCatalogSheet([{ ...normalize("Samsung A16 6/128 Black; 42500")[0], productType }], [], reference).rows[0];
+  assert.equal(byType("Accessory").category, "Accessories");
+  assert.equal(byType("Gadget").category, "Gadgets");
+  assert.equal(byType("Accessory").fieldStatus.category, "inferred");
+  const [phone] = stage("Samsung A16 6/128 Black; 42500");
+  assert.equal(phone.category, "Mobile Phones");
+  const [ipad] = stage("iPad Air 11 128 Blue; 190000");
+  assert.equal(ipad.productType, "Tablet");
+  assert.equal(ipad.category, "Tablets");
+  const [tab] = stage("Samsung Tab S9 8/128 Grey; 150000");
+  assert.equal(tab.category, "Tablets");
+  assert.equal(tab.deliveryScope, null);
+});
+
+test("v2 MacBook line is a Laptop in Laptops, never a Mobile Phone, and keeps its delivery", () => {
+  const [macbook] = stage("MacBook Neo 256 Indigo; 250000; Karachi Only");
+  assert.equal(macbook.brand, "Apple");
+  assert.equal(macbook.productType, "Laptop");
+  assert.equal(macbook.category, "Laptops");
+  assert.equal(macbook.deliveryScope, "karachi_only");
+  assert.equal(macbook.needsReview, false);
+  // Laptop delivery is never auto-set (neither Karachi Only nor Nationwide).
+  const [blank] = stage("MacBook Air 13 M3 256 Midnight; 330000");
+  assert.equal(blank.productType, "Laptop");
+  assert.equal(blank.deliveryScope, null);
+});
+
+test("v2 Category / Product Type mismatch needs review; unknown or outdated names are never created", () => {
+  const rows = normalize("Samsung A16 6/128 Black; 42500\nMacBook Neo 256 Indigo; 250000");
+  const [mismatch, laptopAsPhone] = validateCatalogSheet(
+    [{ ...rows[0], category: "Accessories" }, { ...rows[1], category: "Mobile Phones" }],
     [],
-    { brands: reference.brands, categories: liveCategories },
+    reference,
   ).rows;
-  assert.equal(ambiguous.category, null);
-  assert.ok(ambiguous.reviewReasons.includes("Category is ambiguous for Accessory: Accessories / Mobile Accessories"));
-  const [tablet] = stage("Samsung Tab S9 8/128 Grey; 150000");
-  assert.equal(tablet.productType, "Tablet");
-  assert.ok(tablet.reviewReasons.includes("No active category matches Product Type Tablet"));
+  assert.ok(mismatch.needsReview);
+  assert.equal(mismatch.fieldStatus.category, "needs_review");
+  assert.ok(mismatch.reviewReasons.includes('Category "Accessories" does not match Product Type Mobile Phone (expected Mobile Phones)'));
+  assert.ok(laptopAsPhone.reviewReasons.includes('Category "Mobile Phones" does not match Product Type Laptop (expected Laptops)'));
+  // Before migration 202609240001 the locked names do not exist yet: review, never create.
+  const [beforeMigration] = stage("Samsung A16 6/128 Black; 42500", "none", preMigrationCategories);
+  assert.equal(beforeMigration.category, null);
+  assert.ok(beforeMigration.reviewReasons.includes("No active category matches Product Type Mobile Phone"));
+  const [outdated] = validateCatalogSheet([{ ...rows[0], category: "Smartphones" }], [], reference).rows;
+  assert.ok(outdated.reviewReasons.includes('Category not found among active categories: "Smartphones"'));
   const [noType] = stage("Samsung 25W Charger; 3500");
   assert.ok(noType.reviewReasons.includes("Category cannot be resolved without a Product Type"));
 });
@@ -318,7 +369,80 @@ test("v2 uploaded Mobile Phone with blank delivery resolves to Karachi Only", as
   assert.equal(row.needsReview, false);
 });
 
-test("v2 preview requires only SKU, Price and Stock", () => {
-  assert.deepEqual(catalogStagingMissingFacts({ priceMinor: 4_250_000, inventory: 10 }, "SAMSUNG-A16"), []);
-  assert.deepEqual(catalogStagingMissingFacts({ priceMinor: null, inventory: -1 }, " "), ["SKU", "Price", "Stock"]);
+test("v2 preview requires only Price and Stock (SKU is assigned on import)", () => {
+  assert.deepEqual(catalogStagingMissingFacts({ priceMinor: 4_250_000, inventory: 10 }), []);
+  assert.deepEqual(catalogStagingMissingFacts({ priceMinor: null, inventory: -1 }), ["Price", "Stock"]);
+});
+
+// ---------------------------------------------------------------------------
+// Server-assigned sequential SKUs (MB001 / AC001 / GD001 / MC001 / IP001)
+// ---------------------------------------------------------------------------
+
+const withSku = (row, sku) => ({ ...row, sku, fieldStatus: { ...row.fieldStatus, sku: "explicit" } });
+const validate = (rows, existingSkus = []) =>
+  validateCatalogSheet(rows, [], { ...reference, existingSkus }).rows;
+
+test("SKU prefixes: product type and category slug map to MB / AC / GD / MC / IP", () => {
+  assert.deepEqual(CATALOG_SKU_PREFIX_BY_PRODUCT_TYPE, {
+    "Mobile Phone": "MB", Accessory: "AC", Gadget: "GD", Laptop: "MC", Tablet: "IP",
+  });
+  // Mirrors public.catalog_sku_prefix() in 202609240003.
+  assert.deepEqual(CATALOG_SKU_PREFIX_BY_CATEGORY_SLUG, {
+    "mobile-phones": "MB", "mobile-accessories": "AC", gadgets: "GD", laptops: "MC", tablets: "IP",
+  });
+  assert.equal(catalogSkuPending("MB"), "MB — assigned on import");
+  assert.equal(catalogSkuPending("AC"), "AC — assigned on import");
+  for (const sku of ["MB001", "AC001", "GD001", "MC001", "IP001", "IP999"]) assert.match(sku, CATALOG_SKU_PATTERN);
+  for (const sku of ["MB1000", "XX001", "MB01", "mb001", "A1B2C", "APPLE-20W-USB-C-CHARGER"]) assert.doesNotMatch(sku, CATALOG_SKU_PATTERN);
+});
+
+test("SKU: normalizer and blank Excel SKU leave SKU blank; nothing is generated client-side", async () => {
+  const rows = normalize("Samsung A16 6/128 Black; 42500\nMacBook Air 13 M3 256 Midnight; 330000\niPad Air 11 128 Blue; 190000");
+  assert.ok(rows.every((row) => row.sku === null && row.fieldStatus.sku === "blank"));
+  const data = await roundTrip(rows);
+  assert.ok(data.rows.every((row) => row.sku === null && !row.reviewReasons.some((reason) => reason.includes("SKU"))));
+  const variants = catalogSheetToBulkParseResult(data).products.flatMap((product) => product.variants);
+  assert.ok(variants.every((variant) => variant.sku === null));
+});
+
+test("SKU: a supplied SKU is only accepted as an existing SKU of the same product", () => {
+  const [row] = normalize("Samsung A16 6/128 Black; 42500");
+  const existing = [{ sku: "MB007", productSlug: "samsung-a16" }, { sku: "MB008", productSlug: "xiaomi-redmi-note-14" }];
+  const [kept] = validate([withSku(row, "mb007")], existing);
+  assert.equal(kept.sku, "MB007");
+  assert.equal(kept.needsReview, false);
+  const [other] = validate([withSku(row, "MB008")], existing);
+  assert.ok(other.reviewReasons.includes("SKU MB008 belongs to another product (xiaomi-redmi-note-14)"));
+  // A made-up SKU, even in the right format, is never used for a new variant.
+  const [invented] = validate([withSku(row, "MB050")], existing);
+  assert.equal(invented.fieldStatus.sku, "needs_review");
+  assert.ok(invented.reviewReasons.includes("SKU MB050 is not an existing catalog SKU; leave SKU blank for new variants (assigned on import)"));
+  assert.equal(invented.sku, "MB050");
+});
+
+test("SKU: an existing legacy long SKU of the same product is preserved, never rewritten", () => {
+  const [macbook] = normalize("MacBook Neo 256 Indigo; 250000; Karachi Only");
+  const legacy = "APPLE-MACBOOK-NEO-256-INDIGO";
+  const [kept] = validate([withSku(macbook, legacy)], [{ sku: legacy, productSlug: "apple-macbook-neo" }]);
+  assert.equal(kept.sku, legacy);
+  assert.equal(kept.needsReview, false);
+});
+
+test("SKU: a duplicate supplied SKU needs review on every row", () => {
+  const [first, second] = normalize("Samsung A16 6/128 Black; 42500\nSamsung A16 6/128 Blue; 42500");
+  const rows = validate([withSku(first, "MB007"), withSku(second, "mb007")], [{ sku: "MB007", productSlug: "samsung-a16" }]);
+  assert.ok(rows.every((row) => row.needsReview && row.reviewReasons.some((reason) => reason.startsWith("Duplicate SKU MB007"))));
+});
+
+test("SKU preview: matching never uses SKU; matched variant keeps its SKU; new variant shows the prefix only", () => {
+  const source = readFileSync(new URL("../src/admin/BulkImport.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  assert.ok(source.includes("existing?.product_variants.filter((item) =>\n                matchesVariant(item, variant),"));
+  assert.ok(!source.includes("item.sku === variant.sku"));
+  assert.ok(!source.includes("generatedVariantSku"));
+  assert.ok(source.includes('const skuResolved = match?.sku ?? "";'));
+  assert.ok(source.includes("existing SKUs are kept"));
+  assert.ok(source.includes("SKU is assigned automatically; leave SKU blank for a new variant"));
+  assert.ok(source.includes("catalogSkuPending(variant.skuPrefix)"));
+  assert.ok(source.includes("CATALOG_SKU_PREFIX_BY_CATEGORY_SLUG[effectiveCategorySlug]"));
+  assert.ok(source.includes("// Blank for a new variant: the database assigns its SKU.\n          sku: variant.skuResolved,"));
 });

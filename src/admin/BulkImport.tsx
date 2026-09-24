@@ -14,7 +14,6 @@ import {
   BatchDefaults,
   applyBatchDefaults,
   bulkInventoryPreview,
-  generatedVariantSku,
   matchingActiveRealCategoryTaxonomy,
   matchingActiveRealTaxonomy,
   requiresExplicitPricedVariant,
@@ -24,9 +23,12 @@ import {
   unresolvedVariantFacts,
 } from "../lib/bulkCatalog";
 import {
+  CATALOG_SKU_PREFIX_BY_CATEGORY_SLUG,
   STAGING_PROFILES,
   applyStagingProfile,
+  catalogSkuPending,
   normalizeStockLines,
+  type CatalogSkuPrefix,
   type StagingProfileId,
 } from "../lib/catalogSheet";
 import {
@@ -74,7 +76,10 @@ type ExistingProduct = {
 type PreviewVariant = BulkVariant & {
   action: string;
   id: string | null;
+  /** Existing variant SKU (kept as-is), or "" for a new variant: assigned on import. */
   skuResolved: string;
+  /** Prefix the database will use for a new variant's SKU; null if the category has none. */
+  skuPrefix: CatalogSkuPrefix | null;
   inventoryLabel: string;
 };
 type PreviewProduct = Omit<BulkProduct, "variants"> & {
@@ -194,6 +199,7 @@ export function BulkImport() {
       const brands = (brandResult.data ?? []) as Taxonomy[];
       const categories = (categoryResult.data ?? []) as Taxonomy[];
       const products = (productResult.data ?? []) as ExistingProduct[];
+      const catalogSheet = parsed.format === "catalog_sheet";
       const rows = parsed.products.map((product): PreviewProduct => {
         const blocked = [...product.warnings];
         const realBrands = product.brandExplicit
@@ -263,6 +269,17 @@ export function BulkImport() {
               : "NEEDS REVIEW";
         const categoryId =
           realCategories.length === 1 ? realCategories[0].id : null;
+        // The SKU prefix comes from the product's category, exactly as the database
+        // derives it when it assigns the SKU (MB/AC/GD/MC/IP).
+        const effectiveCategoryId =
+          categoryId ?? (existing && !product.category ? existing.category_id : null);
+        const effectiveCategorySlug = categories.find(
+          (item) => item.id === effectiveCategoryId,
+        )?.slug;
+        const skuPrefix: CatalogSkuPrefix | null =
+          (effectiveCategorySlug &&
+            CATALOG_SKU_PREFIX_BY_CATEGORY_SLUG[effectiveCategorySlug]) ||
+          null;
         if (requiresExplicitPricedVariant(Boolean(existing), product.variants))
           blocked.push("No explicit priced variant parsed");
         if (!existing && !product.category)
@@ -367,16 +384,11 @@ export function BulkImport() {
                   ? ("inherited from product" as const)
                   : parsedVariant.ptaSource,
             };
-            const canonicalSku = generatedVariantSku(
-              existing?.slug ?? requestedSlug,
-              variant,
-            );
+            // SKUs are identifiers only: variants match on product identity +
+            // variant attributes, never on SKU.
             const matches =
-              existing?.product_variants.filter(
-                (item) =>
-                  item.sku === variant.sku ||
-                  item.sku === canonicalSku ||
-                  matchesVariant(item, variant),
+              existing?.product_variants.filter((item) =>
+                matchesVariant(item, variant),
               ) ?? [];
             const variantBlocked = [...variant.warnings];
             if (matches.length > 1)
@@ -430,14 +442,31 @@ export function BulkImport() {
             const effectiveDeliverySource = preserveExistingDelivery
               ? "Owner supplied explicitly"
               : variant.deliverySource;
-            const skuResolved = canonicalSku || match?.sku || "";
+            // A matched existing variant keeps its SKU; a new variant is sent with a
+            // blank SKU and the database assigns the next one for its prefix.
+            const suppliedSku = variant.sku?.trim().toUpperCase() ?? "";
+            const skuResolved = match?.sku ?? "";
+            if (match) {
+              if (suppliedSku && suppliedSku !== match.sku.toUpperCase())
+                variantBlocked.push(
+                  `${variant.source}: SKU ${suppliedSku} differs from the existing variant SKU ${match.sku}; existing SKUs are kept`,
+                );
+            } else {
+              if (suppliedSku)
+                variantBlocked.push(
+                  `${variant.source}: SKU is assigned automatically; leave SKU blank for a new variant (got ${suppliedSku})`,
+                );
+              if (!skuPrefix)
+                variantBlocked.push(
+                  `${variant.source}: No SKU prefix for this category; use Mobile Phones, Accessories, Gadgets, Laptops or Tablets`,
+                );
+            }
             // v2 staging only blocks on genuinely required values; blank Warranty,
             // PTA, Condition, BH and Cycle Count are allowed while staging.
             const missingFacts =
-              parsed.format === "catalog_sheet"
-                ? catalogStagingMissingFacts(variant, skuResolved)
+              catalogSheet
+                ? catalogStagingMissingFacts(variant)
                 : unresolvedVariantFacts(variant, {
-                    sku: skuResolved,
                     existingVariant: Boolean(match),
                   });
             variantBlocked.push(
@@ -448,7 +477,6 @@ export function BulkImport() {
             const unchanged = Boolean(
               match &&
               variant.inventory === null &&
-              match.sku === skuResolved &&
               normalized(match.ram_display) === normalized(variant.ram) &&
               normalized(match.storage_display) === normalized(variant.storage) &&
               normalized(match.color_finish) === normalized(variant.color) &&
@@ -477,6 +505,7 @@ export function BulkImport() {
               warnings: [...new Set(variantBlocked)],
               id: match?.id ?? null,
               skuResolved,
+              skuPrefix,
               inventoryLabel: inventoryIntent.label,
               action: variantBlocked.length
                 ? "NEEDS REVIEW"
@@ -502,7 +531,7 @@ export function BulkImport() {
           ]
             .map((value) => normalized(value))
             .join("|");
-          if (seenSkus.has(variant.skuResolved))
+          if (variant.skuResolved && seenSkus.has(variant.skuResolved))
             variant.warnings.push(`${variant.source}: Duplicate SKU in batch`);
           if (seenCombinations.has(combination))
             variant.warnings.push(
@@ -530,9 +559,7 @@ export function BulkImport() {
             (existing ? null : product.shortDescription),
           id: existing?.id ?? null,
           brandId: brandId ?? (existing ? existing.brand_id : null),
-          categoryId:
-            categoryId ??
-            (existing && !product.category ? existing.category_id : null),
+          categoryId: effectiveCategoryId,
           slugResolved: existing?.slug ?? requestedSlug,
           variants,
           blocked,
@@ -543,7 +570,7 @@ export function BulkImport() {
               : brandAction,
           categoryAction,
           action:
-            parsed.format === "catalog_sheet"
+            catalogSheet
               ? blocked.length
                 ? "NEEDS REVIEW"
                 : existing
@@ -575,15 +602,41 @@ export function BulkImport() {
 
   const loadCatalogReference = async (): Promise<CatalogReference> => {
     if (!supabase) throw new Error("Supabase environment is not configured.");
-    const [brandResult, categoryResult] = await Promise.all([
-      supabase.from("brands").select("name").eq("data_class", "real").eq("is_active", true),
-      supabase.from("categories").select("name").eq("data_class", "real").eq("is_active", true),
+    const client = supabase;
+    // All variants, active or not: new SKUs must be unique across the whole catalog.
+    // Paged, because a single request returns at most 1000 rows.
+    const loadExistingSkus = async () => {
+      const pageSize = 1000;
+      const skus: CatalogReference["existingSkus"] = [];
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await client
+          .from("product_variants")
+          .select("sku,products(slug)")
+          .order("id")
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        const page = (data ?? []) as unknown as Array<{
+          sku: string;
+          products: { slug: string } | { slug: string }[] | null;
+        }>;
+        for (const item of page) {
+          const product = Array.isArray(item.products) ? item.products[0] : item.products;
+          skus.push({ sku: item.sku, productSlug: product?.slug ?? "" });
+        }
+        if (page.length < pageSize) return skus;
+      }
+    };
+    const [brandResult, categoryResult, existingSkus] = await Promise.all([
+      client.from("brands").select("name").eq("data_class", "real").eq("is_active", true),
+      client.from("categories").select("name").eq("data_class", "real").eq("is_active", true),
+      loadExistingSkus(),
     ]);
     const error = brandResult.error ?? categoryResult.error;
     if (error) throw error;
     return {
       brands: (brandResult.data ?? []).map((item) => item.name as string),
       categories: (categoryResult.data ?? []).map((item) => item.name as string),
+      existingSkus,
     };
   };
 
@@ -703,6 +756,7 @@ export function BulkImport() {
           source: variant.source,
           id: variant.id,
           action: variant.action,
+          // Blank for a new variant: the database assigns its SKU.
           sku: variant.skuResolved,
           ram_display: variant.ram,
           storage_display: variant.storage,
@@ -983,7 +1037,7 @@ export function BulkImport() {
           aria-label="Bulk catalog source"
           value={source}
           onChange={(event) => setSource(event.target.value)}
-          placeholder="Apple 17 Pro Max&#10;Category: Smartphones&#10;256 GB Blue/Orange/Silver 472000&#10;Brand New&#10;Karachi only"
+          placeholder="Apple 17 Pro Max&#10;Category: Mobile Phones&#10;256 GB Blue/Orange/Silver 472000&#10;Brand New&#10;Karachi only"
         />
       </label>
       <div className="bulk-actions">
@@ -1110,7 +1164,12 @@ export function BulkImport() {
                         {variant.storage ?? "Storage unresolved"} /{" "}
                         {variant.color ?? "Color unresolved"}
                       </b>
-                      <small>{variant.skuResolved}</small>
+                      <small>
+                        {variant.skuResolved ||
+                          (variant.skuPrefix
+                            ? catalogSkuPending(variant.skuPrefix)
+                            : "SKU prefix unknown for this category")}
+                      </small>
                     </div>
                     <div>
                       <span>Entered: {variant.pricePkr ?? "unresolved"}</span>
