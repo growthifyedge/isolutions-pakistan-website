@@ -17,6 +17,12 @@ import {
   parsePkrMajorToMinor,
   pkrMajorInputFromMinor,
 } from "../lib/money";
+import {
+  CONDITION_GRADES,
+  parseUsedPhoneFacts,
+  ptaLabel,
+  variantFacts,
+} from "../lib/variantFacts";
 import { MediaManager } from "./MediaManager";
 
 type Option = {
@@ -73,8 +79,19 @@ type Variant = {
   carrier_jv: string | null;
   delivery_scope: string | null;
   is_active: boolean;
+  // Used-phone facts (202609240005); NULL when not supplied.
+  condition_grade?: string | null;
+  battery_health_percent?: number | null;
+  battery_cycle_count?: number | null;
   quantity?: number;
 };
+/** Variant being edited; Battery Health / Cycle Count are edited as text and validated on save. */
+type VariantEdit = Variant & { batteryHealthInput: string; cycleCountInput: string };
+const editableVariant = (variant: Variant): VariantEdit => ({
+  ...variant,
+  batteryHealthInput: variant.battery_health_percent?.toString() ?? "",
+  cycleCountInput: variant.battery_cycle_count?.toString() ?? "",
+});
 const variantIdentity = (variant: Variant) =>
   [variant.storage_display, variant.ram_display, variant.color_finish]
     .filter(Boolean)
@@ -383,6 +400,9 @@ export function Phase4ProductEditor() {
     compare_at_price: "",
     pta_status: "unknown",
     condition: "unknown",
+    condition_grade: "",
+    battery_health_percent: "",
+    battery_cycle_count: "",
     delivery_scope: "",
   });
   const [stock, setStock] = useState<Record<string, string>>({});
@@ -393,7 +413,7 @@ export function Phase4ProductEditor() {
   });
   const [variantPendingDelete, setVariantPendingDelete] = useState<Variant | null>(null);
   const [variantDeleting, setVariantDeleting] = useState(false);
-  const [variantEditing, setVariantEditing] = useState<Variant | null>(null);
+  const [variantEditing, setVariantEditing] = useState<VariantEdit | null>(null);
   const [variantSaving, setVariantSaving] = useState(false);
   const load = useCallback(async () => {
     if (!supabase) return;
@@ -675,9 +695,20 @@ export function Phase4ProductEditor() {
       setMessage("Compare-at Price PKR must be greater than Price PKR.");
       return;
     }
+    const usedFacts = parseUsedPhoneFacts({
+      condition: newVariant.condition,
+      conditionGrade: newVariant.condition_grade,
+      batteryHealth: newVariant.battery_health_percent,
+      cycleCount: newVariant.battery_cycle_count,
+    });
+    if (!usedFacts.ok) {
+      setMessage(usedFacts.message);
+      return;
+    }
     // No SKU is sent: the database assigns the next sequential SKU for the
     // product's category (e.g. MB001) when the variant is inserted.
     const { error } = await supabase.from("product_variants").insert({
+      ...usedFacts.values,
       product_id: productId,
       ram_display: newVariant.ram_display || null,
       storage_display: newVariant.storage_display || null,
@@ -698,6 +729,9 @@ export function Phase4ProductEditor() {
         compare_at_price: "",
         pta_status: "unknown",
         condition: "unknown",
+        condition_grade: "",
+        battery_health_percent: "",
+        battery_cycle_count: "",
         delivery_scope: "",
       });
       await load();
@@ -712,11 +746,22 @@ export function Phase4ProductEditor() {
   };
   const saveVariantDetails = async () => {
     if (!supabase || !variantEditing || variantSaving) return;
+    const usedFacts = parseUsedPhoneFacts({
+      condition: variantEditing.condition,
+      conditionGrade: variantEditing.condition_grade,
+      batteryHealth: variantEditing.batteryHealthInput,
+      cycleCount: variantEditing.cycleCountInput,
+    });
+    if (!usedFacts.ok) {
+      setMessage(usedFacts.message);
+      return;
+    }
     setVariantSaving(true);
     // The SKU is never sent: existing SKUs are permanent and read-only.
     const { error } = await supabase
       .from("product_variants")
       .update({
+        ...usedFacts.values,
         storage_display: variantEditing.storage_display?.trim() || null,
         ram_display: variantEditing.ram_display?.trim() || null,
         color_finish: variantEditing.color_finish?.trim() || null,
@@ -1126,6 +1171,9 @@ export function Phase4ProductEditor() {
                       setNewVariant({
                         ...newVariant,
                         condition: e.target.value,
+                        // Grade applies to used phones only.
+                        condition_grade:
+                          e.target.value === "used" ? newVariant.condition_grade : "",
                       })
                     }
                   >
@@ -1135,6 +1183,49 @@ export function Phase4ProductEditor() {
                     <option value="open_box">Open box</option>
                     <option value="refurbished">Refurbished</option>
                   </select>
+                </label>
+                <label>
+                  Condition Grade
+                  <select
+                    value={newVariant.condition_grade}
+                    disabled={newVariant.condition !== "used"}
+                    onChange={(e) =>
+                      setNewVariant({ ...newVariant, condition_grade: e.target.value })
+                    }
+                  >
+                    <option value="">None</option>
+                    {CONDITION_GRADES.map((grade) => (
+                      <option key={grade} value={grade}>{grade}</option>
+                    ))}
+                  </select>
+                  <small>Used phones only.</small>
+                </label>
+                <label>
+                  Battery Health %
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="1"
+                    value={newVariant.battery_health_percent}
+                    onChange={(e) =>
+                      setNewVariant({ ...newVariant, battery_health_percent: e.target.value })
+                    }
+                  />
+                  <small>Optional · 1–100</small>
+                </label>
+                <label>
+                  Battery Cycle Count
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={newVariant.battery_cycle_count}
+                    onChange={(e) =>
+                      setNewVariant({ ...newVariant, battery_cycle_count: e.target.value })
+                    }
+                  />
+                  <small>Optional · 0 or more</small>
                 </label>
                 <label>
                   Delivery
@@ -1162,12 +1253,12 @@ export function Phase4ProductEditor() {
               </div>
               <div className="variant-list">
                 {variants.map((v) => (
-                  <article key={v.id}>
+                  <article key={v.id} className={v.is_active ? undefined : "variant-hidden"}>
                     <div>
                       <strong>
                         {variantIdentity(v)}
                       </strong>
-                      <span>Explicit row</span>
+                      <span>{v.is_active ? "Explicit row" : "Hidden from the store"}</span>
                     </div>
                     <code>{v.sku}</code>
                     <div>
@@ -1208,12 +1299,18 @@ export function Phase4ProductEditor() {
                         Save pricing
                       </button>
                     </div>
-                    <span>{v.pta_status}</span>
+                    <span>{ptaLabel(v.pta_status)}</span>
                     <span>{v.quantity ?? 0} units</span>
                     <div className="variant-actions">
-                      <button type="button" className="variant-edit" onClick={() => setVariantEditing({ ...v })} aria-label={`Edit variant ${variantIdentity(v)}`}><Pencil /></button>
+                      <button type="button" className="variant-edit" onClick={() => setVariantEditing(editableVariant(v))} aria-label={`Edit variant ${variantIdentity(v)}`}><Pencil /></button>
                       <button type="button" className="variant-delete" onClick={() => setVariantPendingDelete(v)} aria-label={`Delete variant ${variantIdentity(v)}`}><Trash2 /></button>
                     </div>
+                    <dl className="variant-facts" aria-label={`Facts for ${v.sku}`}>
+                      <div><dt>SKU</dt><dd>{v.sku}</dd></div>
+                      {variantFacts(v).map((fact) => (
+                        <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>
+                      ))}
+                    </dl>
                   </article>
                 ))}
               </div>
@@ -1433,7 +1530,10 @@ export function Phase4ProductEditor() {
               <label>RAM<input value={variantEditing.ram_display ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, ram_display: event.target.value || null })} /></label>
               <label>Color / finish<input value={variantEditing.color_finish ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, color_finish: event.target.value || null })} /></label>
               <label>PTA<select value={variantEditing.pta_status} onChange={(event) => setVariantEditing({ ...variantEditing, pta_status: event.target.value })}><option value="unknown">Unknown</option><option value="approved">Approved</option><option value="not_approved">Not approved</option><option value="not_applicable">Not applicable</option></select></label>
-              <label>Condition<select value={variantEditing.condition} onChange={(event) => setVariantEditing({ ...variantEditing, condition: event.target.value })}><option value="unknown">Unknown</option><option value="brand_new">Brand new</option><option value="used">Used</option><option value="open_box">Open box</option><option value="refurbished">Refurbished</option></select></label>
+              <label>Condition<select value={variantEditing.condition} onChange={(event) => setVariantEditing({ ...variantEditing, condition: event.target.value, condition_grade: event.target.value === "used" ? variantEditing.condition_grade : null })}><option value="unknown">Unknown</option><option value="brand_new">Brand new</option><option value="used">Used</option><option value="open_box">Open box</option><option value="refurbished">Refurbished</option></select></label>
+              <label>Condition Grade<select value={variantEditing.condition_grade ?? ""} disabled={variantEditing.condition !== "used"} onChange={(event) => setVariantEditing({ ...variantEditing, condition_grade: event.target.value || null })}><option value="">None</option>{CONDITION_GRADES.map((grade) => <option key={grade} value={grade}>{grade}</option>)}</select><small>Used phones only.</small></label>
+              <label>Battery Health %<input type="number" min="1" max="100" step="1" value={variantEditing.batteryHealthInput} onChange={(event) => setVariantEditing({ ...variantEditing, batteryHealthInput: event.target.value })} /><small>Optional · 1–100 · blank stays empty</small></label>
+              <label>Battery Cycle Count<input type="number" min="0" step="1" value={variantEditing.cycleCountInput} onChange={(event) => setVariantEditing({ ...variantEditing, cycleCountInput: event.target.value })} /><small>Optional · 0 or more · blank stays empty</small></label>
               <label>Delivery<select value={variantEditing.delivery_scope ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, delivery_scope: event.target.value || null })}><option value="">Unresolved</option><option value="karachi_only">Karachi only</option><option value="nationwide">Nationwide</option></select></label>
             </div>
             <div><button type="button" className="admin-secondary" disabled={variantSaving} onClick={() => setVariantEditing(null)}>Cancel</button><button type="button" className="admin-primary" disabled={variantSaving} onClick={() => void saveVariantDetails()}>{variantSaving ? "Saving…" : "Save variant"}</button></div>

@@ -713,6 +713,34 @@
 .variant-list code {
   font-size: 9px;
 }
+.variant-list article .variant-facts {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0 0 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--a-line);
+}
+.variant-list article .variant-facts > div {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.variant-facts dt {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--a-muted);
+}
+.variant-facts dd {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+.variant-list article.variant-hidden {
+  background: #f7f7f3;
+}
 .variant-list article button {
   background: none;
   border: 0;
