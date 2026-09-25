@@ -1350,7 +1350,7 @@ export function BulkImport() {
             <b>5. {stagingOnly ? "Apply import" : "Apply approved batch"}</b>
             <span>
               {stagingOnly && importCounts
-                ? `Create ${importCounts.productsToCreate} · Replace ${importCounts.productsToReplace} products · Variants: create ${importCounts.variantsToCreate}, update ${importCounts.variantsToUpdate + importCounts.variantsToReactivate}, hide ${importCounts.variantsToHide} · Rows needing review: ${importCounts.rowsNeedingReview}`
+                ? `Create ${importCounts.productsToCreate} · Replace ${importCounts.productsToReplace} products · Variants: create ${importCounts.variantsToCreate}, update ${importCounts.variantsToUpdate + importCounts.variantsToReactivate}, hide ${importCounts.variantsToHide} · Rows needing review: ${importCounts.rowsNeedingReview}${blocked ? " · Resolve all rows needing review before applying" : ""}`
                 : blocked
                   ? "Resolve all blocked rows before apply"
                   : "Server authorization + atomic transaction"}

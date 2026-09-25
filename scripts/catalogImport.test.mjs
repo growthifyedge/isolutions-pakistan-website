@@ -65,6 +65,31 @@ test("28. Apply is disabled whenever anything needs review; counts feed the conf
   ].join("\n"));
 });
 
+test("Apply Import stays disabled for 3 blocked rows + 1 valid row, and is visibly disabled", () => {
+  const needsReview = (reason) => preview({
+    action: "NEEDS REVIEW",
+    blocked: [reason, "One or more variants require review"],
+    variants: [{ action: "NEEDS REVIEW", warnings: [reason] }],
+  });
+  const mixed = [
+    needsReview("Brand must be an existing active brand"),
+    needsReview("Category must be an existing active category"),
+    needsReview("Category must be an existing active category"),
+    preview(),
+  ];
+  assert.equal(catalogImportCounts(mixed).rowsNeedingReview, 3);
+  assert.equal(catalogImportCounts(mixed).productsToCreate, 1);
+  assert.equal(canApplyCatalogImport("catalog_sheet", mixed, []), false);
+  assert.equal(canApplyCatalogImport("catalog_sheet", [preview(), preview()], []), true, "a fully valid file still enables Apply");
+
+  const source = readFileSync(new URL("../src/admin/BulkImport.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  assert.ok(source.includes("? !canApplyCatalogImport(format, preview, parseErrors)"));
+  assert.ok(source.includes("disabled={working || blocked}"));
+  assert.ok(source.includes("Resolve all rows needing review before applying"));
+  const css = readFileSync(new URL("../src/admin/admin.css", import.meta.url), "utf8");
+  assert.match(css, /\.admin-primary:disabled\s*\{[^}]*cursor:\s*not-allowed[^}]*opacity:/);
+});
+
 test("Bulk Import wires Apply Import to the v2 function with blank SKUs for new variants", () => {
   const source = readFileSync(new URL("../src/admin/BulkImport.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.ok(source.includes('supabase.rpc("apply_catalog_bulk_import_v2"'));
