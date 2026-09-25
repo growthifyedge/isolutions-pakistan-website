@@ -220,7 +220,11 @@ test("duplicates, conflicts and missing prices are flagged, never resolved silen
   assert.ok(one("Samsung A16 6/128 Black; 42500; Nationwide").reviewReasons.some((reason) => reason.includes("Karachi-only")));
   assert.ok(one("Samsung A16 6/128 Black; 42500; PTA Approved; Non-PTA").reviewReasons.includes("Conflicting PTA values"));
   assert.ok(one("Samsung A16 6/128 Black; Used").reviewReasons.includes("Price missing"));
-  assert.ok(one("Samsung A16 6/128 Black 42500").reviewReasons.includes("Missing ';' separator before price"));
+  // A clearly price-shaped trailing value needs no separator; anything else still needs review.
+  const unseparated = one("Samsung A16 6/128 Black 42500");
+  assert.equal(unseparated.priceMinor, 4_250_000);
+  assert.equal(unseparated.needsReview, false);
+  assert.ok(one("Samsung A16 6/128 Black").reviewReasons.includes("Missing ';' separator before price"));
   assert.ok(one("Samsung A16 6/128 Black; 42500; BH 120").reviewReasons.some((reason) => reason.startsWith("Battery Health out of range")));
   // PTA and Non-PTA of the same configuration are distinct variants.
   const pta = normalize("Samsung A16 6/128 Black; 42500; PTA Approved\nSamsung A16 6/128 Black; 39000; Non-PTA");
