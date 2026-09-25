@@ -500,10 +500,15 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
 
   const identity = splitIdentity(identityText);
   if (identity.ramExpression) attributes.reviewReasons.push(EXTENDED_RAM);
-  for (const color of identity.unknownColors)
-    attributes.reviewReasons.push(`Colour "${color}" not recognised — verify`);
-  for (const color of identity.multiWordColors)
-    attributes.reviewReasons.push(`Multi-word colour value "${color}" — verify`);
+  // Colour issues belong to that colour's variant only (see colorReasons below), never
+  // to sibling colours expanded from the same line.
+  const colorReasons = (color: string | null) => {
+    const reasons: string[] = [];
+    if (color === null) return reasons;
+    if (identity.unknownColors.includes(color)) reasons.push(`Colour "${color}" not recognised — verify`);
+    if (identity.multiWordColors.includes(color)) reasons.push(`Multi-word colour value "${color}" — verify`);
+    return reasons;
+  };
   for (const size of identity.screenSizes) attributes.notes.push(`Screen size as listed: ${size}`);
   const match = matchBrand(identity.titleText, brands);
   let brand: string | null = null;
@@ -555,6 +560,7 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
   const colors = identity.colors.length ? identity.colors : [null];
   const reviewReasons = [...new Set(attributes.reviewReasons)];
   return colors.map((color) => {
+    const variantReasons = [...reviewReasons, ...colorReasons(color)];
     const fieldStatus = emptyStatus();
     const explicitIf = (value: unknown): FieldStatus => (value === null ? "blank" : "explicit");
     fieldStatus.productType = productType ? "inferred" : "blank";
@@ -564,7 +570,7 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
     fieldStatus.slug = brand && model ? "inferred" : "needs_review";
     fieldStatus.ram = identity.ramExpression ? "needs_review" : explicitIf(identity.ram);
     fieldStatus.storage = explicitIf(identity.storage);
-    fieldStatus.color = explicitIf(color);
+    fieldStatus.color = colorReasons(color).length ? "needs_review" : explicitIf(color);
     fieldStatus.ptaStatus = explicitIf(attributes.ptaStatus);
     fieldStatus.condition = explicitIf(attributes.condition);
     fieldStatus.conditionGrade = !attributes.conditionGrade ? "blank" : attributes.gradeExplicit ? "explicit" : "default";
@@ -602,8 +608,8 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
       slug,
       notes: identity.ramExpression ? [...attributes.notes, `RAM as listed: ${identity.ramExpression}`] : [...attributes.notes],
       fieldStatus,
-      needsReview: reviewReasons.length > 0,
-      reviewReasons: [...reviewReasons],
+      needsReview: variantReasons.length > 0,
+      reviewReasons: variantReasons,
     };
     return row;
   });

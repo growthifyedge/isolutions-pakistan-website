@@ -277,7 +277,11 @@ test("a screen size is never a colour and is preserved in Notes", () => {
 test("whitespace-separated colour text is kept as one value and flagged, never split", () => {
   const rows = rowsOf("🔵 ✨ Samsung ✨\nA37 8/256 lavender/charcoal/grey green @ 𝟏𝟑𝟒𝟖𝟎𝟎/-");
   assert.deepEqual(rows.map((row) => row.color), ["Lavender", "Charcoal", "Grey Green"]);
-  assert.ok(rows.every((row) => row.reviewReasons.includes('Multi-word colour value "Grey Green" — verify')));
+  // Only the multi-word colour's own variant is flagged.
+  assert.deepEqual(
+    rows.map((row) => row.reviewReasons.includes('Multi-word colour value "Grey Green" — verify')),
+    [false, false, true],
+  );
 });
 
 test("'officail warranty' is Official Warranty metadata, never a heading or product", () => {
@@ -323,4 +327,31 @@ test("extended/virtual RAM notation stays distinct, never summed or blanked", ()
     assert.ok(row.reviewReasons.includes(EXTENDED_RAM));
     assert.equal(row.fieldStatus.ram, "needs_review");
   }
+});
+
+test("a colour-specific review reason stays on that colour's variant only", async () => {
+  const rows = rowsOf("🔵 ✨ Samsung ✨\nA37 8/256 lavender/charcoal/grey green @ 𝟏𝟑𝟒𝟖𝟎𝟎/-");
+  const byColor = Object.fromEntries(rows.map((row) => [row.color, row]));
+  const multiWord = 'Multi-word colour value "Grey Green" — verify';
+  assert.deepEqual(Object.keys(byColor), ["Lavender", "Charcoal", "Grey Green"]);
+  for (const color of ["Lavender", "Charcoal"]) {
+    assert.deepEqual(byColor[color].reviewReasons, [], color);
+    assert.equal(byColor[color].needsReview, false, color);
+    assert.equal(byColor[color].fieldStatus.color, "explicit", color);
+  }
+  assert.deepEqual(byColor["Grey Green"].reviewReasons, [multiWord]);
+  assert.equal(byColor["Grey Green"].fieldStatus.color, "needs_review");
+  // Arrays are independent: mutating one variant never touches its siblings.
+  byColor.Lavender.reviewReasons.push("probe");
+  assert.deepEqual(byColor.Charcoal.reviewReasons, []);
+  byColor.Lavender.reviewReasons.pop();
+  // Line-level issues still apply to every colour of the line.
+  const missing = rowsOf("Tecno\nSpark 50pro 8/128 black/zorbl @");
+  assert.ok(missing.every((row) => row.reviewReasons.includes("Price missing")));
+  assert.deepEqual(missing.map((row) => row.reviewReasons.some((reason) => reason.startsWith("Colour"))), [false, true]);
+  // In the preview the product still needs review because one variant does.
+  const { catalogSheetToBulkParseResult } = await import("../src/lib/catalogWorkbook.ts");
+  const [product] = catalogSheetToBulkParseResult({ rows, specifications: [] }).products;
+  assert.deepEqual(product.variants.map((variant) => variant.warnings.length), [0, 0, 1]);
+  assert.ok(product.variants.some((variant) => variant.warnings.includes(multiWord)));
 });
