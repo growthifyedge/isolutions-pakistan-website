@@ -355,3 +355,19 @@ test("a colour-specific review reason stays on that colour's variant only", asyn
   assert.deepEqual(product.variants.map((variant) => variant.warnings.length), [0, 0, 1]);
   assert.ok(product.variants.some((variant) => variant.warnings.includes(multiWord)));
 });
+
+test("a bare 'Gift box' freebie line is ignored without breaking the section context", () => {
+  const { rows, summary } = normalize("🟡 ✨ 𝐑𝐞𝐚𝐥𝐦𝐞 ✨\n▪️ Gift box @ 𝟕𝟓𝟎/-\n▪️ C100i 4/64 grey/purple @ 𝟑𝟔𝟖𝟎𝟎/-\nGIFT BOX\ngift box @750");
+  assert.equal(summary.nonProductLines, 3);
+  assert.equal(summary.productLines, 1);
+  assert.ok(rows.every((row) => !/gift/i.test(row.productTitle ?? "")), "no Gift Box product or variant");
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((row) => row.brand === "Realme" && row.model === "C100i" && row.productType === "Mobile Phone"));
+  assert.deepEqual(rows.map((row) => row.color), ["Grey", "Purple"]);
+  assert.ok(rows.every((row) => !row.needsReview), rows.flatMap((row) => row.reviewReasons).join("; "));
+  // Narrow rule: other accessory lines are still parsed and reviewed, never silently dropped.
+  const [buds] = rowsOf("🔵 ✨ Samsung ✨\nBuds 3 white @ 15000");
+  assert.equal(buds.model, "Buds 3");
+  const [boxWithColour] = rowsOf("🔵 ✨ Vgotel ✨\nGift Box black @ 3000");
+  assert.ok(boxWithColour.reviewReasons.some((reason) => reason.startsWith("Gift Box")));
+});

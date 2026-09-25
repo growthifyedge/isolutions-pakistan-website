@@ -688,8 +688,14 @@ export type NormalizeStockSummary = {
   headings: number;
   decorativeLines: number;
   contextLines: number;
+  /** Promotional/freebie lines that are not catalog products ("Gift box @ 750/-"). */
+  nonProductLines: number;
   productLines: number;
 };
+
+// A line that is only "Gift box", optionally with a price, is a supplier freebie, not a
+// catalog product. Deliberately narrow: other accessories are never ignored.
+const NON_PRODUCT_LINE = /^gift\s*box(?:\s*@.*)?$/i;
 
 /**
  * Normalizes rough stock lines ("Title RAM/Storage Color; Price; Used; Non-PTA; BH 89%; Cycles 312",
@@ -701,7 +707,7 @@ export type NormalizeStockSummary = {
  */
 export function normalizeStockLines(text: string, options: NormalizeStockOptions): NormalizeStockResult {
   const rows: CatalogSheetRow[] = [];
-  const summary: NormalizeStockSummary = { nonEmptyLines: 0, headings: 0, decorativeLines: 0, contextLines: 0, productLines: 0 };
+  const summary: NormalizeStockSummary = { nonEmptyLines: 0, headings: 0, decorativeLines: 0, contextLines: 0, nonProductLines: 0, productLines: 0 };
   let context: SectionContext = { brand: null, productType: null, qualifier: null, phoneSection: false, warranty: null };
   const lines = normalizeText(text).replace(/\r\n?/g, "\n").split("\n");
   for (const [index, raw] of lines.entries()) {
@@ -711,6 +717,11 @@ export function normalizeStockLines(text: string, options: NormalizeStockOptions
     const stripped = stripHeadingDecoration(line);
     if (!stripped || !/[\p{L}\d]/u.test(stripped)) {
       summary.decorativeLines += 1;
+      continue;
+    }
+    // Skipped without touching the section context: the next rows keep the current heading.
+    if (NON_PRODUCT_LINE.test(stripped)) {
+      summary.nonProductLines += 1;
       continue;
     }
     const warranty = WARRANTY_NOTES.find(([pattern]) => pattern.test(stripped));
