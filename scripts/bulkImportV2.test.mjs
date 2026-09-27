@@ -210,6 +210,43 @@ test("12. Server rejects bad values, malformed actions, missing identity and any
   assert.equal((await one(db, `select count(*)::int as n from public.products where title in ('Nope 1', 'Samsung Bad')`)).n, 0);
 });
 
+test("slugs: many variant rows share one product slug; '+' models stay separate; real clashes still blocked", async () => {
+  const local = await fresh();
+  const rows = (first, specs) => specs.map(([ram, storage, color], index) =>
+    variant({ source: `Products row ${first + index}`, ram, storage, color }));
+  const noteVariants = rows(131, [
+    ["8 GB", "256 GB", "Black"], ["8 GB", "256 GB", "Blue"], ["8 GB", "256 GB", "Titanium"],
+    ["12 GB", "512 GB", "Black"], ["12 GB", "512 GB", "Blue"], ["12 GB", "512 GB", "Titanium"],
+  ]);
+  const result = await apply(local, [
+    product({ source: "Products rows 131-136", brand: "Xiaomi", title: "Xiaomi Note 15 Pro", variants: noteVariants }),
+    product({ source: "Products rows 137-139", brand: "Xiaomi", title: "Xiaomi Note 15 Pro+",
+      variants: rows(137, [["12 GB", "512 GB", "Black"], ["12 GB", "512 GB", "Blue"], ["12 GB", "512 GB", "Brown"]]) }),
+    product({ source: "Products rows 233-234", brand: "Honor", title: "Honor X5c",
+      variants: rows(233, [["4 GB", "64 GB", "Black"], ["4 GB", "64 GB", "Blue"]]) }),
+    product({ source: "Products rows 235-236", brand: "Honor", title: "Honor X5c+",
+      variants: rows(235, [["4 GB", "128 GB", "Black"], ["4 GB", "128 GB", "Cyan"]]) }),
+  ]);
+  assert.equal(result.products.length, 4);
+  // Exactly one product record per identity, with the client's '+' -> "plus" slug.
+  const slugs = await all(local, `select title, slug, (select count(*)::int from public.product_variants v where v.product_id = p.id) as variants
+    from public.products p where title like 'Xiaomi Note 15%' or title like 'Honor X5c%' order by title`);
+  assert.deepEqual(slugs, [
+    { title: "Honor X5c", slug: "honor-x5c", variants: 2 },
+    { title: "Honor X5c+", slug: "honor-x5c-plus", variants: 2 },
+    { title: "Xiaomi Note 15 Pro", slug: "xiaomi-note-15-pro", variants: 6 },
+    { title: "Xiaomi Note 15 Pro+", slug: "xiaomi-note-15-pro-plus", variants: 3 },
+  ]);
+  // Two genuinely different product identities that produce the same slug are still blocked.
+  await rejects(local, [
+    product({ source: "Products row 300", brand: "Xiaomi", title: "Xiaomi Note 16 Pro" }),
+    product({ source: "Products row 301", brand: "Xiaomi", title: "Xiaomi Note-16 Pro" }),
+  ], /Products would share one slug: Products row 300, Products row 301/);
+  // A new product whose slug is taken by an existing product is still blocked.
+  await rejects(local, [product({ source: "Products row 302", brand: "Xiaomi", title: "Xiaomi Note-15 Pro+" })],
+    /Product slug "xiaomi-note-15-pro-plus" is already used by another product/);
+});
+
 test("admin only", async () => {
   const local = await fresh();
   await signOut(local);
