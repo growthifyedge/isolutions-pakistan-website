@@ -2,6 +2,7 @@ import type { Cell, DataValidation, Workbook, Worksheet } from "exceljs";
 import type { BulkParseResult, BulkProduct, BulkVariant } from "./bulkCatalog.ts";
 import {
   DEFAULT_IMPORT_STOCK,
+  EXTENDED_RAM,
   catalogSlug,
   catalogVariantKey,
   parseCatalogPrice,
@@ -441,7 +442,11 @@ export function catalogRowFromRecord(record: Partial<Record<ProductHeader, CellI
   if (brand && model && lower(model).startsWith(`${lower(brand)} `)) model = model.slice(brand.length).trim();
   explicit("model", model);
   if (!model) invalid("model", "Model / Product Title is required");
-  const ram = capacity("RAM");
+  // Extended/virtual RAM ("3+5 GB") is kept exactly as written and stays Needs Review until
+  // the Owner replaces it with the physical RAM; it is never summed or split.
+  const extendedRam = text("RAM")?.match(/^(\d+)\s*\+\s*(\d+)\s*(?:GB)?$/i);
+  const ram = extendedRam ? `${extendedRam[1]}+${extendedRam[2]} GB` : capacity("RAM");
+  if (extendedRam) invalid("ram", EXTENDED_RAM);
   const storage = capacity("Storage");
   const color = text("Color");
   explicit("color", color);

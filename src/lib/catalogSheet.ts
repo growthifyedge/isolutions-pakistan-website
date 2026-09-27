@@ -1,5 +1,5 @@
 import { normalizeCapacity } from "./bulkCatalog.ts";
-import { normalizeColor } from "./catalogColors.ts";
+import { isKnownMultiWordColor, normalizeColor } from "./catalogColors.ts";
 import { parsePkrMajorToMinor } from "./money.ts";
 
 // Bulk Upload v2 — Phase 1A. The fixed catalog sheet row contract shared by the
@@ -198,6 +198,8 @@ export type PriceText = {
   ambiguous: boolean;
   /** Anything besides the price (dates, words), kept verbatim for review. */
   leftover: string | null;
+  /** True when the leftover is written entirely after the price ("110000 active 25-04-26"). */
+  leftoverTrailing: boolean;
 };
 
 const PRICE_NUMBER = /(?:(?:rs\.?|pkr)\s*)?(\d[\d,]*(?:\.\d+)?)(k)?(?![\d])/gi;
@@ -211,15 +213,18 @@ const DATE_TEXT = /\b\d{1,2}[-./]\d{1,2}[-./]\d{2,4}\b/g;
 export function parsePriceText(value: string): PriceText {
   const text = collapse(value.replace(/\/\s*[-=]\s*$/, ""));
   const simple = parseCatalogPrice(text);
-  if (simple !== null) return { priceMinor: simple, ambiguous: false, leftover: null };
+  if (simple !== null) return { priceMinor: simple, ambiguous: false, leftover: null, leftoverTrailing: false };
   const withoutDates = text.replace(DATE_TEXT, " ");
   const candidates = [...withoutDates.matchAll(PRICE_NUMBER)].filter(
     (match) => match[1].replaceAll(",", "").split(".")[0].length >= 3,
   );
-  if (candidates.length !== 1) return { priceMinor: null, ambiguous: candidates.length > 1, leftover: text || null };
+  if (candidates.length !== 1) {
+    return { priceMinor: null, ambiguous: candidates.length > 1, leftover: text || null, leftoverTrailing: false };
+  }
   const priceMinor = parseCatalogPrice(candidates[0][0]);
   const rest = collapse(text.replace(candidates[0][0], " ").replace(/\/\s*[-=]/g, " ").replace(/^[\s/,-]+|[\s/,-]+$/g, ""));
-  return { priceMinor, ambiguous: false, leftover: rest || null };
+  const leftoverTrailing = !/[^\s/,-]/.test(withoutDates.slice(0, candidates[0].index));
+  return { priceMinor, ambiguous: false, leftover: rest || null, leftoverTrailing };
 }
 
 type BrandMatch ={ brand: string; rest: string; status: "explicit" | "inferred" } | { ambiguous: string[] } | null;
@@ -325,7 +330,7 @@ function splitColors(value: string) {
     const { color, known } = normalizeColor(item);
     if (!colors.includes(color)) colors.push(color);
     if (!known && !unknownColors.includes(color)) unknownColors.push(color);
-    if (/\s/.test(color) && !multiWordColors.includes(color)) multiWordColors.push(color);
+    if (/\s/.test(color) && !isKnownMultiWordColor(color) && !multiWordColors.includes(color)) multiWordColors.push(color);
   }
   return { colors, unknownColors, multiWordColors };
 }
@@ -414,7 +419,10 @@ function applyToken(attributes: Attributes, token: string): boolean {
     setOnce(attributes, "priceMinor", price.priceMinor, "Price");
     if (price.leftover) {
       attributes.notes.push(price.leftover);
-      attributes.reviewReasons.push(`Unrecognised value: ${price.leftover}`);
+      // Supplier metadata trailing the price ("active 25-04-26", "non") is kept in Notes as
+      // written; its meaning is not inferred and it never changes any catalog field.
+      const supplierNote = price.leftoverTrailing && SUPPLIER_TRAILING_NOTE.test(price.leftover);
+      if (!supplierNote) attributes.reviewReasons.push(`Unrecognised value: ${price.leftover}`);
     }
   }
   return true;
@@ -422,7 +430,11 @@ function applyToken(attributes: Attributes, token: string): boolean {
 
 const NO_WARRANTY = "No Warranty";
 const OFFICIAL_WARRANTY = "Official Warranty";
-const EXTENDED_RAM = "RAM uses extended/virtual notation — verify physical RAM";
+export const EXTENDED_RAM = "RAM uses extended/virtual notation — verify physical RAM";
+// Exact supplier trailing forms after a parsed price: "active <date>", a standalone "non",
+// or the accessory note "with charger". Anything else ("without charger") still needs review.
+const SUPPLIER_TRAILING_NOTE = /^(?:active\s+\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|non|with\s+charger)$/i;
+export const CONFLICTING_DUPLICATE = "Same variant is listed more than once with conflicting commercial data — review.";
 const AMBIGUOUS_PRICE ="Multiple/ambiguous prices detected; review price-to-color mapping.";
 const SUSPICIOUS_PRICE = "Price appears unusually high — verify.";
 // Broad ceiling for any single catalog item (Rs 1,500,000); higher prices need review.
@@ -752,8 +764,25 @@ export function normalizeStockLines(text: string, options: NormalizeStockOptions
       row.reviewReasons.push(`Duplicate variant (same as line ${firstLine})`);
     } else seen.set(key, row.lineNumber);
   }
+  flagConflictingDuplicates(rows);
   flagPeerPriceOutliers(rows);
   return { rows, summary };
+}
+
+// Same variant identity listed more than once with different commercial data: every copy
+// needs review, so no price (or stock/warranty/delivery) is chosen silently.
+function flagConflictingDuplicates(rows: CatalogSheetRow[]) {
+  const groups = new Map<string, CatalogSheetRow[]>();
+  for (const row of rows) groups.set(catalogVariantKey(row), [...(groups.get(catalogVariantKey(row)) ?? []), row]);
+  const commercial = (row: CatalogSheetRow) =>
+    [row.priceMinor, row.compareAtPriceMinor, row.stock, row.warranty, row.deliveryScope].join("|");
+  for (const group of groups.values()) {
+    if (group.length < 2 || new Set(group.map(commercial)).size < 2) continue;
+    for (const row of group) {
+      row.needsReview = true;
+      row.reviewReasons.push(CONFLICTING_DUPLICATE);
+    }
+  }
 }
 
 // A price far above the batch median for the same RAM/Storage configuration is flagged
@@ -779,7 +808,7 @@ function flagPeerPriceOutliers(rows: CatalogSheetRow[]) {
   }
 }
 
-export type StagingProfileId = "none" | "android_box_pack_pta";
+export type StagingProfileId = "none" | "android_box_pack_pta" | "wholesale_pta_approved";
 
 /** Optional, per-batch staging profiles. They only fill blank values and never override a row. */
 export const STAGING_PROFILES: Record<Exclude<StagingProfileId, "none">, { label: string; supplies: string[] }> = {
@@ -787,6 +816,22 @@ export const STAGING_PROFILES: Record<Exclude<StagingProfileId, "none">, { label
     label: "Android Box Pack / PTA Approved",
     supplies: ["Product Type: Mobile Phone", "Condition: Brand New", "PTA Status: PTA Approved", "Delivery Scope: Karachi Only"],
   },
+  // Owner-confirmed: a wholesale stock list of PTA Approved phones. PTA only, and only for
+  // Mobile Phone rows; Condition, Warranty, Delivery, Product Type and Category stay as parsed.
+  wholesale_pta_approved: {
+    label: "Wholesale List / PTA Approved",
+    supplies: ["PTA Status: PTA Approved (Mobile Phones only)"],
+  },
+};
+
+type ProfileField = "productType" | "condition" | "ptaStatus" | "deliveryScope";
+const PROFILE_DEFAULTS: Record<Exclude<StagingProfileId, "none">, Partial<Pick<CatalogSheetRow, ProfileField>>> = {
+  android_box_pack_pta: { productType: "Mobile Phone", condition: "brand_new", ptaStatus: "approved", deliveryScope: "karachi_only" },
+  wholesale_pta_approved: { ptaStatus: "approved" },
+};
+/** Profiles whose defaults apply only to one Product Type; other rows are left untouched. */
+const PROFILE_PRODUCT_TYPE: Partial<Record<Exclude<StagingProfileId, "none">, CatalogProductType>> = {
+  wholesale_pta_approved: "Mobile Phone",
 };
 
 /**
@@ -795,17 +840,16 @@ export const STAGING_PROFILES: Record<Exclude<StagingProfileId, "none">, { label
  */
 export function applyStagingProfile(rows: CatalogSheetRow[], profile: StagingProfileId): CatalogSheetRow[] {
   if (profile === "none") return rows;
+  const onlyType = PROFILE_PRODUCT_TYPE[profile];
   return rows.map((source) => {
+    if (onlyType && source.productType !== onlyType) return source;
     const row: CatalogSheetRow = { ...source, fieldStatus: { ...source.fieldStatus }, reviewReasons: [...source.reviewReasons] };
-    const supply = <K extends "productType" | "condition" | "ptaStatus" | "deliveryScope">(field: K, value: CatalogSheetRow[K]) => {
+    const supply = <K extends ProfileField>(field: K, value: CatalogSheetRow[K]) => {
       if (row[field] !== null) return;
       row[field] = value;
       row.fieldStatus[field] = "default";
     };
-    supply("productType", "Mobile Phone");
-    supply("condition", "brand_new");
-    supply("ptaStatus", "approved");
-    supply("deliveryScope", "karachi_only");
+    for (const [field, value] of Object.entries(PROFILE_DEFAULTS[profile]) as [ProfileField, never][]) supply(field, value);
     return row;
   });
 }

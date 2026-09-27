@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { catalogVariantKey, normalizeStockLines } from "../src/lib/catalogSheet.ts";
+import { CONFLICTING_DUPLICATE, catalogVariantKey, normalizeStockLines } from "../src/lib/catalogSheet.ts";
 
 const brands = [
   { name: "Samsung" },
@@ -215,8 +215,12 @@ test("12. the same model in different casing shares one slug and product identit
 
 test("duplicates, conflicts and missing prices are flagged, never resolved silently", () => {
   const duplicate = normalize("Samsung A16 6/128 Black; 42500\nSamsung A16 6/128 Black; 43000");
-  assert.equal(duplicate[0].needsReview, false);
+  // Different prices for one variant: both copies need review, no price is chosen.
+  assert.ok(duplicate.every((row) => row.needsReview && row.reviewReasons.includes(CONFLICTING_DUPLICATE)));
   assert.ok(duplicate[1].reviewReasons.includes("Duplicate variant (same as line 1)"));
+  const identical = normalize("Samsung A16 6/128 Black; 42500\nSamsung A16 6/128 Black; 42500");
+  assert.equal(identical[0].needsReview, false);
+  assert.deepEqual(identical[1].reviewReasons, ["Duplicate variant (same as line 1)"]);
   assert.ok(one("Samsung A16 6/128 Black; 42500; Nationwide").reviewReasons.some((reason) => reason.includes("Karachi-only")));
   assert.ok(one("Samsung A16 6/128 Black; 42500; PTA Approved; Non-PTA").reviewReasons.includes("Conflicting PTA values"));
   assert.ok(one("Samsung A16 6/128 Black; Used").reviewReasons.includes("Price missing"));

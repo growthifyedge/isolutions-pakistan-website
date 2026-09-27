@@ -76,7 +76,7 @@ test("4. an activation date is never read as the price", () => {
   assert.equal(row.priceMinor, 11_000_000);
   assert.equal(row.color, "Silver");
   assert.deepEqual(row.notes, ["active 25-04-26"]);
-  assert.ok(row.reviewReasons.includes("Unrecognised value: active 25-04-26"));
+  assert.ok(!row.reviewReasons.some((reason) => reason.startsWith("Unrecognised value")));
 });
 
 test("5. two prices for one row are ambiguous and never guessed", () => {
@@ -86,7 +86,7 @@ test("5. two prices for one row are ambiguous and never guessed", () => {
   assert.equal(row.needsReview, true);
   assert.ok(row.reviewReasons.includes(AMBIGUOUS));
   assert.ok(!row.reviewReasons.includes("Price missing"));
-  assert.deepEqual(parsePriceText("176500/178500wht"), { priceMinor: null, ambiguous: true, leftover: "176500/178500wht" });
+  assert.deepEqual(parsePriceText("176500/178500wht"), { priceMinor: null, ambiguous: true, leftover: "176500/178500wht", leftoverTrailing: false });
 });
 
 test("6. a trailing '@' with no price stays Needs Review", () => {
@@ -275,13 +275,35 @@ test("a screen size is never a colour and is preserved in Notes", () => {
 });
 
 test("whitespace-separated colour text is kept as one value and flagged, never split", () => {
-  const rows = rowsOf("🔵 ✨ Samsung ✨\nA37 8/256 lavender/charcoal/grey green @ 𝟏𝟑𝟒𝟖𝟎𝟎/-");
-  assert.deepEqual(rows.map((row) => row.color), ["Lavender", "Charcoal", "Grey Green"]);
+  const rows = rowsOf("🔵 ✨ Samsung ✨\nA37 8/256 lavender/charcoal/sky blue @ 𝟏𝟑𝟒𝟖𝟎𝟎/-");
+  assert.deepEqual(rows.map((row) => row.color), ["Lavender", "Charcoal", "Sky Blue"]);
   // Only the multi-word colour's own variant is flagged.
   assert.deepEqual(
-    rows.map((row) => row.reviewReasons.includes('Multi-word colour value "Grey Green" — verify')),
+    rows.map((row) => row.reviewReasons.includes('Multi-word colour value "Sky Blue" — verify')),
     [false, false, true],
   );
+});
+
+test("'Grey Green' is an Owner-confirmed supplier colour: clean, displayed exactly", () => {
+  const source = "🔵 ✨ Samsung ✨\nA37 8/256 lavender/charcoal/grey green @ 𝟏𝟑𝟒𝟖𝟎𝟎/-";
+  const rows = rowsOf(source);
+  assert.deepEqual(rows.map((row) => row.color), ["Lavender", "Charcoal", "Grey Green"]);
+  for (const row of rows) {
+    assert.equal(row.needsReview, false, `${row.color}: ${row.reviewReasons.join("; ")}`);
+    assert.deepEqual(row.reviewReasons, [], row.color);
+    assert.equal(row.fieldStatus.color, "explicit", row.color);
+    assert.equal(row.priceMinor, 13_480_000);
+    assert.deepEqual([row.ram, row.storage], ["8 GB", "256 GB"]);
+    assert.equal(row.productTitle, rows[0].productTitle);
+  }
+  assert.equal(new Set(rows.map(catalogVariantKey)).size, 3);
+  assert.equal(normalizeColor("grey green").color, "Grey Green");
+  // Other multi-word colours are still flagged; no generic multi-word acceptance.
+  for (const color of ["Grey Blue", "Green Grey", "Mystic Bronze"]) {
+    const [row] = rowsOf(`🔵 ✨ Samsung ✨\nA37 8/256 ${color.toLowerCase()} @ 134800/-`);
+    assert.equal(row.color, color);
+    assert.ok(row.reviewReasons.includes(`Multi-word colour value "${color}" — verify`), color);
+  }
 });
 
 test("'officail warranty' is Official Warranty metadata, never a heading or product", () => {
@@ -297,10 +319,90 @@ test("'officail warranty' is Official Warranty metadata, never a heading or prod
   assert.equal(rowsOf("Samsung A16 6/128 Black; 42500; Officail Warranty")[0].warranty, "Official Warranty");
 });
 
-test("active / non stay in Notes and need review", () => {
-  const rows = rowsOf("💙 ✨ Vivo ✨\nV70FE 8/256 silver @ 110000 active 25-04-26/-\nV70FE 8/256 silver @ 119500 non");
-  assert.deepEqual(rows.map((row) => row.notes), [["active 25-04-26"], ["non"]]);
-  assert.ok(rows.every((row) => row.needsReview));
+const CONFLICT = "Same variant is listed more than once with conflicting commercial data — review.";
+const unrecognised = (row) => row.reviewReasons.filter((reason) => reason.startsWith("Unrecognised value"));
+
+test("trailing 'active <date>' / 'non' after a price stay in Notes without unrecognised-value review", () => {
+  const [active, non] = rowsOf("💙 ✨ Vivo ✨\nV70FE 8/256 silver @ 110000 active 25-04-26/-\nV70FE 12/256 blue @ 137000 non");
+  assert.deepEqual(active.notes, ["active 25-04-26"]);
+  assert.deepEqual(non.notes, ["non"]);
+  // The notes change no field and never enter variant identity.
+  const [plainActive, plainNon] = rowsOf("💙 ✨ Vivo ✨\nV70FE 8/256 silver @ 110000\nV70FE 12/256 blue @ 137000");
+  for (const [row, plain] of [[active, plainActive], [non, plainNon]]) {
+    assert.deepEqual(unrecognised(row), []);
+    assert.equal(row.needsReview, false, row.reviewReasons.join("; "));
+    for (const field of ["ptaStatus", "condition", "conditionGrade", "warranty", "productType", "deliveryScope", "priceMinor", "slug"]) {
+      assert.equal(row[field], plain[field], field);
+    }
+    assert.equal(catalogVariantKey(row), catalogVariantKey(plain));
+  }
+});
+
+test("V70FE: same identity with different prices stays blocked; 12/256 'non' row is clean", () => {
+  const rows = rowsOf("💙 ✨ Vivo ✨\nV70FE 8/256 silver @ 110000 active 25-04-26/-\nV70FE 8/256 silver @ 119500 non\nV70FE 12/256 blue/silver @ 137000 non");
+  const [active, non, blue, silver] = rows;
+  assert.deepEqual([active.priceMinor, non.priceMinor], [11_000_000, 11_950_000], "both prices kept, none chosen");
+  for (const row of [active, non]) {
+    assert.ok(row.needsReview);
+    assert.ok(row.reviewReasons.includes(CONFLICT));
+  }
+  for (const row of [blue, silver]) {
+    assert.equal(row.priceMinor, 13_700_000);
+    assert.deepEqual(row.notes, ["non"]);
+    assert.equal(row.needsReview, false, row.reviewReasons.join("; "));
+  }
+});
+
+test("trailing 'with charger' after a price is kept in Notes without review; other charger text is not swallowed", () => {
+  // Exact supplier line: glued price, plug emoji.
+  const nokia = rowsOf("⚪ ✨ 𝐍𝐨𝐤𝐢𝐚 ✨\n▪️ 105 pure blue/charcoal @ 𝟐𝟕𝟓𝟎with 🔌 charger");
+  const plain = rowsOf("⚪ ✨ 𝐍𝐨𝐤𝐢𝐚 ✨\n▪️ 105 pure blue/charcoal @ 𝟐𝟕𝟓𝟎/-");
+  assert.equal(nokia.length, 2);
+  nokia.forEach((row, index) => {
+    assert.deepEqual(row.notes, ["with charger"]);
+    assert.deepEqual(unrecognised(row), []);
+    assert.equal(row.needsReview, false, row.reviewReasons.join("; "));
+    for (const field of ["priceMinor", "ptaStatus", "condition", "warranty", "productType", "sku", "category", "productTitle", "slug", "color"]) {
+      assert.equal(row[field], plain[index][field], field);
+    }
+    assert.equal(catalogVariantKey(row), catalogVariantKey(plain[index]));
+  });
+  // Other charger wording still needs review.
+  for (const note of ["without charger", "charger missing", "charger damaged", "with charger missing"]) {
+    const [row] = rowsOf(`⚪ ✨ Nokia ✨\n105 pure blue @ 2750 ${note}`);
+    assert.deepEqual(unrecognised(row), [`Unrecognised value: ${note}`], note);
+    assert.ok(row.needsReview, note);
+  }
+  // Charger before the price is not trailing metadata.
+  const [before] = rowsOf("⚪ ✨ Nokia ✨\n105 pure blue @ with charger 2750");
+  assert.equal(unrecognised(before).length, 1);
+  // Product/model text containing "charger" is not altered.
+  const [product] = rowsOf("Samsung 25W Charger White; 3500");
+  assert.match(product.productTitle ?? "", /Charger/i);
+  assert.deepEqual(product.notes, []);
+});
+
+test("the trailing rule is narrow: Non-PTA, Non Warranty, Non Active and other leftovers keep their meaning", () => {
+  const [nonPta] = rowsOf("💙 ✨ Vivo ✨\nV70FE 8/256 silver @ 110000; Non-PTA");
+  assert.equal(nonPta.ptaStatus, "not_approved");
+  const [identityNonPta] = rowsOf("Samsung A16 non pta 6/128 Black; 42500");
+  assert.equal(identityNonPta.ptaStatus, "not_approved");
+  const { rows: tab } = normalize("📲 ✨ Samsung Tab ✨\n▪️ Non Warranty\nA11 wifi 8/128 grey @ 52000 non");
+  assert.equal(tab[0].warranty, "No Warranty");
+  assert.deepEqual(tab[0].notes, ["non"]);
+  assert.equal(rowsOf("Samsung A16 6/128 Black; 42500; Non Warranty")[0].warranty, "No Warranty");
+  // "Non Active" is not the exact standalone "non" form: kept and reviewed, never swallowed.
+  const [nonActive] = rowsOf("🍎 ✨ Apple ✨\niPhone 15 128 black @ 150000 Non Active iPhone");
+  assert.deepEqual(nonActive.notes, ["Non Active iPhone"]);
+  assert.deepEqual(unrecognised(nonActive), ["Unrecognised value: Non Active iPhone"]);
+  // Model text containing "non" is untouched.
+  const [nonTitle] = rowsOf("🍎 ✨ Apple ✨\nNon Active iPhone 15 128 black @ 150000");
+  assert.match(nonTitle.productTitle ?? "", /Non Active/i);
+  // Only exact trailing forms: "non" before the price, "active" without a date, or extra words still need review.
+  for (const line of ["V70FE 8/256 silver @ non 110000", "V70FE 8/256 silver @ 110000 active", "V70FE 8/256 silver @ 110000 non stock"]) {
+    const [row] = rowsOf(`💙 ✨ Vivo ✨\n${line}`);
+    assert.equal(unrecognised(row).length, 1, line);
+  }
 });
 
 test("extended/virtual RAM notation stays distinct, never summed or blanked", () => {
@@ -327,20 +429,23 @@ test("extended/virtual RAM notation stays distinct, never summed or blanked", ()
     assert.ok(row.reviewReasons.includes(EXTENDED_RAM));
     assert.equal(row.fieldStatus.ram, "needs_review");
   }
+  // 6. The original notation is preserved in Notes; no physical RAM is guessed either way.
+  assert.deepEqual(rows.map((row) => row.notes), [["RAM as listed: 3+5"], ["RAM as listed: 4+4"], ["RAM as listed: 4+8"], ["RAM as listed: 4+8"]]);
+  assert.ok(rows.every((row) => !["3 GB", "4 GB", "5 GB", "8 GB", "12 GB"].includes(row.ram)));
 });
 
 test("a colour-specific review reason stays on that colour's variant only", async () => {
-  const rows = rowsOf("🔵 ✨ Samsung ✨\nA37 8/256 lavender/charcoal/grey green @ 𝟏𝟑𝟒𝟖𝟎𝟎/-");
+  const rows = rowsOf("🔵 ✨ Samsung ✨\nA37 8/256 lavender/charcoal/sky blue @ 𝟏𝟑𝟒𝟖𝟎𝟎/-");
   const byColor = Object.fromEntries(rows.map((row) => [row.color, row]));
-  const multiWord = 'Multi-word colour value "Grey Green" — verify';
-  assert.deepEqual(Object.keys(byColor), ["Lavender", "Charcoal", "Grey Green"]);
+  const multiWord = 'Multi-word colour value "Sky Blue" — verify';
+  assert.deepEqual(Object.keys(byColor), ["Lavender", "Charcoal", "Sky Blue"]);
   for (const color of ["Lavender", "Charcoal"]) {
     assert.deepEqual(byColor[color].reviewReasons, [], color);
     assert.equal(byColor[color].needsReview, false, color);
     assert.equal(byColor[color].fieldStatus.color, "explicit", color);
   }
-  assert.deepEqual(byColor["Grey Green"].reviewReasons, [multiWord]);
-  assert.equal(byColor["Grey Green"].fieldStatus.color, "needs_review");
+  assert.deepEqual(byColor["Sky Blue"].reviewReasons, [multiWord]);
+  assert.equal(byColor["Sky Blue"].fieldStatus.color, "needs_review");
   // Arrays are independent: mutating one variant never touches its siblings.
   byColor.Lavender.reviewReasons.push("probe");
   assert.deepEqual(byColor.Charcoal.reviewReasons, []);

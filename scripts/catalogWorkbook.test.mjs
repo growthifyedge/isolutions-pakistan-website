@@ -277,6 +277,119 @@ test("v2 A. Android Box Pack / PTA Approved profile fills blanks only", () => {
   assert.equal(explicit.stock, 3);
 });
 
+test("v2 A2. Wholesale List / PTA Approved profile defaults PTA only; explicit PTA wins", () => {
+  assert.equal(STAGING_PROFILES.wholesale_pta_approved.label, "Wholesale List / PTA Approved");
+  assert.deepEqual(STAGING_PROFILES.wholesale_pta_approved.supplies, ["PTA Status: PTA Approved (Mobile Phones only)"]);
+  const text = [
+    "Samsung A16 6/128 Black; 42500",
+    "Samsung A16 6/128 Blue; 39000; Non-PTA",
+    "Samsung A16 8/256 Black; 52000; PTA Approved",
+  ].join("\n");
+  const [plain, nonPta, pta] = stage(text, "wholesale_pta_approved");
+  const [basePlain, baseNonPta, basePta] = stage(text);
+  // 1. A normal wholesale row gets PTA Approved as a visible default.
+  assert.equal(plain.ptaStatus, "approved");
+  assert.equal(plain.fieldStatus.ptaStatus, "default");
+  // 2-3. Explicit Non-PTA / PTA Approved are kept as written.
+  assert.equal(nonPta.ptaStatus, "not_approved");
+  assert.equal(nonPta.fieldStatus.ptaStatus, "explicit");
+  assert.equal(pta.ptaStatus, "approved");
+  assert.equal(pta.fieldStatus.ptaStatus, "explicit");
+  // Nothing but PTA changes compared with no profile.
+  for (const [row, base] of [[plain, basePlain], [nonPta, baseNonPta], [pta, basePta]]) {
+    for (const field of ["productType", "category", "condition", "warranty", "deliveryScope", "priceMinor", "stock", "sku", "slug", "productTitle", "color", "ram", "storage"]) {
+      assert.deepEqual(row[field], base[field], field);
+    }
+  }
+  // 4. Without this profile the blank PTA stays unresolved.
+  assert.equal(basePlain.ptaStatus, null);
+  assert.equal(basePlain.fieldStatus.ptaStatus, "blank");
+  // Wholesale list format: V70FE notes stay metadata and the 8/256 Silver price conflict stays blocked.
+  const [active, non, blue] = stage(
+    "💙 ✨ Vivo ✨\nV70FE 8/256 silver @ 110000 active 25-04-26/-\nV70FE 8/256 silver @ 119500 non\nV70FE 12/256 blue @ 137000 non",
+    "wholesale_pta_approved",
+  );
+  assert.ok([active, non, blue].every((row) => row.ptaStatus === "approved"));
+  assert.deepEqual([active.notes, non.notes, blue.notes], [["active 25-04-26"], ["non"], ["non"]]);
+  const conflict = "Same variant is listed more than once with conflicting commercial data — review.";
+  assert.ok(active.needsReview && active.reviewReasons.includes(conflict));
+  assert.ok(non.needsReview && non.reviewReasons.includes(conflict));
+  assert.ok(!blue.reviewReasons.includes(conflict));
+});
+
+test("v2 A3. Wholesale PTA default applies to Mobile Phones only; other types stay unresolved", () => {
+  const text = [
+    "📲 ✨ Samsung Tab ✨",
+    "A11 wifi 8/128 grey @ 52000",
+    "⌚ ✨ Samsung Watch ✨",
+    "Watch 8 44mm graphite @ 60000",
+    "🍎 ✨ Apple ✨",
+    "MacBook Air M3 256 midnight @ 300000",
+    "🔵 ✨ Samsung ✨",
+    "A16 8/256 black @ 55000",
+  ].join("\n");
+  const rows = stage(text, "wholesale_pta_approved");
+  const base = stage(text);
+  const byType = Object.fromEntries(rows.map((row) => [row.productType, row]));
+  assert.deepEqual(Object.keys(byType).sort(), ["Gadget", "Laptop", "Mobile Phone", "Tablet"]);
+  // 1. Mobile Phone + blank PTA -> PTA Approved (default).
+  assert.equal(byType["Mobile Phone"].ptaStatus, "approved");
+  assert.equal(byType["Mobile Phone"].fieldStatus.ptaStatus, "default");
+  // 2-3. Tablet, Gadget/Watch and Laptop + blank PTA -> unresolved, identical to no profile.
+  for (const type of ["Tablet", "Gadget", "Laptop"]) {
+    assert.equal(byType[type].ptaStatus, null, type);
+    assert.equal(byType[type].fieldStatus.ptaStatus, "blank", type);
+  }
+  rows.forEach((row, index) => {
+    if (row.productType !== "Mobile Phone") assert.deepEqual(row, base[index], row.productType);
+  });
+  // 4. Accessory (parsed without a type, or typed Accessory) + blank PTA -> unresolved.
+  const [cable] = normalize("Samsung 25W charger white; 3500");
+  const [typedAccessory] = applyStagingProfile([{ ...cable, productType: "Accessory" }], "wholesale_pta_approved");
+  assert.equal(typedAccessory.ptaStatus, null);
+  const [untyped] = applyStagingProfile([cable], "wholesale_pta_approved");
+  assert.notEqual(untyped.productType, "Mobile Phone");
+  assert.equal(untyped.ptaStatus, null);
+  // Explicit PTA on a non-phone row is kept as written.
+  const [explicitTab] = stage("📲 ✨ Samsung Tab ✨\nA11 8/128 grey @ 52000; Non-PTA", "wholesale_pta_approved");
+  assert.equal(explicitTab.productType, "Tablet");
+  assert.equal(explicitTab.ptaStatus, "not_approved");
+  assert.equal(explicitTab.fieldStatus.ptaStatus, "explicit");
+});
+
+test("extended/virtual RAM survives the Excel round trip and blocks until the Owner supplies physical RAM", async () => {
+  const EXTENDED = "RAM uses extended/virtual notation — verify physical RAM";
+  const rows = normalizeStockLines(
+    "🟡 ✨ Realme ✨\nNote 60x 3+5/64 green @ 29500/-\nNote 60x 4+4/64 green @ 33500/-",
+    { brands: [...reference.brands, "ZTE"].map((name) => ({ name })) },
+  ).rows;
+  // Exported cells show the supplier value and the original notation for Owner review.
+  const exported = await load(await buildCatalogWorkbook(rows, [], reference));
+  const sheet = exported.getWorksheet("Products");
+  assert.deepEqual([2, 3].map((r) => sheet.getRow(r).getCell(column("RAM")).value), ["3+5 GB", "4+4 GB"]);
+  assert.deepEqual([2, 3].map((r) => sheet.getRow(r).getCell(column("Notes")).value), ["RAM as listed: 3+5", "RAM as listed: 4+4"]);
+  // Unedited re-upload: exact value and clear reason kept; no summing, no false duplicate; Apply blocked.
+  const unedited = await roundTrip(rows, (workbook) => [2, 3].forEach((r) => completeRow(workbook.getWorksheet("Products"), r)));
+  assert.deepEqual(unedited.rows.map((row) => row.ram), ["3+5 GB", "4+4 GB"]);
+  for (const row of unedited.rows) {
+    assert.equal(row.needsReview, true);
+    assert.deepEqual(row.reviewReasons, [EXTENDED]);
+    assert.equal(row.fieldStatus.ram, "needs_review");
+  }
+  const blocked = catalogSheetToBulkParseResult(unedited);
+  assert.ok(blocked.products[0].variants.every((variant) => variant.warnings.includes(EXTENDED)));
+  // Owner replaces one value with physical RAM: that variant is clean; the other stays blocked.
+  const partial = await roundTrip(rows, (workbook) => {
+    const products = workbook.getWorksheet("Products");
+    [2, 3].forEach((r) => completeRow(products, r));
+    products.getRow(2).getCell(column("RAM")).value = "3 GB";
+  });
+  assert.deepEqual(partial.rows.map((row) => row.ram), ["3 GB", "4+4 GB"]);
+  assert.deepEqual(partial.rows.map((row) => row.needsReview), [false, true]);
+  assert.deepEqual(partial.rows[1].reviewReasons, [EXTENDED]);
+  assert.deepEqual(partial.rows.map((row) => [row.storage, row.color, row.priceMinor]), [["64 GB", "Green", 2_950_000], ["64 GB", "Green", 3_350_000]]);
+});
+
 test("v2 B. mixed stock without a profile leaves PTA/Condition/Warranty blank without review", () => {
   const [android] = stage("Samsung A16 6/128 Black; 42500");
   assert.equal(android.ptaStatus, null);

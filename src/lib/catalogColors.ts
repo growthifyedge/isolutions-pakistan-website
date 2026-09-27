@@ -35,6 +35,13 @@ const KNOWN_COLOR_WORDS = new Set([
   "jet", "mist", "cosmic", "awesome", "starry", "shadow", "marble", "sea",
 ]);
 
+// Owner-confirmed multi-word supplier colours, as displayed. Any other multi-word colour
+// still needs review; there is no generic acceptance of multi-word colours.
+const KNOWN_MULTI_WORD_COLORS = new Set(["Grey Green"]);
+
+/** True for an exact Owner-confirmed multi-word colour ("Grey Green"). */
+export const isKnownMultiWordColor = (color: string) => KNOWN_MULTI_WORD_COLORS.has(color);
+
 export type NormalizedColor = { color: string; known: boolean };
 
 const titleWord = (word: string) => word[0].toUpperCase() + word.slice(1).toLowerCase();
