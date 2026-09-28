@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { pkrMajorInputFromMinor } from "../src/lib/money.ts";
-import { parseUsedPhoneFacts, variantFacts } from "../src/lib/variantFacts.ts";
+import { SIM_CONFIGURATIONS, parseSimConfiguration, parseUsedPhoneFacts, variantFacts } from "../src/lib/variantFacts.ts";
 import { createCatalogTestDatabase, signInAsOwner } from "./support/catalogTestDatabase.mjs";
 
 const admin = readFileSync(new URL("../src/admin/AdminCatalog.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
@@ -99,4 +99,41 @@ test("database accepts the Admin update and enforces the same rules", async () =
   await assert.rejects(update({ condition: "brand_new", condition_grade: "A++", battery_health_percent: null, battery_cycle_count: null }), /variants_condition_grade_valid/);
   await assert.rejects(update({ condition: "used", condition_grade: null, battery_health_percent: 101, battery_cycle_count: null }), /variants_battery_health_range/);
   await assert.rejects(update({ condition: "used", condition_grade: null, battery_health_percent: null, battery_cycle_count: -1 }), /variants_battery_cycle_nonnegative/);
+});
+
+test("SIM Configuration: four locked options, blank saves NULL, nothing inferred", () => {
+  assert.deepEqual(SIM_CONFIGURATIONS.map((option) => [option.value, option.label]), [
+    ["physical_sim", "Physical SIM"], ["esim", "eSIM"], ["physical_plus_esim", "Physical + eSIM"], ["dual_esim", "Dual eSIM"],
+  ]);
+  for (const value of ["", " ", null, undefined]) assert.deepEqual(parseSimConfiguration(value), { ok: true, value: null });
+  for (const { value } of SIM_CONFIGURATIONS) assert.deepEqual(parseSimConfiguration(value), { ok: true, value });
+  for (const value of ["both_esim_ready", "Dual eSIM", "physical"])
+    assert.equal(parseSimConfiguration(value).ok, false, value);
+});
+
+test("Admin add and edit forms load and save SIM Configuration", () => {
+  assert.ok(admin.includes("value={newVariant.sim_configuration}"));
+  assert.ok(admin.includes('value={variantEditing.sim_configuration ?? ""}'));
+  assert.ok(admin.includes("sim_configuration: event.target.value || null"));
+  const add = admin.slice(admin.indexOf("const addVariant"), admin.indexOf("const saveVariantPrice"));
+  assert.ok(add.includes("parseSimConfiguration(newVariant.sim_configuration)") && add.includes("sim_configuration: simConfiguration.value,"));
+  const save = admin.slice(admin.indexOf("const saveVariantDetails"), admin.indexOf("const deleteVariant"));
+  assert.ok(save.includes("parseSimConfiguration(variantEditing.sim_configuration)") && save.includes("sim_configuration: simConfiguration.value,"));
+});
+
+test("database stores SIM Configuration, keeps NULL, rejects unknown values", async () => {
+  const db = await createCatalogTestDatabase();
+  await signInAsOwner(db);
+  await db.query(`select public.apply_catalog_bulk_import_v2($1::jsonb)`, [JSON.stringify({ products: [{
+    action: "Create", source: "row 2", product_type: "Mobile Phone", brand: "Apple", title: "Apple iPhone 16", category: "Mobile Phones",
+    specifications: [], variants: [{ source: "row 2", ram: null, storage: "128 GB", color: "Black", price_minor: 25_000_000, stock: null,
+      pta_status: "not_approved", condition: "brand_new", warranty: null, delivery_scope: "karachi_only" }],
+  }] })]);
+  const sim = async () => (await db.query(`select sim_configuration from public.product_variants where sku = 'MB001'`)).rows[0].sim_configuration;
+  assert.equal(await sim(), null);
+  const update = (value) => db.query(`update public.product_variants set sim_configuration = $1 where sku = 'MB001'`, [value]);
+  for (const { value } of SIM_CONFIGURATIONS) { await update(value); assert.equal(await sim(), value); }
+  await update(null);
+  assert.equal(await sim(), null);
+  await assert.rejects(update("both_esim_ready"), /variants_sim_configuration_valid/);
 });

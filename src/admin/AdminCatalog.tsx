@@ -19,6 +19,8 @@ import {
 } from "../lib/money";
 import {
   CONDITION_GRADES,
+  SIM_CONFIGURATIONS,
+  parseSimConfiguration,
   parseUsedPhoneFacts,
   ptaLabel,
   variantFacts,
@@ -83,6 +85,8 @@ type Variant = {
   condition_grade?: string | null;
   battery_health_percent?: number | null;
   battery_cycle_count?: number | null;
+  // SIM configuration (202609270003); NULL when not supplied.
+  sim_configuration?: string | null;
   quantity?: number;
 };
 /** Variant being edited; Battery Health / Cycle Count are edited as text and validated on save. */
@@ -403,6 +407,7 @@ export function Phase4ProductEditor() {
     condition_grade: "",
     battery_health_percent: "",
     battery_cycle_count: "",
+    sim_configuration: "",
     delivery_scope: "",
   });
   const [stock, setStock] = useState<Record<string, string>>({});
@@ -705,6 +710,11 @@ export function Phase4ProductEditor() {
       setMessage(usedFacts.message);
       return;
     }
+    const simConfiguration = parseSimConfiguration(newVariant.sim_configuration);
+    if (!simConfiguration.ok) {
+      setMessage(simConfiguration.message);
+      return;
+    }
     // No SKU is sent: the database assigns the next sequential SKU for the
     // product's category (e.g. MB001) when the variant is inserted.
     const { error } = await supabase.from("product_variants").insert({
@@ -717,6 +727,7 @@ export function Phase4ProductEditor() {
       compare_at_price_minor: compareAtPriceMinor,
       pta_status: newVariant.pta_status,
       condition: newVariant.condition,
+      sim_configuration: simConfiguration.value,
       delivery_scope: newVariant.delivery_scope || null,
     });
     setMessage(error?.message ?? "Explicit variant added. SKU assigned automatically.");
@@ -732,6 +743,7 @@ export function Phase4ProductEditor() {
         condition_grade: "",
         battery_health_percent: "",
         battery_cycle_count: "",
+        sim_configuration: "",
         delivery_scope: "",
       });
       await load();
@@ -756,6 +768,11 @@ export function Phase4ProductEditor() {
       setMessage(usedFacts.message);
       return;
     }
+    const simConfiguration = parseSimConfiguration(variantEditing.sim_configuration);
+    if (!simConfiguration.ok) {
+      setMessage(simConfiguration.message);
+      return;
+    }
     setVariantSaving(true);
     // The SKU is never sent: existing SKUs are permanent and read-only.
     const { error } = await supabase
@@ -767,6 +784,7 @@ export function Phase4ProductEditor() {
         color_finish: variantEditing.color_finish?.trim() || null,
         pta_status: variantEditing.pta_status,
         condition: variantEditing.condition,
+        sim_configuration: simConfiguration.value,
         delivery_scope: variantEditing.delivery_scope || null,
       })
       .eq("id", variantEditing.id);
@@ -1228,6 +1246,21 @@ export function Phase4ProductEditor() {
                   <small>Optional · 0 or more</small>
                 </label>
                 <label>
+                  SIM Configuration
+                  <select
+                    value={newVariant.sim_configuration}
+                    onChange={(e) =>
+                      setNewVariant({ ...newVariant, sim_configuration: e.target.value })
+                    }
+                  >
+                    <option value="">None</option>
+                    {SIM_CONFIGURATIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <small>Optional · blank stays empty</small>
+                </label>
+                <label>
                   Delivery
                   <select
                     value={newVariant.delivery_scope}
@@ -1534,6 +1567,7 @@ export function Phase4ProductEditor() {
               <label>Condition Grade<select value={variantEditing.condition_grade ?? ""} disabled={variantEditing.condition !== "used"} onChange={(event) => setVariantEditing({ ...variantEditing, condition_grade: event.target.value || null })}><option value="">None</option>{CONDITION_GRADES.map((grade) => <option key={grade} value={grade}>{grade}</option>)}</select><small>Used phones only.</small></label>
               <label>Battery Health %<input type="number" min="1" max="100" step="1" value={variantEditing.batteryHealthInput} onChange={(event) => setVariantEditing({ ...variantEditing, batteryHealthInput: event.target.value })} /><small>Optional · 1–100 · blank stays empty</small></label>
               <label>Battery Cycle Count<input type="number" min="0" step="1" value={variantEditing.cycleCountInput} onChange={(event) => setVariantEditing({ ...variantEditing, cycleCountInput: event.target.value })} /><small>Optional · 0 or more · blank stays empty</small></label>
+              <label>SIM Configuration<select value={variantEditing.sim_configuration ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, sim_configuration: event.target.value || null })}><option value="">None</option>{SIM_CONFIGURATIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><small>Optional · blank stays empty</small></label>
               <label>Delivery<select value={variantEditing.delivery_scope ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, delivery_scope: event.target.value || null })}><option value="">Unresolved</option><option value="karachi_only">Karachi only</option><option value="nationwide">Nationwide</option></select></label>
             </div>
             <div><button type="button" className="admin-secondary" disabled={variantSaving} onClick={() => setVariantEditing(null)}>Cancel</button><button type="button" className="admin-primary" disabled={variantSaving} onClick={() => void saveVariantDetails()}>{variantSaving ? "Saving…" : "Save variant"}</button></div>

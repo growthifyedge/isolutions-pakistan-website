@@ -4,6 +4,24 @@
 
 export const CONDITION_GRADES = ["A++"] as const;
 
+// SIM configuration (202609270003): optional; blank stays NULL and is never inferred.
+export const SIM_CONFIGURATIONS = [
+  { value: "physical_sim", label: "Physical SIM" },
+  { value: "esim", label: "eSIM" },
+  { value: "physical_plus_esim", label: "Physical + eSIM" },
+  { value: "dual_esim", label: "Dual eSIM" },
+] as const;
+
+/** Blank selection saves NULL; any other value must be one of SIM_CONFIGURATIONS. */
+export function parseSimConfiguration(value: string | null | undefined):
+  | { ok: true; value: string | null }
+  | { ok: false; message: string } {
+  if (value === null || value === undefined || value.trim() === "") return { ok: true, value: null };
+  return SIM_CONFIGURATIONS.some((option) => option.value === value)
+    ? { ok: true, value }
+    : { ok: false, message: "SIM Configuration must be Physical SIM, eSIM, Physical + eSIM or Dual eSIM." };
+}
+
 const PTA_LABELS: Record<string, string> = {
   approved: "PTA Approved",
   not_approved: "Non-PTA",
