@@ -14,10 +14,12 @@ import {
   type CatalogProductType,
   type CatalogPtaStatus,
   type CatalogSheetRow,
+  type CatalogSimConfiguration,
   type FieldStatus,
 } from "./catalogSheet.ts";
 import { normalizeCapacity } from "./bulkCatalog.ts";
 import { pkrMajorInputFromMinor } from "./money.ts";
+import { SIM_CONFIGURATIONS } from "./variantFacts.ts";
 
 // Bulk Upload v2 — Phase 1B. Excel staging for CatalogSheetRow data: a workbook
 // writer, a reader, and validation against current active brands/categories.
@@ -27,12 +29,14 @@ export const CATALOG_TEMPLATE_VERSION = "isolutions-catalog-v1";
 
 export const PRODUCT_HEADERS = [
   "Action", "Product Type", "Brand", "Model / Product Title", "RAM", "Storage", "Color",
-  "PTA Status", "Condition", "Battery Health", "Cycle Count", "Warranty", "Delivery Scope",
+  "PTA Status", "Condition", "Battery Health", "Cycle Count", "SIM Configuration", "Warranty", "Delivery Scope",
   "Price", "Compare-at Price", "Stock", "SKU", "Category", "Slug", "Notes",
 ] as const;
 export const SPECIFICATION_HEADERS = ["Product Key", "Section", "Specification Name", "Specification Value"] as const;
 
 type ProductHeader = (typeof PRODUCT_HEADERS)[number];
+/** Columns added after v1 shipped: workbooks without them still read (the value stays blank). */
+const OPTIONAL_PRODUCT_HEADERS: ProductHeader[] = ["SIM Configuration"];
 
 const HEADER_FIELD: Record<ProductHeader, CatalogField> = {
   Action: "action",
@@ -46,6 +50,7 @@ const HEADER_FIELD: Record<ProductHeader, CatalogField> = {
   Condition: "condition",
   "Battery Health": "batteryHealth",
   "Cycle Count": "cycleCount",
+  "SIM Configuration": "simConfiguration",
   Warranty: "warranty",
   "Delivery Scope": "deliveryScope",
   Price: "priceMinor",
@@ -63,6 +68,7 @@ export const CATALOG_LISTS = {
   ptaStatus: ["PTA Approved", "Non-PTA", "Not Applicable"],
   condition: ["Brand New", "Used", "Open Box", "Refurbished"],
   deliveryScope: ["Karachi Only", "Nationwide"],
+  simConfiguration: SIM_CONFIGURATIONS.map((option) => option.label) as string[],
 };
 
 const PTA_LABEL: Record<CatalogPtaStatus, string> = {
@@ -80,6 +86,10 @@ const DELIVERY_LABEL: Record<CatalogDeliveryScope, string> = {
   karachi_only: "Karachi Only",
   nationwide: "Nationwide",
 };
+const SIM_LABEL = Object.fromEntries(SIM_CONFIGURATIONS.map((option) => [option.value, option.label])) as Record<
+  CatalogSimConfiguration,
+  string
+>;
 
 /** An SKU already in the catalog and the slug of the product that owns it. */
 export type CatalogExistingSku = { sku: string; productSlug: string };
@@ -120,7 +130,7 @@ const FILL = {
 const TEXT_COLUMNS: ProductHeader[] = ["RAM", "Storage", "SKU", "Slug"];
 const COLUMN_WIDTHS: Record<ProductHeader, number> = {
   Action: 16, "Product Type": 14, Brand: 14, "Model / Product Title": 26, RAM: 9, Storage: 10,
-  Color: 16, "PTA Status": 15, Condition: 13, "Battery Health": 14, "Cycle Count": 12, Warranty: 18,
+  Color: 16, "PTA Status": 15, Condition: 13, "Battery Health": 14, "Cycle Count": 12, "SIM Configuration": 18, Warranty: 18,
   "Delivery Scope": 15, Price: 13, "Compare-at Price": 16, Stock: 8, SKU: 10, Category: 20, Slug: 30, Notes: 32,
 };
 const VALIDATION_ROWS = 2000;
@@ -156,6 +166,7 @@ function cellValueFor(row: CatalogSheetRow, header: ProductHeader): string | num
     case "Condition": return row.condition ? CONDITION_LABEL[row.condition] : null;
     case "Battery Health": return row.batteryHealth;
     case "Cycle Count": return row.cycleCount;
+    case "SIM Configuration": return row.simConfiguration ? SIM_LABEL[row.simConfiguration] : null;
     case "Warranty": return row.warranty;
     case "Delivery Scope": return row.deliveryScope ? DELIVERY_LABEL[row.deliveryScope] : null;
     case "Price": return row.priceMinor === null ? null : row.priceMinor / 100;
@@ -191,6 +202,7 @@ function writeListsSheet(workbook: Workbook, reference: CatalogReference) {
     ["Condition", CATALOG_LISTS.condition],
     ["Delivery Scope", CATALOG_LISTS.deliveryScope],
     ["Template", [CATALOG_TEMPLATE_VERSION]],
+    ["SIM Configuration", CATALOG_LISTS.simConfiguration],
   ];
   const ranges: Record<string, string | null> = {};
   columns.forEach(([title, values], index) => {
@@ -273,6 +285,7 @@ export async function buildCatalogWorkbook(
     ["PTA Status", "PTA Status"],
     ["Condition", "Condition"],
     ["Delivery Scope", "Delivery Scope"],
+    ["SIM Configuration", "SIM Configuration"],
     ["Category", "Categories"],
   ];
   for (const [header, list] of listColumns) {
@@ -364,6 +377,10 @@ const CONDITION_INPUT: Record<string, CatalogCondition> = {
 const DELIVERY_INPUT: Record<string, CatalogDeliveryScope> = {
   "karachi only": "karachi_only", karachi: "karachi_only", nationwide: "nationwide",
 };
+// Exact display labels only (case-insensitive). Anything else needs review; never guessed.
+const SIM_INPUT: Record<string, CatalogSimConfiguration> = Object.fromEntries(
+  SIM_CONFIGURATIONS.map((option) => [option.label.toLowerCase(), option.value]),
+);
 const ACTION_INPUT: Record<string, CatalogAction> = {
   create: "Create", "replace existing": "Replace Existing", replace: "Replace Existing",
 };
@@ -459,6 +476,7 @@ export function catalogRowFromRecord(record: Partial<Record<ProductHeader, CellI
   }
   const batteryHealth = wholeNumber("Battery Health", 1, 100);
   const cycleCount = wholeNumber("Cycle Count", 0, Number.MAX_SAFE_INTEGER);
+  const simConfiguration = choose("SIM Configuration", SIM_INPUT);
   const warranty = text("Warranty");
   explicit("warranty", warranty);
   const deliveryScope = choose("Delivery Scope", DELIVERY_INPUT);
@@ -502,6 +520,7 @@ export function catalogRowFromRecord(record: Partial<Record<ProductHeader, CellI
     conditionGrade,
     batteryHealth,
     cycleCount,
+    simConfiguration,
     warranty,
     deliveryScope,
     priceMinor,
@@ -705,8 +724,9 @@ export async function readCatalogWorkbook(
   if (!products || !specSheet || fileErrors.length) return { rows: [], specifications: [], fileErrors };
 
   const productHeaders = headerMap(products, PRODUCT_HEADERS, HEADER_ALIASES);
-  if (productHeaders.missing.length)
-    fileErrors.push(`Products sheet is missing required column(s): ${productHeaders.missing.join(", ")}.`);
+  const missingProductHeaders = productHeaders.missing.filter((header) => !OPTIONAL_PRODUCT_HEADERS.includes(header));
+  if (missingProductHeaders.length)
+    fileErrors.push(`Products sheet is missing required column(s): ${missingProductHeaders.join(", ")}.`);
   const specHeaders = headerMap(specSheet, SPECIFICATION_HEADERS);
   if (specHeaders.missing.length)
     fileErrors.push(`Specifications sheet is missing required column(s): ${specHeaders.missing.join(", ")}.`);
@@ -778,6 +798,7 @@ function toBulkVariant(row: CatalogSheetRow): BulkVariant {
     conditionGrade: row.conditionGrade,
     batteryHealth: row.batteryHealth,
     cycleCount: row.cycleCount,
+    simConfiguration: row.simConfiguration,
   };
 }
 

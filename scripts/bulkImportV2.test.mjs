@@ -293,6 +293,91 @@ test("30. a forced error mid-import rolls back the whole batch", async () => {
   assert.equal((await one(local, `select count(*)::int as n from public.inventory_movements`)).n, 0);
 });
 
+// ---------------------------------------------------------------------------
+// SIM Configuration (202609290001): optional variant fact, not part of identity
+// ---------------------------------------------------------------------------
+
+const SIM_VALUES = ["physical_sim", "esim", "physical_plus_esim", "dual_esim"];
+const simOf = async (title) =>
+  Object.fromEntries((await variantsOf(db, title)).map((row) => [row.color_finish, row.sim_configuration]));
+
+test("SIM: Create stores each of the 4 values; blank, null and a missing key store NULL", async () => {
+  const colors = ["Black", "White", "Blue", "Natural"];
+  await apply(db, [product({ brand: "Apple", title: "Apple iPhone 16 SIM Create", variants: [
+    ...SIM_VALUES.map((sim, index) => variant({ ram: null, color: colors[index], sim_configuration: sim })),
+    variant({ ram: null, color: "Pink", sim_configuration: "" }),
+    variant({ ram: null, color: "Teal", sim_configuration: "   " }),
+    variant({ ram: null, color: "Green", sim_configuration: null }),
+    variant({ ram: null, color: "Gold" }),
+  ] })]);
+  assert.deepEqual(await simOf("Apple iPhone 16 SIM Create"), {
+    Black: "physical_sim", White: "esim", Blue: "physical_plus_esim", Natural: "dual_esim",
+    Pink: null, Teal: null, Green: null, Gold: null,
+  });
+});
+
+test("SIM: Replace with a supplied value updates it; blank / missing keeps the existing value", async () => {
+  const used = { ram: null, storage: "256 GB", condition: "used", condition_grade: "A++" };
+  await apply(db, [product({ brand: "Apple", title: "Apple iPhone 15 SIM Replace", variants: [
+    variant({ ...used, color: "Black", sim_configuration: "esim", battery_health_percent: 90, battery_cycle_count: 200 }),
+    variant({ ...used, color: "Blue", sim_configuration: "physical_sim" }),
+    variant({ ...used, color: "White", sim_configuration: "dual_esim" }),
+    variant({ ...used, color: "Pink" }),
+  ] })]);
+  const before = await variantsOf(db, "Apple iPhone 15 SIM Replace");
+  const result = await apply(db, [product({ action: "Replace Existing", brand: "Apple", title: "Apple iPhone 15 SIM Replace", variants: [
+    variant({ ...used, color: "Black", sim_configuration: "physical_plus_esim", battery_health_percent: 90, battery_cycle_count: 200 }),
+    variant({ ...used, color: "Blue", sim_configuration: null }),
+    variant({ ...used, color: "White", sim_configuration: "" }),
+    variant({ ...used, color: "Pink", sim_configuration: "esim" }),
+  ] })]);
+  // Every row matched its existing variant: nothing created, nothing hidden.
+  assert.deepEqual([result.variants_updated, result.variants_created, result.variants_hidden], [4, 0, 0]);
+  assert.deepEqual(await simOf("Apple iPhone 15 SIM Replace"), {
+    Black: "physical_plus_esim", Blue: "physical_sim", White: "dual_esim", Pink: "esim",
+  });
+  // An old payload without the key also keeps the stored value.
+  await apply(db, [product({ action: "Replace Existing", brand: "Apple", title: "Apple iPhone 15 SIM Replace", variants: [
+    variant({ ...used, color: "Black", battery_health_percent: 90, battery_cycle_count: 200 }),
+    variant({ ...used, color: "Blue" }), variant({ ...used, color: "White" }), variant({ ...used, color: "Pink" }),
+  ] })]);
+  assert.deepEqual(await simOf("Apple iPhone 15 SIM Replace"), {
+    Black: "physical_plus_esim", Blue: "physical_sim", White: "dual_esim", Pink: "esim",
+  });
+  // SKUs and the other facts are untouched by the SIM changes.
+  const after = await variantsOf(db, "Apple iPhone 15 SIM Replace");
+  assert.deepEqual(after.map((row) => [row.sku, row.condition_grade, row.battery_health_percent, row.battery_cycle_count, row.pta_status]),
+    before.map((row) => [row.sku, row.condition_grade, row.battery_health_percent, row.battery_cycle_count, row.pta_status]));
+});
+
+test("SIM: invalid values are rejected, never coerced, and nothing is written", async () => {
+  for (const bad of ["both_esim", "Dual eSIM", "ESIM", "physical", "dual_sim"]) {
+    await rejects(db, [product({ brand: "Apple", title: "Apple iPhone SIM Bad", variants: [variant({ ram: null, sim_configuration: bad })] })],
+      new RegExp(`Unknown SIM Configuration "${bad}"`));
+  }
+  assert.equal((await one(db, `select count(*)::int as n from public.products where title = 'Apple iPhone SIM Bad'`)).n, 0);
+  // Replace with an invalid value leaves the stored value alone.
+  await apply(db, [product({ brand: "Apple", title: "Apple iPhone SIM Keep", variants: [variant({ ram: null, sim_configuration: "esim" })] })]);
+  await rejects(db, [product({ action: "Replace Existing", brand: "Apple", title: "Apple iPhone SIM Keep", variants: [variant({ ram: null, sim_configuration: "both" })] })],
+    /Unknown SIM Configuration "both"/);
+  assert.deepEqual(await simOf("Apple iPhone SIM Keep"), { Black: "esim" });
+});
+
+test("SIM: not part of variant identity (duplicate check, Replace matching, uniqueness unchanged)", async () => {
+  // Two rows differing only by SIM are still the same variant.
+  await rejects(db, [product({ brand: "Apple", title: "Apple iPhone SIM Identity", variants: [
+    variant({ ram: null, source: "row 2", sim_configuration: "esim" }), variant({ ram: null, source: "row 3", sim_configuration: "physical_sim" }),
+  ] })], /Duplicate variant: row 2, row 3/);
+  // Replace with a different SIM updates the matched variant instead of creating a new one.
+  await apply(db, [product({ brand: "Apple", title: "Apple iPhone SIM Identity", variants: [variant({ ram: null, sim_configuration: "esim" })] })]);
+  const [original] = await variantsOf(db, "Apple iPhone SIM Identity");
+  const result = await apply(db, [product({ action: "Replace Existing", brand: "Apple", title: "Apple iPhone SIM Identity",
+    variants: [variant({ ram: null, sim_configuration: "dual_esim" })] })]);
+  assert.deepEqual([result.variants_updated, result.variants_created], [1, 0]);
+  const rows = await variantsOf(db, "Apple iPhone SIM Identity");
+  assert.deepEqual(rows.map((row) => [row.id, row.sku, row.sim_configuration]), [[original.id, original.sku, "dual_esim"]]);
+});
+
 test("legacy import stays available alongside v2", async () => {
   const functions = await all(db, `select proname from pg_proc where proname in ('apply_catalog_bulk_import', 'apply_catalog_bulk_import_phase4_legacy', 'apply_catalog_bulk_import_v2') order by proname`);
   assert.deepEqual(functions.map((row) => row.proname), ["apply_catalog_bulk_import", "apply_catalog_bulk_import_phase4_legacy", "apply_catalog_bulk_import_v2"]);

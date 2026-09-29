@@ -47,6 +47,7 @@ import {
   validateCatalogSheet,
   type CatalogReference,
 } from "../lib/catalogWorkbook";
+import { simConfigurationLabel } from "../lib/variantFacts";
 
 type Taxonomy = {
   id: string;
@@ -829,6 +830,7 @@ export function BulkImport() {
           condition_grade: variant.conditionGrade ?? null,
           battery_health_percent: variant.batteryHealth ?? null,
           battery_cycle_count: variant.cycleCount ?? null,
+          sim_configuration: variant.simConfiguration ?? null,
           warranty: variant.warranty,
           delivery_scope: variant.deliveryScope,
         })),
@@ -1319,6 +1321,7 @@ export function BulkImport() {
                       {variant.conditionGrade ? ` · grade ${variant.conditionGrade}` : ""}
                       {variant.batteryHealth != null ? ` · BH ${variant.batteryHealth}%` : ""}
                       {variant.cycleCount != null ? ` · ${variant.cycleCount} cycles` : ""}
+                      {variant.simConfiguration ? ` · ${simConfigurationLabel(variant.simConfiguration)}` : ""}
                     </span>
                     <span
                       className={`bulk-status ${variant.warnings.length ? "blocked" : "ready"}`}

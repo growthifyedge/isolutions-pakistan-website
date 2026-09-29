@@ -1,6 +1,7 @@
 import { normalizeCapacity } from "./bulkCatalog.ts";
 import { isKnownMultiWordColor, normalizeColor } from "./catalogColors.ts";
 import { parsePkrMajorToMinor } from "./money.ts";
+import type { SIM_CONFIGURATIONS } from "./variantFacts.ts";
 
 // Bulk Upload v2 — Phase 1A. The fixed catalog sheet row contract shared by the
 // rough-stock normalizer and (later) the Excel writer/reader. Pure functions only:
@@ -19,6 +20,8 @@ export type CatalogPtaStatus = "approved" | "not_approved" | "not_applicable";
 export type CatalogCondition = "brand_new" | "used" | "open_box" | "refurbished";
 export type CatalogConditionGrade = "A++";
 export type CatalogDeliveryScope = "karachi_only" | "nationwide";
+/** product_variants.sim_configuration (202609270003); NULL when not supplied, never inferred. */
+export type CatalogSimConfiguration = (typeof SIM_CONFIGURATIONS)[number]["value"];
 
 export type CatalogSheetRow = {
   lineNumber: number;
@@ -36,6 +39,8 @@ export type CatalogSheetRow = {
   conditionGrade: CatalogConditionGrade | null;
   batteryHealth: number | null;
   cycleCount: number | null;
+  /** Not part of variant identity; only supplied through the Excel SIM Configuration column. */
+  simConfiguration: CatalogSimConfiguration | null;
   warranty: string | null;
   deliveryScope: CatalogDeliveryScope | null;
   priceMinor: number | null;
@@ -53,7 +58,7 @@ export type CatalogSheetRow = {
 export type CatalogField =
   | "action" | "productType" | "brand" | "model" | "productTitle"
   | "ram" | "storage" | "color" | "ptaStatus" | "condition" | "conditionGrade"
-  | "batteryHealth" | "cycleCount" | "warranty" | "deliveryScope"
+  | "batteryHealth" | "cycleCount" | "simConfiguration" | "warranty" | "deliveryScope"
   | "priceMinor" | "compareAtPriceMinor" | "stock" | "sku" | "category" | "slug" | "notes";
 
 /** Active brand names (plus optional aliases) supplied by the caller, e.g. from the brands table. */
@@ -174,7 +179,7 @@ function emptyStatus(): Record<CatalogField, FieldStatus> {
   return {
     action: "blank", productType: "blank", brand: "blank", model: "blank", productTitle: "blank",
     ram: "blank", storage: "blank", color: "blank", ptaStatus: "blank", condition: "blank",
-    conditionGrade: "blank", batteryHealth: "blank", cycleCount: "blank", warranty: "blank",
+    conditionGrade: "blank", batteryHealth: "blank", cycleCount: "blank", simConfiguration: "blank", warranty: "blank",
     deliveryScope: "blank", priceMinor: "blank", compareAtPriceMinor: "blank", stock: "blank",
     sku: "blank", category: "blank", slug: "blank", notes: "blank",
   };
@@ -610,6 +615,8 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
       conditionGrade: attributes.conditionGrade,
       batteryHealth: attributes.batteryHealth,
       cycleCount: attributes.cycleCount,
+      // Raw supplier text never sets SIM Configuration (parser mapping is a later phase).
+      simConfiguration: null,
       warranty: attributes.warranty,
       deliveryScope,
       priceMinor: attributes.priceMinor,

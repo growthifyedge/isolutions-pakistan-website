@@ -64,6 +64,8 @@ export type BulkVariant = {
   conditionGrade?: string | null;
   batteryHealth?: number | null;
   cycleCount?: number | null;
+  // Catalog sheet SIM Configuration (internal value); preview only, not variant identity.
+  simConfiguration?: string | null;
 };
 
 export type BulkProduct = {

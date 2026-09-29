@@ -22,6 +22,7 @@ import {
   catalogSheetToBulkParseResult,
   readCatalogWorkbook,
 } from "../src/lib/catalogWorkbook.ts";
+import { simConfigurationLabel } from "../src/lib/variantFacts.ts";
 
 const reference = {
   brands: ["Samsung", "Xiaomi", "Oppo", "Apple", "Vivo", "Infinix", "Tecno", "Realme"],
@@ -60,7 +61,7 @@ test("1-3. workbook has Products, Specifications and a hidden Lists sheet with e
   assert.deepEqual(workbook.getWorksheet("Products").getRow(1).values.slice(1), [...PRODUCT_HEADERS]);
   assert.deepEqual(workbook.getWorksheet("Specifications").getRow(1).values.slice(1), [...SPECIFICATION_HEADERS]);
   const lists = workbook.getWorksheet("Lists");
-  assert.deepEqual(lists.getRow(1).values.slice(1), ["Brands", "Categories", "Action", "Product Type", "PTA Status", "Condition", "Delivery Scope", "Template"]);
+  assert.deepEqual(lists.getRow(1).values.slice(1), ["Brands", "Categories", "Action", "Product Type", "PTA Status", "Condition", "Delivery Scope", "Template", "SIM Configuration"]);
   assert.equal(lists.getCell("H2").value, CATALOG_TEMPLATE_VERSION);
   assert.equal(lists.getCell("A2").value, "Apple");
   assert.deepEqual(lists.getColumn(4).values.slice(2), ["Mobile Phone", "Accessory", "Gadget", "Tablet", "Laptop"]);
@@ -560,4 +561,178 @@ test("SKU preview: matching never uses SKU; matched variant keeps its SKU; new v
   assert.ok(source.includes("catalogSkuPending(variant.skuPrefix)"));
   assert.ok(source.includes("CATALOG_SKU_PREFIX_BY_CATEGORY_SLUG[effectiveCategorySlug]"));
   assert.ok(source.includes("// Blank for a new variant: the database assigns its SKU.\n          sku: variant.skuResolved,"));
+});
+
+// ---------------------------------------------------------------------------
+// SIM Configuration (product_variants.sim_configuration, 202609270003)
+// ---------------------------------------------------------------------------
+
+const SIM_CASES = [
+  ["physical_sim", "Physical SIM"],
+  ["esim", "eSIM"],
+  ["physical_plus_esim", "Physical + eSIM"],
+  ["dual_esim", "Dual eSIM"],
+];
+const SIM_LINES = "iPhone 15 Pro 256 Natural; 265000\niPhone 15 Pro 256 Black; 265000\niPhone 15 Pro 256 White; 265000\niPhone 15 Pro 256 Blue; 265000";
+const simLetter = () => String.fromCharCode(64 + column("SIM Configuration"));
+
+test("SIM: template has an optional SIM Configuration column with a label dropdown", async () => {
+  assert.ok(PRODUCT_HEADERS.includes("SIM Configuration"));
+  assert.deepEqual(CATALOG_LISTS.simConfiguration, ["Physical SIM", "eSIM", "Physical + eSIM", "Dual eSIM"]);
+  const workbook = await load(await buildCatalogWorkbook([], [], reference));
+  const products = workbook.getWorksheet("Products");
+  assert.equal(products.getRow(1).getCell(column("SIM Configuration")).value, "SIM Configuration");
+  assert.equal(products.getCell(`${simLetter()}50`).dataValidation.type, "list");
+  assert.deepEqual(workbook.getWorksheet("Lists").getColumn(9).values.slice(1), ["SIM Configuration", ...CATALOG_LISTS.simConfiguration]);
+});
+
+test("SIM: all 4 internal values export as their Excel labels; blank exports blank", async () => {
+  const rows = normalize(SIM_LINES).map((row, index) => ({ ...row, simConfiguration: SIM_CASES[index][0] }));
+  const [unset] = normalize("iPhone 15 Pro 256 Gold; 265000");
+  assert.equal(unset.simConfiguration, null);
+  const sheet = (await load(await buildCatalogWorkbook([...rows, unset], [], reference))).getWorksheet("Products");
+  const exported = [2, 3, 4, 5, 6].map((r) => sheet.getRow(r).getCell(column("SIM Configuration")).value);
+  assert.deepEqual(exported, [...SIM_CASES.map(([, label]) => label), null]);
+});
+
+test("SIM: all 4 Excel labels import as internal values; blank and whitespace stay NULL", async () => {
+  const data = await roundTrip(normalize(`${SIM_LINES}\niPhone 15 Pro 256 Gold; 265000\niPhone 15 Pro 256 Red; 265000`), (workbook) => {
+    const sheet = workbook.getWorksheet("Products");
+    SIM_CASES.forEach(([, label], index) => (sheet.getRow(index + 2).getCell(column("SIM Configuration")).value = label));
+    sheet.getRow(6).getCell(column("SIM Configuration")).value = null;
+    sheet.getRow(7).getCell(column("SIM Configuration")).value = "   ";
+  });
+  assert.deepEqual(data.fileErrors, []);
+  assert.deepEqual(data.rows.map((row) => row.simConfiguration), [...SIM_CASES.map(([value]) => value), null, null]);
+  assert.deepEqual(data.rows.map((row) => row.fieldStatus.simConfiguration), ["explicit", "explicit", "explicit", "explicit", "blank", "blank"]);
+  assert.ok(data.rows.every((row) => !row.needsReview));
+});
+
+test("SIM: unknown values need review and are never guessed or converted", async () => {
+  const unknown = ["Both eSIM", "Dual SIM", "physical_sim", "e-SIM"];
+  const data = await roundTrip(normalize(SIM_LINES), (workbook) => {
+    const sheet = workbook.getWorksheet("Products");
+    unknown.forEach((value, index) => (sheet.getRow(index + 2).getCell(column("SIM Configuration")).value = value));
+  });
+  data.rows.forEach((row, index) => {
+    assert.equal(row.simConfiguration, null);
+    assert.equal(row.fieldStatus.simConfiguration, "needs_review");
+    assert.equal(row.needsReview, true);
+    assert.deepEqual(row.reviewReasons, [`Unknown SIM Configuration: "${unknown[index]}"`]);
+  });
+  // The existing review path blocks the variant in the preview.
+  const variants = catalogSheetToBulkParseResult(data).products.flatMap((product) => product.variants);
+  assert.ok(variants.every((variant, index) => variant.warnings.includes(`Unknown SIM Configuration: "${unknown[index]}"`)));
+});
+
+test("SIM: an older workbook without the SIM Configuration column still reads", async () => {
+  const data = await roundTrip(normalize("Samsung A16 6/128 Black; 42500"), (workbook) => {
+    workbook.getWorksheet("Products").spliceColumns(column("SIM Configuration"), 1);
+  });
+  assert.deepEqual(data.fileErrors, []);
+  const [row] = data.rows;
+  assert.equal(row.simConfiguration, null);
+  assert.equal(row.fieldStatus.simConfiguration, "blank");
+  assert.equal(row.priceMinor, 4_250_000);
+  assert.equal(row.warranty, null);
+  assert.equal(row.needsReview, false);
+  // Other columns are still required.
+  const noPrice = await roundTrip([], (workbook) => {
+    const sheet = workbook.getWorksheet("Products");
+    sheet.spliceColumns(column("SIM Configuration"), 1);
+    sheet.getRow(1).getCell(column("Price") - 1).value = "Cost";
+  });
+  assert.deepEqual(noPrice.fileErrors, ["Products sheet is missing required column(s): Price."]);
+});
+
+test("SIM: export -> unchanged re-upload preserves the exact internal value", async () => {
+  const rows = normalize(SIM_LINES).map((row, index) => ({ ...row, simConfiguration: SIM_CASES[index][0] }));
+  const data = await roundTrip(rows);
+  assert.deepEqual(data.rows.map((row) => row.simConfiguration), SIM_CASES.map(([value]) => value));
+  // Round-trip twice: still identical.
+  const again = await roundTrip(data.rows);
+  assert.deepEqual(again.rows.map((row) => row.simConfiguration), SIM_CASES.map(([value]) => value));
+});
+
+test("SIM: not part of variant identity; raw stock lines never set it", async () => {
+  const rows = normalize("iPhone 15 Pro 256 Natural; 265000\niPhone 15 Pro 256 Natural; 265000");
+  assert.ok(rows.every((row) => row.simConfiguration === null));
+  const data = await roundTrip(rows, (workbook) => {
+    const sheet = workbook.getWorksheet("Products");
+    sheet.getRow(2).getCell(column("SIM Configuration")).value = "eSIM";
+    sheet.getRow(3).getCell(column("SIM Configuration")).value = "Physical SIM";
+  });
+  assert.ok(data.rows[1].reviewReasons.includes("Duplicate variant (same as Products row 2)"));
+});
+
+// ---------------------------------------------------------------------------
+// SIM Configuration in Bulk Preview (variant level, display only)
+// ---------------------------------------------------------------------------
+
+test("SIM preview: all 4 values reach Bulk Preview variants; NULL stays blank", async () => {
+  const lines = `${SIM_LINES}\niPhone 15 Pro 256 Gold; 265000`;
+  const data = await roundTrip(normalize(lines), (workbook) => {
+    const sheet = workbook.getWorksheet("Products");
+    SIM_CASES.forEach(([, label], index) => (sheet.getRow(index + 2).getCell(column("SIM Configuration")).value = label));
+  });
+  const preview = catalogSheetToBulkParseResult(data);
+  assert.equal(preview.products.length, 1);
+  const [product] = preview.products;
+  // Variant level only: the product carries no SIM field.
+  assert.ok(!("simConfiguration" in product));
+  assert.deepEqual(product.variants.map((variant) => variant.simConfiguration), [...SIM_CASES.map(([value]) => value), null]);
+  assert.ok(product.variants.every((variant) => variant.warnings.length === 0));
+});
+
+test("SIM preview: display labels for the 4 values; NULL/undefined has no label", () => {
+  for (const [value, label] of SIM_CASES) assert.equal(simConfigurationLabel(value), label);
+  assert.equal(simConfigurationLabel(null), null);
+  assert.equal(simConfigurationLabel(undefined), null);
+  assert.equal(simConfigurationLabel(""), null);
+});
+
+test("SIM preview: unknown workbook value stays blocked with the workbook warning, no SIM value", async () => {
+  const data = await roundTrip(normalize("iPhone 15 Pro 256 Natural; 265000"), (workbook) => {
+    workbook.getWorksheet("Products").getRow(2).getCell(column("SIM Configuration")).value = "Both eSIM";
+  });
+  const [variant] = catalogSheetToBulkParseResult(data).products[0].variants;
+  assert.equal(variant.simConfiguration, null);
+  assert.deepEqual(variant.warnings, ['Unknown SIM Configuration: "Both eSIM"']);
+});
+
+test("SIM preview: rows without SIM preview exactly as before (only a null SIM field is added)", async () => {
+  const text = "Samsung A16 6/128 Black; 42500\niPhone 15 Pro 256 Natural; 265000; Used; Non-PTA; BH 89%; Cycles 312";
+  const withColumn = catalogSheetToBulkParseResult(await roundTrip(normalize(text)));
+  const withoutColumn = catalogSheetToBulkParseResult(
+    await roundTrip(normalize(text), (workbook) => workbook.getWorksheet("Products").spliceColumns(column("SIM Configuration"), 1)),
+  );
+  assert.deepEqual(withColumn, withoutColumn);
+  for (const variant of withColumn.products.flatMap((product) => product.variants)) {
+    assert.equal(variant.simConfiguration, null);
+    const { simConfiguration, ...rest } = variant;
+    assert.deepEqual(Object.keys(rest).sort(), [
+      "batteryHealth", "color", "compareAtPriceMinor", "compareAtPricePkr", "condition", "conditionGrade", "conditionSource",
+      "cycleCount", "deliveryScope", "deliverySource", "inventory", "priceMinor", "pricePkr", "ptaSource", "ptaStatus", "ram",
+      "sku", "source", "storage", "warnings", "warranty", "warrantySource",
+    ]);
+  }
+});
+
+test("SIM preview + Apply: BulkImport shows the label per variant and sends it once; identity unchanged", () => {
+  const source = readFileSync(new URL("../src/admin/BulkImport.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  // Rendered in the variant row, after the used-phone facts; nothing rendered when NULL.
+  assert.ok(source.includes('{variant.simConfiguration ? ` · ${simConfigurationLabel(variant.simConfiguration)}` : ""}'));
+  // Only the import, that one render line and the one Apply payload field mention SIM Configuration.
+  assert.deepEqual(
+    source.split("\n").filter((line) => /sim_?configuration/i.test(line)).map((line) => line.trim()),
+    [
+      'import { simConfigurationLabel } from "../lib/variantFacts";',
+      "sim_configuration: variant.simConfiguration ?? null,",
+      '{variant.simConfiguration ? ` · ${simConfigurationLabel(variant.simConfiguration)}` : ""}',
+    ],
+  );
+  // The payload field sits with the other optional variant facts, sent exactly once.
+  assert.ok(source.includes("battery_cycle_count: variant.cycleCount ?? null,\n          sim_configuration: variant.simConfiguration ?? null,\n          warranty: variant.warranty,"));
+  // Not used for matching or in-batch duplicate detection.
+  assert.ok(!/matchImportVariant\([^)]*simConfiguration/s.test(source));
 });

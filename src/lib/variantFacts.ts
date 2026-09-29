@@ -12,6 +12,10 @@ export const SIM_CONFIGURATIONS = [
   { value: "dual_esim", label: "Dual eSIM" },
 ] as const;
 
+/** Display label for a stored SIM configuration; NULL (not supplied) has no label. */
+export const simConfigurationLabel = (value: string | null | undefined) =>
+  value ? SIM_CONFIGURATIONS.find((option) => option.value === value)?.label ?? value : null;
+
 /** Blank selection saves NULL; any other value must be one of SIM_CONFIGURATIONS. */
 export function parseSimConfiguration(value: string | null | undefined):
   | { ok: true; value: string | null }
