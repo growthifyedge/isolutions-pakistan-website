@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { catalogVariantKey, normalizeDigits, normalizeStockLines, parsePriceText } from "../src/lib/catalogSheet.ts";
+import { catalogVariantKey, normalizeDigits, normalizeStockLines, parsePriceText, parseSimText } from "../src/lib/catalogSheet.ts";
 import { normalizeColor } from "../src/lib/catalogColors.ts";
 
 // Representative lines from a real WhatsApp wholesale stock list (emoji headings,
@@ -475,4 +475,204 @@ test("a bare 'Gift box' freebie line is ignored without breaking the section con
   assert.equal(buds.model, "Buds 3");
   const [boxWithColour] = rowsOf("🔵 ✨ Vgotel ✨\nGift Box black @ 3000");
   assert.ok(boxWithColour.reviewReasons.some((reason) => reason.startsWith("Gift Box")));
+});
+
+// ---------------------------------------------------------------------------
+// SIM Configuration from supplier wording (never inferred; not part of identity)
+// ---------------------------------------------------------------------------
+
+const APPLE = "🍎 ✨ Apple ✨\n";
+const simRow = (text) => {
+  const [row] = rowsOf(text);
+  return row;
+};
+
+test("SIM 1-6. each Owner-approved phrase maps to its SIM Configuration", () => {
+  const cases = [
+    ["Physical SIM", "physical_sim"], ["Physical", "physical_sim"], ["Single Physical SIM", "physical_sim"],
+    ["eSIM", "esim"], ["eSIM Only", "esim"], ["eSIM Ready", "esim"],
+    ["Physical + eSIM", "physical_plus_esim"], ["Physical/eSIM", "physical_plus_esim"],
+    ["Physical & eSIM", "physical_plus_esim"], ["1 Physical + eSIM", "physical_plus_esim"],
+    ["Dual eSIM", "dual_esim"], ["Both eSIM", "dual_esim"], ["Both eSIM Ready", "dual_esim"],
+    ["2 eSIM", "dual_esim"], ["Two eSIM", "dual_esim"],
+  ];
+  for (const [phrase, expected] of cases) {
+    assert.equal(parseSimText(phrase), expected, phrase);
+    // As an attribute after the price...
+    const token = simRow(`${APPLE}iPhone 17 Pro 256 Orange @ 450000; ${phrase}`);
+    assert.equal(token.simConfiguration, expected, `token: ${phrase}`);
+    assert.equal(token.fieldStatus.simConfiguration, "explicit");
+    assert.deepEqual([token.needsReview, token.notes], [false, []], `${phrase}: ${token.reviewReasons}`);
+  }
+});
+
+test("SIM: phrases in the identity text or straight after the price are lifted out", () => {
+  const expected = { productTitle: "Apple 18 Pro Max", storage: "256 GB", color: "Blue", priceMinor: 49_000_000, simConfiguration: "dual_esim" };
+  for (const line of [
+    "18pro Max 256 Blue Both eSIM Ready @ 490,000",
+    "18pro Max 256 Blue @ 490,000 Both eSIM Ready",
+    "18pro Max 256 Blue @ 490,000; Both eSIM Ready",
+    "18pro Max 256 blue both esim @490,000",
+  ]) {
+    const row = simRow(`${APPLE}${line}`);
+    assert.deepEqual(
+      { productTitle: row.productTitle, storage: row.storage, color: row.color, priceMinor: row.priceMinor, simConfiguration: row.simConfiguration },
+      expected, line,
+    );
+    assert.equal(row.needsReview, false, `${line}: ${row.reviewReasons}`);
+  }
+  // Colour-expanded lines give every variant the same SIM.
+  const rows = rowsOf(`${APPLE}17 Pro 256 orange/blue Physical + eSIM @ 450000`);
+  assert.deepEqual(rows.map((row) => [row.color, row.simConfiguration]), [["Orange", "physical_plus_esim"], ["Blue", "physical_plus_esim"]]);
+  // Used-phone facts still parse alongside the SIM.
+  const used = simRow("iPhone 15 Pro 256 Natural; 265000; Used; Non-PTA; BH 89%; Cycles 312; Physical + eSIM");
+  assert.deepEqual([used.condition, used.batteryHealth, used.cycleCount, used.simConfiguration], ["used", 89, 312, "physical_plus_esim"]);
+});
+
+test("SIM 7. case and spacing variants", () => {
+  for (const [phrase, expected] of [
+    ["BOTH ESIM READY", "dual_esim"], ["both   esim   ready", "dual_esim"], ["  Dual eSim  ", "dual_esim"], ["2esim", "dual_esim"],
+    ["PHYSICAL+ESIM", "physical_plus_esim"], ["physical  /  esim", "physical_plus_esim"], ["1  physical+esim", "physical_plus_esim"],
+    ["physical   sim", "physical_sim"], ["ESIM ONLY", "esim"], ["esim  ready", "esim"],
+  ]) {
+    assert.equal(parseSimText(phrase), expected, phrase);
+    assert.equal(simRow(`${APPLE}17 Pro 256 Orange @ 450000; ${phrase}`).simConfiguration, expected, phrase);
+  }
+});
+
+test("SIM 8. no SIM wording leaves SIM Configuration NULL (never inferred)", () => {
+  for (const line of [`${APPLE}17 Pro Max 256 Orange @ 450000`, "iPhone 15 Pro 256 Natural; 265000; Used; Non-PTA", "Samsung A16 6/128 Black; 42500"]) {
+    const row = simRow(line);
+    assert.equal(row.simConfiguration, null, line);
+    assert.equal(row.fieldStatus.simConfiguration, "blank");
+  }
+});
+
+test("SIM 9. unrecognised SIM-like wording stays unresolved and needs review", () => {
+  for (const phrase of ["Dual SIM", "Single SIM", "eSIM Supported", "Nano SIM", "e-SIM", "Physical eSIM Ready"]) {
+    assert.equal(parseSimText(phrase), null, phrase);
+    const row = simRow(`${APPLE}17 Pro 256 Orange @ 450000; ${phrase}`);
+    assert.equal(row.simConfiguration, null, phrase);
+    assert.equal(row.needsReview, true, phrase);
+    assert.ok(row.reviewReasons.includes(`Unrecognised value: ${phrase}`), `${phrase}: ${row.reviewReasons}`);
+  }
+  // Inside the identity it is never guessed: it stays visible in the colour and needs review.
+  const inline = simRow(`${APPLE}17 Pro 256 Orange Dual SIM @ 450000`);
+  assert.equal(inline.simConfiguration, null);
+  assert.equal(inline.needsReview, true);
+  // Bare "Physical" is only a SIM value as a whole attribute token.
+  assert.equal(simRow(`${APPLE}17 Pro 256 Physical @ 450000`).simConfiguration, null);
+  // Two different SIM values for one row conflict and need review.
+  const conflict = simRow(`${APPLE}17 Pro 256 Orange eSIM @ 450000; Dual eSIM`);
+  assert.ok(conflict.reviewReasons.includes("Conflicting SIM Configuration values"));
+});
+
+test("SIM 10. SIM wording never changes product or variant identity", () => {
+  const plain = simRow(`${APPLE}18pro Max 256 Blue @ 490000`);
+  const withSim = simRow(`${APPLE}18pro Max 256 Blue Both eSIM Ready @ 490000`);
+  for (const field of ["brand", "model", "productTitle", "slug", "ram", "storage", "color", "productType", "priceMinor"])
+    assert.equal(withSim[field], plain[field], field);
+  assert.equal(catalogVariantKey(withSim), catalogVariantKey(plain));
+  // Two rows that differ only by SIM are still one variant: flagged as a duplicate.
+  const rows = rowsOf(`${APPLE}17 Pro 256 Orange eSIM @ 450000\n17 Pro 256 Orange Physical SIM @ 450000`);
+  assert.equal(new Set(rows.map(catalogVariantKey)).size, 1);
+  assert.ok(rows[1].reviewReasons.some((reason) => reason.startsWith("Duplicate variant")));
+});
+
+// ---------------------------------------------------------------------------
+// Multi-line listings: SIM and "@ price" lines continue the product line above
+// ---------------------------------------------------------------------------
+
+const summarize = (row) => ({
+  productTitle: row.productTitle, model: row.model, productType: row.productType,
+  priceMinor: row.priceMinor, simConfiguration: row.simConfiguration, reviewReasons: row.reviewReasons,
+});
+const PRO_MAX = { productTitle: "Apple 18 Pro Max", model: "18 Pro Max", productType: "Mobile Phone", priceMinor: 49_000_000, simConfiguration: "dual_esim", reviewReasons: [] };
+
+test("multi-line 1-3. model / SIM / @price lines (any order) become one clean row", () => {
+  for (const block of [
+    "18pro Max\nBoth Esim Ready\n@490,000",
+    "18pro Max\n@490,000\nBoth Esim Ready",
+    "18pro Max\nBoth eSIM\n@490000",
+    "18pro Max\n  both   esim   ready  \n@ 490,000/-",
+  ]) {
+    const { rows, summary } = normalize(`${APPLE}${block}`);
+    assert.equal(rows.length, 1, block);
+    assert.deepEqual(summarize(rows[0]), PRO_MAX, block);
+    assert.equal(rows[0].needsReview, false);
+    assert.equal(rows[0].lineNumber, 2, "the row keeps the model line's number");
+    assert.deepEqual([summary.productLines, summary.continuationLines], [1, 2]);
+  }
+  const [row] = rowsOf(`${APPLE}18pro Max\nBoth Esim Ready\n@490,000`);
+  assert.equal(row.sourceLine, "18pro Max | Both Esim Ready | @490,000");
+});
+
+test("multi-line 4. two consecutive listings stay two products", () => {
+  const rows = rowsOf(`${APPLE}18pro Max\nBoth eSIM Ready\n@490000\n18 Pro\nPhysical + eSIM\n@450000`);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => [row.productTitle, row.priceMinor, row.simConfiguration]), [
+    ["Apple 18 Pro Max", 49_000_000, "dual_esim"],
+    ["Apple 18 Pro", 45_000_000, "physical_plus_esim"],
+  ]);
+  assert.ok(rows.every((row) => !row.needsReview), rows.flatMap((row) => row.reviewReasons).join("; "));
+  // Complete single-line listings are never joined to each other.
+  const singles = rowsOf(`${APPLE}17 Pro 256 Orange @ 450000\n17 Pro Max 256 Blue @ 490000`);
+  assert.deepEqual(singles.map((row) => [row.model, row.priceMinor]), [["17 Pro", 45_000_000], ["17 Pro Max", 49_000_000]]);
+});
+
+test("multi-line 5. headings, separators, notes and blank lines end a listing and are never absorbed", () => {
+  const { rows, summary } = normalize(
+    `${APPLE}18pro Max\nBoth eSIM Ready\n🔵 ✨ Samsung ✨\n@490000\nA16 8/256 black\n@55000`,
+  );
+  assert.equal(summary.headings, 2);
+  // The Apple listing ended at the Samsung heading: it has no price and needs review.
+  const [iphone, orphanPrice, samsung] = rows;
+  assert.deepEqual([iphone.productTitle, iphone.simConfiguration, iphone.priceMinor], ["Apple 18 Pro Max", "dual_esim", null]);
+  assert.ok(iphone.reviewReasons.includes("Price missing"));
+  // A price right after a heading has no listing to continue: it stays a blocked row, as before.
+  assert.deepEqual([orphanPrice.model, orphanPrice.priceMinor], [null, 49_000_000]);
+  assert.ok(orphanPrice.reviewReasons.includes("Model missing"));
+  // The Samsung listing continues with its own price, under its own heading.
+  assert.deepEqual([samsung.productTitle, samsung.color, samsung.priceMinor, samsung.needsReview], ["Samsung A16", "Black", 5_500_000, false]);
+
+  for (const boundary of ["", "━━━━━━━━━━━━", "▪️ Non Warranty", "Gift box"]) {
+    const split = rowsOf(`${APPLE}18pro Max\n${boundary}\nBoth eSIM Ready\n@490000`);
+    assert.ok(split.length >= 2, `boundary ${JSON.stringify(boundary)}`);
+    assert.equal(split[0].priceMinor, null, `boundary ${JSON.stringify(boundary)}`);
+    assert.equal(split[0].simConfiguration, null, `boundary ${JSON.stringify(boundary)}`);
+  }
+});
+
+test("multi-line 6. only SIM and @price lines continue; other lines start a new product", () => {
+  // A second price never overwrites a listing that already has one.
+  const twoPrices = rowsOf(`${APPLE}18pro Max @490000\n@480000`);
+  assert.equal(twoPrices.length, 2);
+  assert.equal(twoPrices[0].priceMinor, 49_000_000);
+  assert.ok(twoPrices[1].reviewReasons.includes("Model missing"));
+  // A SIM line after a complete one-line listing belongs to that listing.
+  const [afterPrice] = rowsOf(`${APPLE}17 Pro 256 Orange @ 450000\neSIM Only`);
+  assert.deepEqual([afterPrice.priceMinor, afterPrice.simConfiguration, afterPrice.needsReview], [45_000_000, "esim", false]);
+  // Unrecognised SIM-like wording is not a continuation: it stays its own reviewed row.
+  const unknown = rowsOf(`${APPLE}18pro Max\nDual SIM\n@490000`);
+  assert.equal(unknown[0].priceMinor, null);
+  assert.ok(unknown.some((row) => row.needsReview));
+  // A "@" line that is not a price is not joined either.
+  assert.equal(rowsOf(`${APPLE}18pro Max\n@ call for price`)[0].priceMinor, null);
+  // Two SIM lines for one listing conflict and need review.
+  const [conflict] = rowsOf(`${APPLE}18pro Max\neSIM\nDual eSIM\n@490000`);
+  assert.ok(conflict.reviewReasons.includes("Conflicting SIM Configuration values"));
+});
+
+test("multi-line 7. no-SIM listing with a price on the next line; colours and identity unchanged", () => {
+  const rows = rowsOf("🔵 ✨ Samsung ✨\nA07 4/64 black/volt/green\n@ 𝟑𝟓𝟖𝟎𝟎/-");
+  assert.deepEqual(rows.map((row) => [row.productTitle, row.color, row.priceMinor, row.simConfiguration, row.needsReview]), [
+    ["Samsung A07", "Black", 3_580_000, null, false],
+    ["Samsung A07", "Volt", 3_580_000, null, false],
+    ["Samsung A07", "Green", 3_580_000, null, false],
+  ]);
+  // Same rows and variant keys as the single-line form.
+  const single = rowsOf("🔵 ✨ Samsung ✨\nA07 4/64 black/volt/green @ 𝟑𝟓𝟖𝟎𝟎/-");
+  assert.deepEqual(rows.map(catalogVariantKey), single.map(catalogVariantKey));
+  const strip = (row) => ({ ...row, sourceLine: null });
+  assert.deepEqual(rows.map(strip), single.map(strip));
 });

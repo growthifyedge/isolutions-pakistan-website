@@ -39,7 +39,7 @@ export type CatalogSheetRow = {
   conditionGrade: CatalogConditionGrade | null;
   batteryHealth: number | null;
   cycleCount: number | null;
-  /** Not part of variant identity; only supplied through the Excel SIM Configuration column. */
+  /** Not part of variant identity; from the Excel SIM Configuration column or recognised supplier wording. */
   simConfiguration: CatalogSimConfiguration | null;
   warranty: string | null;
   deliveryScope: CatalogDeliveryScope | null;
@@ -370,8 +370,40 @@ export const catalogSkuPending = (prefix: CatalogSkuPrefix) => `${prefix} — as
 
 type Attributes = Pick<
   CatalogSheetRow,
-  "ptaStatus" | "condition" | "conditionGrade" | "batteryHealth" | "cycleCount" | "warranty" | "deliveryScope" | "priceMinor"
+  | "ptaStatus" | "condition" | "conditionGrade" | "batteryHealth" | "cycleCount" | "simConfiguration"
+  | "warranty" | "deliveryScope" | "priceMinor"
 > & { stock: number | null; gradeExplicit: boolean; notes: string[]; reviewReasons: string[] };
+
+// Owner-approved supplier SIM wording (case-insensitive, extra spaces ignored). Most specific
+// first, so "Both eSIM Ready" is never read as plain "eSIM". Anything else stays unresolved.
+const SIM_PHRASES: Array<[string, CatalogSimConfiguration]> = [
+  ["(?:dual|two)\\s+esim|2\\s*esim|both\\s+esim(?:\\s+ready)?", "dual_esim"],
+  ["1\\s+physical\\s*\\+\\s*esim|physical\\s*[+/&]\\s*esim", "physical_plus_esim"],
+  ["(?:single\\s+)?physical\\s+sim", "physical_sim"],
+  ["esim(?:\\s+(?:only|ready))?", "esim"],
+];
+// Bare "Physical" is only accepted as a whole attribute token, never inside the identity text.
+const SIM_TOKEN_ONLY: Array<[string, CatalogSimConfiguration]> = [["physical", "physical_sim"]];
+
+/** The SIM configuration named by a whole token ("Both eSIM Ready"), or null when not recognised. */
+export function parseSimText(value: string): CatalogSimConfiguration | null {
+  const text = collapse(value);
+  const match = [...SIM_PHRASES, ...SIM_TOKEN_ONLY].find(([pattern]) => new RegExp(`^(?:${pattern})$`, "i").test(text));
+  return match ? match[1] : null;
+}
+
+/** Lifts recognised SIM phrases out of identity text so they never reach the model or colour. */
+function liftSimPhrases(text: string): { text: string; values: CatalogSimConfiguration[] } {
+  const values: CatalogSimConfiguration[] = [];
+  let rest = text;
+  for (const [pattern, value] of SIM_PHRASES) {
+    rest = rest.replace(new RegExp(`(^|\\s)(?:${pattern})(?=\\s|$)`, "gi"), (_match, lead: string) => {
+      values.push(value);
+      return `${lead} `;
+    });
+  }
+  return { text: collapse(rest), values };
+}
 
 function setOnce<K extends keyof Attributes>(attributes: Attributes, key: K, value: Attributes[K], label: string) {
   const current = attributes[key];
@@ -413,6 +445,8 @@ function applyToken(attributes: Attributes, token: string): boolean {
     setOnce(attributes, "deliveryScope", "karachi_only", "Delivery Scope");
   } else if (/^nationwide$/i.test(value)) {
     setOnce(attributes, "deliveryScope", "nationwide", "Delivery Scope");
+  } else if (parseSimText(value)) {
+    setOnce(attributes, "simConfiguration", parseSimText(value), "SIM Configuration");
   } else {
     const price = parsePriceText(value);
     if (price.ambiguous) {
@@ -422,7 +456,10 @@ function applyToken(attributes: Attributes, token: string): boolean {
     }
     if (price.priceMinor === null) return false;
     setOnce(attributes, "priceMinor", price.priceMinor, "Price");
-    if (price.leftover) {
+    // SIM wording written after the price ("@ 490000 Both eSIM Ready") is the variant's SIM.
+    const leftoverSim = price.leftover ? parseSimText(price.leftover) : null;
+    if (leftoverSim) setOnce(attributes, "simConfiguration", leftoverSim, "SIM Configuration");
+    else if (price.leftover) {
       attributes.notes.push(price.leftover);
       // Supplier metadata trailing the price ("active 25-04-26", "non") is kept in Notes as
       // written; its meaning is not inferred and it never changes any catalog field.
@@ -473,10 +510,18 @@ const GIFT_BOX_WORDS = /\bgift\s*box\b/i;
 const ACCESSORY_WORDS =
   /\b(?:buds|earbuds|airpods|charger|cable|adapter|power\s*bank|powerbank|case|cover|protector|speaker|headphones?|earphones?|handsfree|band|strap|gift)\b/i;
 
-function normalizeLine(line: string, lineNumber: number, brands: BrandReference[], context: SectionContext): CatalogSheetRow[] {
+function normalizeLine(
+  line: string,
+  lineNumber: number,
+  brands: BrandReference[],
+  context: SectionContext,
+  // Continuation lines joined to this product (see normalizeStockLines): extra attribute
+  // tokens, and the full listing text used as the row's source.
+  continuation: { tokens: string[]; source: string } = { tokens: [], source: line },
+): CatalogSheetRow[] {
   let [first, ...rest] = stripEmoji(line).split(/\s*[;@]\s*/);
   const attributes: Attributes = {
-    ptaStatus: null, condition: null, conditionGrade: null, batteryHealth: null, cycleCount: null,
+    ptaStatus: null, condition: null, conditionGrade: null, batteryHealth: null, cycleCount: null, simConfiguration: null,
     warranty: null, deliveryScope: null, priceMinor: null, stock: null, gradeExplicit: false, notes: [], reviewReasons: [],
   };
   if (!rest.length) {
@@ -487,6 +532,7 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
       first = first.slice(0, trailing.index);
     }
   }
+  rest = [...rest, ...continuation.tokens];
   // PTA / Used words written inside the identity segment are unambiguous; lift them out.
   let identityText = first;
   for (const [pattern, token] of [
@@ -499,6 +545,11 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
       applyToken(attributes, token);
     }
   }
+  // SIM wording inside the identity ("18 Pro Max 256 Blue Both eSIM Ready") is lifted out too,
+  // so it never changes the model, colour or product identity.
+  const liftedSim = liftSimPhrases(identityText);
+  identityText = liftedSim.text;
+  for (const sim of liftedSim.values) setOnce(attributes, "simConfiguration", sim, "SIM Configuration");
   if (!rest.length) attributes.reviewReasons.push("Missing ';' separator before price");
   for (const token of rest) {
     if (!token.trim()) continue;
@@ -593,6 +644,7 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
     fieldStatus.conditionGrade = !attributes.conditionGrade ? "blank" : attributes.gradeExplicit ? "explicit" : "default";
     fieldStatus.batteryHealth = explicitIf(attributes.batteryHealth);
     fieldStatus.cycleCount = explicitIf(attributes.cycleCount);
+    fieldStatus.simConfiguration = explicitIf(attributes.simConfiguration);
     fieldStatus.warranty = warrantyInherited ? "inferred" : explicitIf(attributes.warranty);
     fieldStatus.deliveryScope = deliveryStatus;
     fieldStatus.priceMinor =
@@ -601,7 +653,7 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
     fieldStatus.notes = attributes.notes.length || identity.ramExpression ? "needs_review" : "blank";
     const row: CatalogSheetRow = {
       lineNumber,
-      sourceLine: line,
+      sourceLine: continuation.source,
       action: null,
       productType,
       brand,
@@ -615,8 +667,7 @@ function normalizeLine(line: string, lineNumber: number, brands: BrandReference[
       conditionGrade: attributes.conditionGrade,
       batteryHealth: attributes.batteryHealth,
       cycleCount: attributes.cycleCount,
-      // Raw supplier text never sets SIM Configuration (parser mapping is a later phase).
-      simConfiguration: null,
+      simConfiguration: attributes.simConfiguration,
       warranty: attributes.warranty,
       deliveryScope,
       priceMinor: attributes.priceMinor,
@@ -710,7 +761,16 @@ export type NormalizeStockSummary = {
   /** Promotional/freebie lines that are not catalog products ("Gift box @ 750/-"). */
   nonProductLines: number;
   productLines: number;
+  /** SIM / "@ price" lines joined to the product line above them (multi-line listings). */
+  continuationLines: number;
 };
+
+// Multi-line listings ("18pro Max" / "Both Esim Ready" / "@490,000"): only these lines are
+// joined to the product line above them. Anything else starts a new product or section.
+const CONTINUATION_PRICE_LINE = /^@\s*(.+)$/;
+
+/** Whether a product line already carries a price ("... @ 35800", "...; 35800", "... 35800"). */
+const hasPrice = (line: string) => /[;@]/.test(stripEmoji(line)) || TRAILING_PRICE.test(stripEmoji(line));
 
 // A line that is only "Gift box", optionally with a price, is a supplier freebie, not a
 // catalog product. Deliberately narrow: other accessories are never ignored.
@@ -726,14 +786,47 @@ const NON_PRODUCT_LINE = /^gift\s*box(?:\s*@.*)?$/i;
  */
 export function normalizeStockLines(text: string, options: NormalizeStockOptions): NormalizeStockResult {
   const rows: CatalogSheetRow[] = [];
-  const summary: NormalizeStockSummary = { nonEmptyLines: 0, headings: 0, decorativeLines: 0, contextLines: 0, nonProductLines: 0, productLines: 0 };
+  const summary: NormalizeStockSummary = {
+    nonEmptyLines: 0, headings: 0, decorativeLines: 0, contextLines: 0, nonProductLines: 0, productLines: 0, continuationLines: 0,
+  };
   let context: SectionContext = { brand: null, productType: null, qualifier: null, phoneSection: false, warranty: null };
+  // The product line being built; it is parsed once the listing ends.
+  let pending: { line: string; lineNumber: number; context: SectionContext; tokens: string[]; sources: string[] } | null = null;
+  const flush = () => {
+    if (!pending) return;
+    const { line, lineNumber, context: pendingContext, tokens, sources } = pending;
+    rows.push(...normalizeLine(line, lineNumber, options.brands, pendingContext, { tokens, source: sources.join(" | ") }));
+    pending = null;
+  };
   const lines = normalizeText(text).replace(/\r\n?/g, "\n").split("\n");
   for (const [index, raw] of lines.entries()) {
     const line = collapse(raw);
-    if (!line) continue;
+    if (!line) {
+      // A blank line always ends the current listing.
+      flush();
+      continue;
+    }
     summary.nonEmptyLines += 1;
     const stripped = stripHeadingDecoration(line);
+    if (pending && stripped) {
+      // A whole-line SIM phrase belongs to the listing above it.
+      if (parseSimText(stripped)) {
+        pending.tokens.push(stripped);
+        pending.sources.push(line);
+        summary.continuationLines += 1;
+        continue;
+      }
+      // A standalone "@ price" line completes a listing that has no price yet.
+      const priceLine = stripEmoji(line).match(CONTINUATION_PRICE_LINE);
+      if (priceLine && !hasPrice(pending.line) && parsePriceText(priceLine[1]).priceMinor !== null) {
+        pending.line = `${pending.line} @ ${priceLine[1]}`;
+        pending.sources.push(line);
+        summary.continuationLines += 1;
+        continue;
+      }
+    }
+    // Every other line ends the current listing.
+    flush();
     if (!stripped || !/[\p{L}\d]/u.test(stripped)) {
       summary.decorativeLines += 1;
       continue;
@@ -760,8 +853,9 @@ export function normalizeStockLines(text: string, options: NormalizeStockOptions
       }
     }
     summary.productLines += 1;
-    rows.push(...normalizeLine(line, index + 1, options.brands, context));
+    pending = { line, lineNumber: index + 1, context, tokens: [], sources: [line] };
   }
+  flush();
   const seen = new Map<string, number>();
   for (const row of rows) {
     const key = catalogVariantKey(row);

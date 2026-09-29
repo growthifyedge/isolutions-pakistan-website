@@ -654,7 +654,7 @@ test("SIM: export -> unchanged re-upload preserves the exact internal value", as
   assert.deepEqual(again.rows.map((row) => row.simConfiguration), SIM_CASES.map(([value]) => value));
 });
 
-test("SIM: not part of variant identity; raw stock lines never set it", async () => {
+test("SIM: not part of variant identity; stock lines without SIM wording leave it blank", async () => {
   const rows = normalize("iPhone 15 Pro 256 Natural; 265000\niPhone 15 Pro 256 Natural; 265000");
   assert.ok(rows.every((row) => row.simConfiguration === null));
   const data = await roundTrip(rows, (workbook) => {
