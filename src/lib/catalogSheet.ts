@@ -510,6 +510,10 @@ const GIFT_BOX_WORDS = /\bgift\s*box\b/i;
 const ACCESSORY_WORDS =
   /\b(?:buds|earbuds|airpods|charger|cable|adapter|power\s*bank|powerbank|case|cover|protector|speaker|headphones?|earphones?|handsfree|band|strap|gift)\b/i;
 
+// An iPhone model written without its family name: a 1-2 digit generation, optionally with a
+// letter ("16e"), then words or nothing ("18 Pro Max", "17", "16e").
+const IPHONE_NUMBER_MODEL = /^\d{1,2}[a-z]?(?:\s|$)/i;
+
 function normalizeLine(
   line: string,
   lineNumber: number,
@@ -610,6 +614,11 @@ function normalizeLine(
     productType = context.productType;
     if (model && context.qualifier) model = `${context.qualifier} ${model}`;
   } else if (identity.storage || context.phoneSection) productType = "Mobile Phone";
+  // Apple phones are iPhones: a model written by number alone under an Apple phone row
+  // ("18pro Max", "17 pro max") gets its "iPhone" name. Never applied without the Apple brand,
+  // to other product types, or to a model that already names its family ("iPhone 16 Plus").
+  if (brand && lower(brand) === "apple" && productType === "Mobile Phone" && IPHONE_NUMBER_MODEL.test(model))
+    model = `iPhone ${model}`;
   let deliveryScope = attributes.deliveryScope;
   let deliveryStatus: FieldStatus = deliveryScope ? "explicit" : "blank";
   if (productType === "Mobile Phone") {

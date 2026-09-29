@@ -507,7 +507,7 @@ test("SIM 1-6. each Owner-approved phrase maps to its SIM Configuration", () => 
 });
 
 test("SIM: phrases in the identity text or straight after the price are lifted out", () => {
-  const expected = { productTitle: "Apple 18 Pro Max", storage: "256 GB", color: "Blue", priceMinor: 49_000_000, simConfiguration: "dual_esim" };
+  const expected = { productTitle: "Apple iPhone 18 Pro Max", storage: "256 GB", color: "Blue", priceMinor: 49_000_000, simConfiguration: "dual_esim" };
   for (const line of [
     "18pro Max 256 Blue Both eSIM Ready @ 490,000",
     "18pro Max 256 Blue @ 490,000 Both eSIM Ready",
@@ -587,7 +587,7 @@ const summarize = (row) => ({
   productTitle: row.productTitle, model: row.model, productType: row.productType,
   priceMinor: row.priceMinor, simConfiguration: row.simConfiguration, reviewReasons: row.reviewReasons,
 });
-const PRO_MAX = { productTitle: "Apple 18 Pro Max", model: "18 Pro Max", productType: "Mobile Phone", priceMinor: 49_000_000, simConfiguration: "dual_esim", reviewReasons: [] };
+const PRO_MAX = { productTitle: "Apple iPhone 18 Pro Max", model: "iPhone 18 Pro Max", productType: "Mobile Phone", priceMinor: 49_000_000, simConfiguration: "dual_esim", reviewReasons: [] };
 
 test("multi-line 1-3. model / SIM / @price lines (any order) become one clean row", () => {
   for (const block of [
@@ -611,13 +611,13 @@ test("multi-line 4. two consecutive listings stay two products", () => {
   const rows = rowsOf(`${APPLE}18pro Max\nBoth eSIM Ready\n@490000\n18 Pro\nPhysical + eSIM\n@450000`);
   assert.equal(rows.length, 2);
   assert.deepEqual(rows.map((row) => [row.productTitle, row.priceMinor, row.simConfiguration]), [
-    ["Apple 18 Pro Max", 49_000_000, "dual_esim"],
-    ["Apple 18 Pro", 45_000_000, "physical_plus_esim"],
+    ["Apple iPhone 18 Pro Max", 49_000_000, "dual_esim"],
+    ["Apple iPhone 18 Pro", 45_000_000, "physical_plus_esim"],
   ]);
   assert.ok(rows.every((row) => !row.needsReview), rows.flatMap((row) => row.reviewReasons).join("; "));
   // Complete single-line listings are never joined to each other.
   const singles = rowsOf(`${APPLE}17 Pro 256 Orange @ 450000\n17 Pro Max 256 Blue @ 490000`);
-  assert.deepEqual(singles.map((row) => [row.model, row.priceMinor]), [["17 Pro", 45_000_000], ["17 Pro Max", 49_000_000]]);
+  assert.deepEqual(singles.map((row) => [row.model, row.priceMinor]), [["iPhone 17 Pro", 45_000_000], ["iPhone 17 Pro Max", 49_000_000]]);
 });
 
 test("multi-line 5. headings, separators, notes and blank lines end a listing and are never absorbed", () => {
@@ -627,7 +627,7 @@ test("multi-line 5. headings, separators, notes and blank lines end a listing an
   assert.equal(summary.headings, 2);
   // The Apple listing ended at the Samsung heading: it has no price and needs review.
   const [iphone, orphanPrice, samsung] = rows;
-  assert.deepEqual([iphone.productTitle, iphone.simConfiguration, iphone.priceMinor], ["Apple 18 Pro Max", "dual_esim", null]);
+  assert.deepEqual([iphone.productTitle, iphone.simConfiguration, iphone.priceMinor], ["Apple iPhone 18 Pro Max", "dual_esim", null]);
   assert.ok(iphone.reviewReasons.includes("Price missing"));
   // A price right after a heading has no listing to continue: it stays a blocked row, as before.
   assert.deepEqual([orphanPrice.model, orphanPrice.priceMinor], [null, 49_000_000]);
@@ -675,4 +675,73 @@ test("multi-line 7. no-SIM listing with a price on the next line; colours and id
   assert.deepEqual(rows.map(catalogVariantKey), single.map(catalogVariantKey));
   const strip = (row) => ({ ...row, sourceLine: null });
   assert.deepEqual(rows.map(strip), single.map(strip));
+});
+
+// ---------------------------------------------------------------------------
+// Apple phones: a model written by number alone gets its "iPhone" name
+// ---------------------------------------------------------------------------
+
+const titleOf = (text) => {
+  const [row] = rowsOf(text);
+  return [row.model, row.productTitle, row.productType];
+};
+
+test("iPhone 1-3. numbered Apple phone models under Apple context become iPhone models", () => {
+  for (const [line, model] of [
+    ["18pro Max 256 Blue @ 490000", "iPhone 18 Pro Max"],
+    ["18 Pro 256 Silver @ 450000", "iPhone 18 Pro"],
+    ["17 pro max 512 orange @ 480000", "iPhone 17 Pro Max"],
+    ["16e 128 White @ 180000", "iPhone 16e"],
+    ["17 256 Black @ 300000", "iPhone 17"],
+  ]) {
+    assert.deepEqual(titleOf(`${APPLE}${line}`), [model, `Apple ${model}`, "Mobile Phone"], line);
+  }
+  // An explicit Apple brand on the line is Apple context too.
+  assert.deepEqual(titleOf("Apple 18 Pro Max 256 Blue; 490000"), ["iPhone 18 Pro Max", "Apple iPhone 18 Pro Max", "Mobile Phone"]);
+  // Slugs follow the full name, so these match existing "Apple iPhone ..." products.
+  assert.equal(rowsOf(`${APPLE}18pro Max 256 Blue @ 490000`)[0].slug, "apple-iphone-18-pro-max");
+});
+
+test("iPhone 4. a model that already says iPhone keeps a single prefix", () => {
+  for (const [line, model] of [
+    [`${APPLE}iPhone 16 Plus 128 Black @ 250000`, "iPhone 16 Plus"],
+    [`${APPLE}iphone 16 plus 128 black @ 250000`, "iPhone 16 Plus"],
+    ["Apple iPhone 15 128 Black; 200000", "iPhone 15"],
+    ["iPhone 15 Pro 256 Natural; 265000", "iPhone 15 Pro"],
+  ]) {
+    const [actual, title] = titleOf(line);
+    assert.equal(actual, model, line);
+    assert.equal(title, `Apple ${model}`, line);
+    assert.ok(!/iphone\s+iphone|apple\s+apple/i.test(title), title);
+  }
+});
+
+test("iPhone 5. non-Apple and brand-less rows are unchanged", () => {
+  assert.deepEqual(titleOf("🔵 ✨ Samsung ✨\nS25 Ultra 12/256 black @ 350000"), ["S25 Ultra", "Samsung S25 Ultra", "Mobile Phone"]);
+  assert.deepEqual(titleOf("🔵 ✨ Samsung ✨\n17 5G 8/256 black @ 90000")[1], "Samsung 17 5G");
+  assert.deepEqual(titleOf("✨ Xiaomi ✨\n15 Ultra 16/512 black @ 400000")[1], "Xiaomi 15 Ultra");
+  // Without any Apple context a bare number is never taken for an iPhone.
+  const [bare] = rowsOf("18pro Max 256 Blue @ 490000");
+  assert.equal(bare.brand, null);
+  assert.equal(bare.model, "18 Pro Max");
+});
+
+test("iPhone 6. MacBook, iPad, Watch, AirPods and accessories under Apple are unchanged", () => {
+  assert.deepEqual(titleOf(`${APPLE}MacBook Air 13 M3 256 Midnight @ 330000`), ["MacBook Air 13 M3", "Apple MacBook Air 13 M3", "Laptop"]);
+  assert.deepEqual(titleOf(`${APPLE}iPad Air 11 128 Blue @ 190000`), ["iPad Air 11", "Apple iPad Air 11", "Tablet"]);
+  assert.deepEqual(titleOf(`${APPLE}Watch 10 46mm black @ 120000`)[2], "Gadget");
+  assert.equal(titleOf(`${APPLE}Watch 10 46mm black @ 120000`)[0].startsWith("iPhone"), false);
+  assert.equal(titleOf(`${APPLE}AirPods Pro 2 white @ 60000`)[0], "AirPods Pro 2");
+  assert.equal(titleOf(`${APPLE}20W charger white @ 5000`)[0].startsWith("iPhone"), false);
+  // Apple sections for other families (Tab / Watch headings) are unchanged too.
+  assert.deepEqual(titleOf("⌚ ✨ Apple Watch ✨\n10 46mm black @ 120000")[0], "Watch 10 46mm");
+});
+
+test("iPhone 7. the multi-line SIM listing is Apple iPhone 18 Pro Max, dual_esim, Rs 490,000", () => {
+  const rows = rowsOf(`${APPLE}18pro Max\nBoth Esim Ready\n@490,000`);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(summarize(rows[0]), {
+    productTitle: "Apple iPhone 18 Pro Max", model: "iPhone 18 Pro Max", productType: "Mobile Phone",
+    priceMinor: 49_000_000, simConfiguration: "dual_esim", reviewReasons: [],
+  });
 });
