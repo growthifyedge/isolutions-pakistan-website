@@ -8,6 +8,10 @@ import {
   pkrMajorInputFromMinor,
 } from "../src/lib/money.ts";
 import { nullIfEmpty } from "../src/lib/catalogFilters.ts";
+import {
+  HOMEPAGE_FEATURED_LIMIT,
+  selectHomepageFeaturedProducts,
+} from "../src/lib/homepageFeatured.ts";
 
 const [
   migration,
@@ -34,6 +38,10 @@ const [
   ),
   readFile("firebase.json", "utf8"),
 ]);
+const featuredMigration = await readFile(
+  "supabase/migrations/202609300001_homepage_featured_products.sql",
+  "utf8",
+);
 const priceRepair = await readFile(
   "supabase/migrations/202608260002_phase_4_macbook_neo_price_repair.sql",
   "utf8",
@@ -95,17 +103,62 @@ test("product routing uses real slugs", () => {
 test("storefront does not import the fictional mock catalog", () => {
   assert.doesNotMatch(app, /mockCatalog/);
   assert.doesNotMatch(storefront, /mockCatalog|prototype-flagship/);
-  // The homepage featured block (ce92dd9) has inline demo cards while live featured products
-  // are switched off. Those names may appear only there, and the cards only link to /shop:
-  // they can never be added to the cart or bought.
-  const demoStart = storefront.indexOf("const homepageDemoFeaturedProducts = [");
-  const demoEnd = storefront.indexOf("] as const;", demoStart);
-  assert.ok(demoStart > 0 && demoEnd > demoStart);
-  const outsideDemo = storefront.slice(0, demoStart) + storefront.slice(demoEnd);
-  assert.doesNotMatch(outsideDemo, /Aster One/);
-  const demoCard = storefront.slice(storefront.indexOf("function FeaturedDemoCard("), storefront.indexOf("</article>", storefront.indexOf("function FeaturedDemoCard(")));
-  assert.match(demoCard, /window\.location\.assign\("\/shop"\)/);
-  assert.doesNotMatch(demoCard, /addStorefrontCartItem|addToCart|checkout/i);
+});
+test("homepage Featured Products never renders fictional or demo products", () => {
+  // The fictional demo cards were removed; no demo list, switch, card, or product name may return.
+  assert.doesNotMatch(
+    storefront,
+    /Aster One|SlateBook|Vision Tab|Arc Watch|homepageDemoFeaturedProducts|FeaturedDemoCard|USE_LIVE_FEATURED_PRODUCTS|assets\/featured\//,
+  );
+  assert.doesNotMatch(storefront, /home-featured-empty|Featured products are being prepared/);
+  // Only the real card renders, and the section is hidden when nothing qualifies.
+  assert.match(storefront, /products\.map\(\(product\) => <FeaturedProductCard product=\{product\} key=\{product\.id\} \/>\)/);
+  assert.match(storefront, /\{featuredProducts\.length > 0 && <FeaturedProducts products=\{featuredProducts\} \/>\}/);
+});
+test("homepage Featured Products uses the dedicated server-side read, not the newest-100 page", () => {
+  assert.match(storefront, /fetchHomepageFeaturedProducts\(\)\s*\.then\(setFeaturedProducts\)\s*\.catch\(\(\) => setFeaturedProducts\(\[\]\)\)/);
+  assert.doesNotMatch(storefront, /products\.filter\(\(product\) => product\.is_featured\)/);
+  assert.match(catalog, /rpc\("homepage_featured_products", \{\s*p_limit: limit,\s*\}\)/);
+  assert.match(catalog, /return selectHomepageFeaturedProducts\(/);
+  assert.equal(HOMEPAGE_FEATURED_LIMIT, 4);
+});
+test("homepage_featured_products RPC filters to sellable real featured products", () => {
+  const where = featuredMigration.slice(featuredMigration.indexOf("with featured as ("), featuredMigration.indexOf("), inventory as ("));
+  assert.match(where, /p\.data_class = 'real' and p\.publication_status = 'published' and p\.published_at is not null/);
+  assert.match(where, /and p\.is_featured\n/);
+  assert.match(where, /b\.data_class = 'real' and b\.is_active/);
+  assert.match(where, /c\.data_class = 'real' and c\.is_active/);
+  assert.match(where, /m\.is_primary\s+and m\.cloudinary_public_id is not null and m\.secure_url is not null/);
+  assert.match(where, /v\.is_active and v\.price_minor > 0\s+and \(select coalesce\(sum\(im\.quantity_delta\), 0\) from public\.inventory_movements im where im\.variant_id = v\.id\) > 0/);
+  // No newest-N pre-page: the featured filter runs before the limit, in deterministic order.
+  assert.match(where, /order by p\.published_at desc, p\.id\s+limit least\(greatest\(coalesce\(p_limit, 4\), 1\), 12\)/);
+  // Additive only: the existing public catalog RPC is neither called, dropped, nor redefined.
+  assert.doesNotMatch(featuredMigration, /public\.search_public_catalog|drop function|create or replace/i);
+  assert.match(featuredMigration, /language sql stable security definer set search_path = ''/);
+  assert.match(featuredMigration, /revoke all on function public\.homepage_featured_products\(integer\) from public;/);
+  assert.match(featuredMigration, /grant execute on function public\.homepage_featured_products\(integer\) to anon, authenticated;/);
+  assert.doesNotMatch(featuredMigration, /\b(insert into|update public\.|delete from|drop table|alter table)\b/i);
+});
+test("homepage Featured selection keeps only sellable featured products, max 4", () => {
+  const media = [{ id: "m", variantId: null, publicId: "p/1", url: "https://res.cloudinary.com/x.jpg", alt: "", width: 1, height: 1, format: "jpg", isPrimary: true }];
+  const variant = (priceMinor, quantity) => ({ id: `${priceMinor}-${quantity}`, sku: "S", ram: null, storage: null, color: null, priceMinor, compareAtPriceMinor: null, ptaStatus: "approved", condition: "brand_new", warranty: null, carrierJv: null, deliveryScope: "nationwide", quantity });
+  const product = (id, overrides = {}) => ({ id, slug: id, title: id, is_featured: true, media, variants: [variant(100, 1)], ...overrides });
+  assert.deepEqual(selectHomepageFeaturedProducts([]), []);
+  assert.deepEqual(
+    selectHomepageFeaturedProducts([
+      product("ok"),
+      product("not-featured", { is_featured: false }),
+      product("no-image", { media: [] }),
+      product("no-primary", { media: [{ ...media[0], isPrimary: false }] }),
+      product("no-variant", { variants: [] }),
+      product("out-of-stock", { variants: [variant(100, 0)] }),
+      product("zero-price", { variants: [variant(0, 5)] }),
+      product("mixed", { variants: [variant(100, 0), variant(200, 3)] }),
+    ]).map((item) => item.id),
+    ["ok", "mixed"],
+  );
+  assert.equal(selectHomepageFeaturedProducts(["a", "b", "c", "d", "e", "f"].map((id) => product(id))).length, 4);
+  assert.equal(selectHomepageFeaturedProducts(["a", "b"].map((id) => product(id))).length, 2);
 });
 test("variants remain explicit rows without Cartesian generation", () => {
   assert.match(admin, /Add explicit variant/);

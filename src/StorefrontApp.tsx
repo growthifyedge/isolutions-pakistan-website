@@ -43,6 +43,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  fetchHomepageFeaturedProducts,
   fetchPublicCatalog,
   fetchPublicTaxonomy,
   fetchFrequentlyBoughtTogether,
@@ -1425,6 +1426,7 @@ function Home({ taxonomy }: { taxonomy: Taxonomy }) {
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [bundles, setBundles] = useState<HomepageBundle[]>([]);
   const [bundlesLoading, setBundlesLoading] = useState(true);
+  const [featuredProducts, setFeaturedProducts] = useState<CatalogProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -1434,7 +1436,12 @@ function Home({ taxonomy }: { taxonomy: Taxonomy }) {
       .finally(() => setLoading(false));
   }, []);
   const dealProducts = products.filter((product) => product.is_flash_sale === true);
-  const featuredProducts = products.filter((product) => product.is_featured).slice(0, 4);
+  useEffect(() => {
+    // Dedicated server-side read: any eligible featured product qualifies regardless of age.
+    fetchHomepageFeaturedProducts()
+      .then(setFeaturedProducts)
+      .catch(() => setFeaturedProducts([]));
+  }, []);
   useEffect(() => {
     fetchHomepageBundles(4)
       .then(setBundles)
@@ -1448,7 +1455,7 @@ function Home({ taxonomy }: { taxonomy: Taxonomy }) {
         <HomepageTrustBenefits />
         <ShopByCategory />
         <FlashSale products={dealProducts} loading={loading} />
-        <FeaturedProducts products={featuredProducts} loading={loading} />
+        {featuredProducts.length > 0 && <FeaturedProducts products={featuredProducts} />}
         <AccessoriesSection taxonomy={taxonomy} />
         <BundleOffers bundles={bundles} products={products} loading={bundlesLoading} />
         <BestSellerSection products={products} loading={loading} />
@@ -1636,47 +1643,6 @@ function FlashSale({ products, loading }: { products: CatalogProduct[]; loading:
   );
 }
 const featuredPromoImage = "/assets/home-gadgets.png";
-const USE_LIVE_FEATURED_PRODUCTS = false;
-const homepageDemoFeaturedProducts = [
-  { brand: "Aster", title: "Aster One Pro 5G", price: 28999900, compareAt: 31999900, image: "/assets/featured/featured-iphone.png", availability: "In stock" },
-  { brand: "Nova", title: "SlateBook Air 14", price: 36450000, compareAt: 38900000, image: "/assets/featured/featured-ps5.png", availability: "Limited" },
-  { brand: "Orbit", title: "Vision Tab 12", price: 17490000, image: "/assets/featured/featured-samsung.png", availability: "In stock" },
-  { brand: "Aster", title: "Arc Watch S", price: 7290000, compareAt: 7990000, image: "/assets/featured/featured-watch.png", availability: "In stock" },
-] as const;
-
-function FeaturedDemoCard({ product }: { product: (typeof homepageDemoFeaturedProducts)[number] }) {
-  const compareAt = "compareAt" in product && product.compareAt > product.price
-    ? product.compareAt
-    : null;
-  const discount = compareAt !== null
-    ? Math.round(((compareAt - product.price) / compareAt) * 100)
-    : null;
-  const browseShop = () => window.location.assign("/shop");
-  return (
-    <article className="home-featured-card">
-      <div className="home-featured-image">
-        <a className="home-featured-image-link" href="/shop" aria-label={`Browse products like ${product.title}`}>
-        <img className="home-featured-image-primary" src={product.image} alt={product.title} loading="lazy" />
-        {discount !== null && <span className="home-featured-sale">Sale · {discount}%</span>}
-        </a>
-        <button type="button" className="home-product-cart-button is-preview" onClick={browseShop} aria-label={`Browse products like ${product.title}`} title="Browse products"><ShoppingCart aria-hidden="true" /></button>
-        <div className="home-product-card-actions is-preview">
-          <button type="button" className="home-product-add-action" onClick={browseShop}><ShoppingCart aria-hidden="true" />Add to cart</button>
-          <button type="button" className="home-product-buy-action" onClick={browseShop}>Buy it now</button>
-        </div>
-      </div>
-      <a className="home-featured-copy" href="/shop">
-        <span>{product.brand}</span>
-        <strong>{product.title}</strong>
-        <span className="home-featured-price">
-          <b>{formatPkrMinor(product.price)}</b>
-          {compareAt !== null && <del>{formatPkrMinor(compareAt)}</del>}
-        </span>
-        <span className="home-featured-availability"><i />{product.availability}</span>
-      </a>
-    </article>
-  );
-}
 
 function FeaturedProductCard({ product }: { product: CatalogProduct }) {
   const variant = [...product.variants].sort((left, right) => left.priceMinor - right.priceMinor)[0];
@@ -1733,7 +1699,7 @@ function FeaturedProductCard({ product }: { product: CatalogProduct }) {
   );
 }
 
-function FeaturedProducts({ products, loading }: { products: CatalogProduct[]; loading: boolean }) {
+function FeaturedProducts({ products }: { products: CatalogProduct[] }) {
   return (
     <section className="home-featured-split" aria-labelledby="featured-products-title">
       <div className="home-featured-promo">
@@ -1747,19 +1713,9 @@ function FeaturedProducts({ products, loading }: { products: CatalogProduct[]; l
           </div>
           <a href="/shop">View All</a>
         </div>
-        {!USE_LIVE_FEATURED_PRODUCTS ? (
-          <div className="home-featured-grid">
-            {homepageDemoFeaturedProducts.map((product) => <FeaturedDemoCard product={product} key={product.title} />)}
-          </div>
-        ) : loading ? (
-          <div className="home-featured-empty">Loading featured products…</div>
-        ) : products.length > 0 ? (
-          <div className="home-featured-grid">
-            {products.map((product) => <FeaturedProductCard product={product} key={product.id} />)}
-          </div>
-        ) : (
-          <div className="home-featured-empty">Featured products are being prepared.</div>
-        )}
+        <div className="home-featured-grid">
+          {products.map((product) => <FeaturedProductCard product={product} key={product.id} />)}
+        </div>
       </div>
     </section>
   );

@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { minimumActiveVariantPrice } from "./money";
 import { nullIfEmpty } from "./catalogFilters";
+import { HOMEPAGE_FEATURED_LIMIT, selectHomepageFeaturedProducts } from "./homepageFeatured";
 export { formatPkrMinor } from "./money";
 
 export type CatalogVariant = {
@@ -100,6 +101,16 @@ export async function fetchPublicCatalog(filters: CatalogFilters = {}) {
   );
   if (error) throw error;
   return (data ?? []) as CatalogProduct[];
+}
+
+export async function fetchHomepageFeaturedProducts(limit = HOMEPAGE_FEATURED_LIMIT) {
+  if (!supabase) throw new Error("Supabase environment is not configured");
+
+  const { data, error } = await supabase.rpc("homepage_featured_products", {
+    p_limit: limit,
+  });
+  if (error) throw error;
+  return selectHomepageFeaturedProducts((data ?? []) as CatalogProduct[], limit);
 }
 
 export async function fetchPublicTaxonomy() {
