@@ -6,6 +6,7 @@ import {
   bulkInventoryPreview,
   parseBulkCatalog,
 } from "../src/lib/bulkCatalog.ts";
+import { DEFAULT_IMPORT_STOCK } from "../src/lib/catalogSheet.ts";
 
 const [bulk, readiness, app, overview] = await Promise.all([
   readFile("src/admin/BulkImport.tsx", "utf8"),
@@ -142,8 +143,14 @@ test("draft products are never auto-published", () => {
   assert.match(readiness, /publication_status = 'draft'/);
   assert.doesNotMatch(readiness, /set publication_status = 'published'/);
 });
-test("inventory default 10 does not regress", () =>
-  assert.equal(bulkInventoryPreview(null, false).mode, "default_new"));
+test("inventory default 10 does not regress", () => {
+  // Excel (Bulk Upload v2): a blank Stock imports as exactly 10 (Owner-locked).
+  assert.equal(DEFAULT_IMPORT_STOCK, 10);
+  // Legacy paste import: a new variant's inventory is never silently defaulted; it stays
+  // unresolved until the row or the Batch Default Inventory supplies it.
+  assert.equal(bulkInventoryPreview(null, false).mode, "unresolved");
+  assert.equal(applyBatchDefaults(base(), { ...defaults, inventory: 10 })[0].variants[0].inventory, 10);
+});
 test("exact integer price protection remains", () =>
   assert.match(readiness, /\(v_variant ->> 'price_minor'\)::bigint/));
 test("anonymous and non-admin mutation remains blocked", () =>

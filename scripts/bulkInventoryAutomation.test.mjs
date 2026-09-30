@@ -4,22 +4,36 @@ import test from "node:test";
 import {
   bulkInventoryPreview,
   parseBulkCatalog,
+  unresolvedVariantFacts,
 } from "../src/lib/bulkCatalog.ts";
 
-const [admin, migration] = await Promise.all([
+const [admin, migration, legacyServerSku, bulkImportV2] = await Promise.all([
   readFile("src/admin/BulkImport.tsx", "utf8"),
   readFile(
     "supabase/migrations/202608270004_phase_4_default_inventory_bulk_persistence.sql",
     "utf8",
   ),
+  readFile("supabase/migrations/202609240004_legacy_bulk_import_server_sku.sql", "utf8"),
+  readFile("supabase/migrations/202609290001_bulk_import_v2_sim_configuration.sql", "utf8"),
 ]);
 
-test("new variant with omitted inventory previews and initializes exactly 10", () => {
+// The Phase 4 default-10 rule for the legacy paste import was replaced (checkout commit
+// ce92dd9 + 202609240004): a new variant must now state its inventory, and the Excel
+// (Bulk Upload v2) path owns the "blank Stock = 10" default.
+test("new variant with omitted inventory: legacy import blocks it; Excel v2 initializes exactly 10", () => {
   assert.deepEqual(bulkInventoryPreview(null, false), {
-    label: "Inventory: 10 (default for new variant)",
-    mode: "default_new",
+    label: "Inventory: unresolved",
+    mode: "unresolved",
   });
-  assert.match(migration, /else 10 - v_current_inventory/);
+  const [parsed] = parseBulkCatalog(
+    "Synthetic Device\nBrand: Synthetic\nCategory: Synthetic Category\nPrice: 223000",
+  ).products[0].variants;
+  assert.equal(parsed.inventory, null);
+  assert.ok(unresolvedVariantFacts(parsed, { existingVariant: false }).includes("Inventory"));
+  assert.ok(!unresolvedVariantFacts(parsed, { existingVariant: true }).includes("Inventory"));
+  assert.match(legacyServerSku, /is null and nullif\(v_variant ->> 'inventory', ''\) is null then raise exception '%: Missing Inventory'/);
+  assert.match(admin, /`Stock → \$\{variant\.inventory \?\? 10\}`/);
+  assert.match(bulkImportV2, /v_stock := 10;/);
 });
 
 test("new variant with Owner inventory uses the supplied quantity", () => {
@@ -79,11 +93,15 @@ test("default inventory is an auditable +10 ledger movement", () => {
   assert.match(migration, /phase4_bulk_default_inventory/);
 });
 
-test("Bulk Preview renders default, preserve, and Owner-supplied labels", () => {
-  assert.match(admin, /inventoryLabel: inventoryIntent\.label/);
+test("Bulk Preview renders unresolved, preserve, and Owner-supplied labels", () => {
+  // Legacy rows show the inventory intent; Excel v2 rows show the final stock.
+  assert.match(
+    admin,
+    /inventoryLabel: catalogSheet\s*\?\s*`Stock → \$\{variant\.inventory \?\? 10\}`\s*:\s*inventoryIntent\.label/,
+  );
   assert.match(admin, /variant\.inventoryLabel/);
   assert.equal(
-    bulkInventoryPreview(null, false).label.includes("default"),
+    bulkInventoryPreview(null, false).label.includes("unresolved"),
     true,
   );
   assert.equal(

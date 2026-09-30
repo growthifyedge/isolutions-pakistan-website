@@ -94,11 +94,28 @@ test("product routing uses real slugs", () => {
 });
 test("storefront does not import the fictional mock catalog", () => {
   assert.doesNotMatch(app, /mockCatalog/);
-  assert.doesNotMatch(storefront, /Aster One|prototype-flagship/);
+  assert.doesNotMatch(storefront, /mockCatalog|prototype-flagship/);
+  // The homepage featured block (ce92dd9) has inline demo cards while live featured products
+  // are switched off. Those names may appear only there, and the cards only link to /shop:
+  // they can never be added to the cart or bought.
+  const demoStart = storefront.indexOf("const homepageDemoFeaturedProducts = [");
+  const demoEnd = storefront.indexOf("] as const;", demoStart);
+  assert.ok(demoStart > 0 && demoEnd > demoStart);
+  const outsideDemo = storefront.slice(0, demoStart) + storefront.slice(demoEnd);
+  assert.doesNotMatch(outsideDemo, /Aster One/);
+  const demoCard = storefront.slice(storefront.indexOf("function FeaturedDemoCard("), storefront.indexOf("</article>", storefront.indexOf("function FeaturedDemoCard(")));
+  assert.match(demoCard, /window\.location\.assign\("\/shop"\)/);
+  assert.doesNotMatch(demoCard, /addStorefrontCartItem|addToCart|checkout/i);
 });
 test("variants remain explicit rows without Cartesian generation", () => {
   assert.match(admin, /Add explicit variant/);
-  assert.doesNotMatch(storefront, /cartesian|flatMap/);
+  assert.doesNotMatch(storefront, /cartesian/i);
+  // flatMap is only used to read existing variants or filter menu links, never to build
+  // option combinations.
+  const flatMaps = [...storefront.matchAll(/flatMap\(/g)].map((match) => storefront.slice(match.index - 30, match.index + 160));
+  assert.ok(flatMaps.length > 0);
+  for (const usage of flatMaps)
+    assert.match(usage, /products\.flatMap\(\(product\)\s*=>\s*product\.variants\.map\(|candidates\.flatMap\(/, usage);
 });
 test("exact minimum active variant pricing and PKR formatting", () => {
   const variants = [
@@ -135,11 +152,13 @@ test("variant create, save, reload, edit, and repeat-save preserve exact money",
   assert.equal(pkrMajorInputFromMinor(storedMinor), "223000");
   storedMinor = parsePkrMajorToMinor(pkrMajorInputFromMinor(storedMinor));
   assert.equal(storedMinor, 22300000);
-  assert.match(admin, /const persistChangedVariantPrices = async/);
+  // Renamed persistChangedVariantPrices -> persistChangedVariantPricing when compare-at
+  // price was added to the same save; the exact-money rules are unchanged.
+  assert.match(admin, /const persistChangedVariantPricing = async/);
   assert.match(admin, /priceMinor === variant\.price_minor/);
   assert.match(
     admin,
-    /const variantPriceError = await persistChangedVariantPrices\(\)/,
+    /const variantPriceError = await persistChangedVariantPricing\(\)/,
   );
   assert.doesNotMatch(admin, /parseFloat|Math\.round/);
 });
