@@ -3927,7 +3927,6 @@ body:has(.pdp-page) header.storefront-navbar {
 .home-featured-availability { display:flex; align-items:center; gap:6px; margin-top:auto; padding-top:14px; color:#66706B; font:500 9px/1 Manrope,sans-serif; }
 .home-featured-availability i { width:6px; height:6px; border-radius:50%; background:#3E8A63; }
 .home-featured-availability.unavailable i { background:#A7AEAA; }
-.home-featured-empty { min-height:210px; display:grid; place-items:center; border:1px solid #D9DEDA; border-radius:14px; background:#F2F4F2; color:#66706B; font:600 14px/1.4 Manrope,sans-serif; text-align:center; }
 
 @media (max-width:1100px) {
   .home-featured-split { grid-template-columns:minmax(0,42fr) minmax(0,58fr); gap:24px; }
@@ -3963,7 +3962,6 @@ body:has(.pdp-page) header.storefront-navbar {
     grid-template-columns:repeat(2,minmax(0,1fr));
     gap:12px;
   }
-  .home-featured-empty { grid-row:3; }
   .home-featured-card {
     height:100%;
     display:flex;
