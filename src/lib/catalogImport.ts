@@ -1,6 +1,7 @@
 // Bulk Upload v2 Phase 2 — client-side preview helpers that mirror
 // public.apply_catalog_bulk_import_v2 (202609240006). The database re-validates and
 // re-matches everything; these only make the preview show what the import will do.
+import { ANDROID_MOBILE_WARRANTY_SOURCE, type ValueSource } from "./bulkCatalog.ts";
 
 /** The facts of an existing variant that take part in matching. */
 export type ExistingVariantFacts = {
@@ -73,6 +74,31 @@ export function matchImportVariant<T extends ExistingVariantFacts>(
       (cycles === null || item.battery_cycle_count === cycles),
   );
   return exact.length === 1 ? { match: exact[0], ambiguous: false } : { match: null, ambiguous: true };
+}
+
+const filled = (value: string | null | undefined): value is string => Boolean(value?.trim());
+
+/**
+ * The warranty a preview row sends for one variant (the database writes it as
+ * warranty_override and keeps the stored value when it is blank):
+ * - an Owner-supplied warranty always wins and may update the stored one;
+ * - a blank or auto-filled Android "1 Year" warranty never replaces a stored one: it inherits
+ *   the existing product default, and a matched variant keeps its own stored warranty;
+ * - with nothing stored, the auto-filled "1 Year" is saved.
+ */
+export function resolveImportWarranty(
+  incoming: { warranty: string | null; source: ValueSource },
+  stored: { productDefault?: string | null; variantOverride?: string | null },
+): { warranty: string | null; source: ValueSource } {
+  let result = incoming;
+  if (
+    (result.source === "unresolved" || result.source === ANDROID_MOBILE_WARRANTY_SOURCE) &&
+    filled(stored.productDefault)
+  )
+    result = { warranty: stored.productDefault, source: "inherited from product" };
+  if (filled(stored.variantOverride) && result.source !== "Owner supplied explicitly")
+    result = { warranty: stored.variantOverride, source: "Owner supplied explicitly" };
+  return result;
 }
 
 export type CatalogImportCounts = {

@@ -1235,7 +1235,7 @@ function ProductCard({ product }: { product: CatalogProduct }) {
       <a className="product-image" href={`/product/${product.slug}`}>
         {media ? (
           <img
-            src={cloudinaryDeliveryUrl(media.publicId, 720) || media.url}
+            src={cloudinaryDeliveryUrl(media.publicId, 800, { trim: true }) || media.url}
             alt={media.alt}
           />
         ) : null}

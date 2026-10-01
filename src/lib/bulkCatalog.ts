@@ -11,7 +11,11 @@ export type ValueSource =
   | "inherited from batch default"
   | "explicit variant override"
   | "inherited by variant"
+  | "Android mobile default"
   | "unresolved";
+
+/** Source of the Owner-locked "1 Year" warranty auto-filled on Android / non-Apple Mobile Phones. */
+export const ANDROID_MOBILE_WARRANTY_SOURCE: ValueSource = "Android mobile default";
 
 export type BatchDefaults = {
   brand: string | null;

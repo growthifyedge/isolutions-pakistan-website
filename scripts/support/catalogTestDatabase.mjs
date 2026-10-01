@@ -22,6 +22,8 @@ const SKIPPED = new Set([
   "202608310001_phase_4_motorola_g77_test_deal.sql",
   "202609010003_phase_4_apple_charger_commercial_facts.sql",
   "202609010004_phase_4_remaining_mobile_accessories.sql",
+  // Guarded to the live catalog's 105 products / 305 variants; tested on seeded data instead.
+  "202610010001_android_mobile_warranty_backfill.sql",
 ]);
 
 const PRELUDE = `

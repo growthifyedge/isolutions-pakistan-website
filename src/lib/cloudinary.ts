@@ -52,11 +52,18 @@ export async function validateSourceImage(file: File) {
   return null;
 }
 
-export function cloudinaryDeliveryUrl(publicId: string, width: number) {
+export function cloudinaryDeliveryUrl(
+  publicId: string,
+  width: number,
+  options: { trim?: boolean } = {},
+) {
   const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
   if (!cloudName || !publicId) return "";
   const safeWidth = Math.max(160, Math.min(3000, Math.round(width)));
-  return `https://res.cloudinary.com/${cloudName}/image/upload/c_limit,w_${safeWidth},q_auto,f_auto/${publicId}`;
+  // trim: removes the uniform white/transparent margin around a product shot so listing cards
+  // can show the product itself large (CSS still contain-fits it: never cropped or stretched).
+  const trim = options.trim ? "e_trim:10/" : "";
+  return `https://res.cloudinary.com/${cloudName}/image/upload/${trim}c_limit,w_${safeWidth},q_auto,f_auto/${publicId}`;
 }
 
 export function containsBinaryMediaData(value: unknown): boolean {

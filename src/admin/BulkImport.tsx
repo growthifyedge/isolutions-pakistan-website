@@ -24,6 +24,7 @@ import {
 } from "../lib/bulkCatalog";
 import {
   CATALOG_SKU_PREFIX_BY_CATEGORY_SLUG,
+  ANDROID_MOBILE_WARRANTY,
   STAGING_PROFILES,
   applyStagingProfile,
   catalogSkuPending,
@@ -35,6 +36,7 @@ import {
   canApplyCatalogImport,
   catalogImportConfirmation,
   catalogImportCounts,
+  resolveImportWarranty,
   matchImportVariant,
   type CatalogImportResult,
   type ExistingVariantFacts,
@@ -367,6 +369,11 @@ export function BulkImport() {
         };
         const variants = product.variants.map(
           (parsedVariant): PreviewVariant => {
+            // A blank or auto-filled Android "1 Year" warranty inherits an existing product default.
+            const inheritedWarranty = resolveImportWarranty(
+              { warranty: parsedVariant.warranty, source: parsedVariant.warrantySource },
+              { productDefault: preserveExistingWarrantyDefault ? existing!.default_warranty : null },
+            );
             const variant = {
               ...parsedVariant,
               condition:
@@ -389,16 +396,8 @@ export function BulkImport() {
                 preserveExistingDeliveryDefault
                   ? ("inherited from product" as const)
                   : parsedVariant.deliverySource,
-              warranty:
-                parsedVariant.warrantySource === "unresolved" &&
-                preserveExistingWarrantyDefault
-                  ? effectiveDefaults.warranty
-                  : parsedVariant.warranty,
-              warrantySource:
-                parsedVariant.warrantySource === "unresolved" &&
-                preserveExistingWarrantyDefault
-                  ? ("inherited from product" as const)
-                  : parsedVariant.warrantySource,
+              warranty: inheritedWarranty.warranty,
+              warrantySource: inheritedWarranty.source,
               ptaStatus:
                 parsedVariant.ptaSource === "unresolved" &&
                 preserveExistingPtaDefault
@@ -454,11 +453,6 @@ export function BulkImport() {
               variant.conditionSource !== "Owner supplied explicitly" &&
               match.condition !== "unknown",
             );
-            const preserveExistingWarranty = Boolean(
-              match &&
-              variant.warrantySource !== "Owner supplied explicitly" &&
-              match.warranty_override,
-            );
             const preserveExistingDelivery = Boolean(
               match &&
               variant.deliverySource !== "Owner supplied explicitly" &&
@@ -476,12 +470,12 @@ export function BulkImport() {
             const effectiveConditionSource = preserveExistingCondition
               ? "Owner supplied explicitly"
               : variant.conditionSource;
-            const effectiveWarranty = preserveExistingWarranty
-              ? match!.warranty_override
-              : variant.warranty;
-            const effectiveWarrantySource = preserveExistingWarranty
-              ? "Owner supplied explicitly"
-              : variant.warrantySource;
+            // Only an Owner-supplied warranty replaces a matched variant's stored warranty.
+            const { warranty: effectiveWarranty, source: effectiveWarrantySource } =
+              resolveImportWarranty(
+                { warranty: variant.warranty, source: variant.warrantySource },
+                { variantOverride: match?.warranty_override },
+              );
             const effectiveDelivery = preserveExistingDelivery
               ? match!.delivery_scope
               : variant.deliveryScope;
@@ -972,7 +966,8 @@ export function BulkImport() {
         <small>
           {stagingProfile === "none"
             ? "Explicit row values only; blank PTA and Condition stay blank."
-            : `Fills blank values only (explicit row values always win): ${STAGING_PROFILES[stagingProfile].supplies.join(" · ")} · Stock stays 10 unless a Qty is given.`}
+            : `Fills blank values only (explicit row values always win): ${STAGING_PROFILES[stagingProfile].supplies.join(" · ")} · Stock stays 10 unless a Qty is given.`}{" "}
+          Android (non-Apple) Mobile Phones with no warranty get {ANDROID_MOBILE_WARRANTY} (Android mobile default); a stated warranty is never changed.
         </small>
       </label>
       <label className="bulk-raw-source">

@@ -944,6 +944,39 @@ const PROFILE_PRODUCT_TYPE: Partial<Record<Exclude<StagingProfileId, "none">, Ca
   wholesale_pta_approved: "Mobile Phone",
 };
 
+/** Owner-locked (2026-10-01): warranty for Android / non-Apple Mobile Phones that state none. */
+export const ANDROID_MOBILE_WARRANTY = "1 Year";
+
+/**
+ * True for a Mobile Phone row with a resolved, non-Apple brand and a blank Warranty. Apple /
+ * iPhone, unresolved brands and every other Product Type (tablets, laptops, watches,
+ * accessories, gadgets) never qualify.
+ */
+export function qualifiesForAndroidMobileWarranty(row: CatalogSheetRow): boolean {
+  const brand = row.brand?.trim();
+  return (
+    row.productType === "Mobile Phone" &&
+    !row.warranty?.trim() &&
+    Boolean(brand) &&
+    row.fieldStatus.brand !== "needs_review" &&
+    brand!.toLowerCase() !== "apple" &&
+    !/\biphone\b/i.test(`${row.model ?? ""} ${row.productTitle ?? ""}`)
+  );
+}
+
+/**
+ * Fills a blank Warranty with "1 Year" on qualifying Android Mobile Phone rows, marked
+ * "default" so the preview shows it as auto-filled. An explicit or section-note warranty
+ * ("Official Warranty", "No Warranty", "2 Year Warranty", ...) is never changed.
+ */
+export function applyAndroidMobileWarrantyDefault(rows: CatalogSheetRow[]): CatalogSheetRow[] {
+  return rows.map((row) =>
+    qualifiesForAndroidMobileWarranty(row)
+      ? { ...row, warranty: ANDROID_MOBILE_WARRANTY, fieldStatus: { ...row.fieldStatus, warranty: "default" } }
+      : row,
+  );
+}
+
 /**
  * Applies a staging profile to blank fields only; explicit row values always win.
  * Profile-supplied values are marked "default" so they stay visible for review.

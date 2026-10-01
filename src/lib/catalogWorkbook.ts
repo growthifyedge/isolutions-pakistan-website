@@ -3,6 +3,7 @@ import type { BulkParseResult, BulkProduct, BulkVariant } from "./bulkCatalog.ts
 import {
   DEFAULT_IMPORT_STOCK,
   EXTENDED_RAM,
+  applyAndroidMobileWarrantyDefault,
   catalogSlug,
   catalogVariantKey,
   parseCatalogPrice,
@@ -17,7 +18,7 @@ import {
   type CatalogSimConfiguration,
   type FieldStatus,
 } from "./catalogSheet.ts";
-import { normalizeCapacity } from "./bulkCatalog.ts";
+import { ANDROID_MOBILE_WARRANTY_SOURCE, normalizeCapacity } from "./bulkCatalog.ts";
 import { pkrMajorInputFromMinor } from "./money.ts";
 import { SIM_CONFIGURATIONS } from "./variantFacts.ts";
 
@@ -790,7 +791,12 @@ function toBulkVariant(row: CatalogSheetRow): BulkVariant {
     condition: row.condition ?? "unknown",
     conditionSource: source(row.condition),
     warranty: row.warranty,
-    warrantySource: source(row.warranty),
+    // The auto-filled Android "1 Year" stays distinct from an Owner-supplied warranty, so it
+    // never replaces a warranty already stored on the product or variant.
+    warrantySource:
+      row.fieldStatus.warranty === "default" && row.warranty !== null
+        ? ANDROID_MOBILE_WARRANTY_SOURCE
+        : source(row.warranty),
     deliveryScope: row.deliveryScope,
     deliverySource: source(row.deliveryScope),
     inventory: row.stock,
@@ -802,12 +808,17 @@ function toBulkVariant(row: CatalogSheetRow): BulkVariant {
   };
 }
 
-/** Groups catalog rows by product key (slug) into the existing BulkParseResult preview model. */
+/**
+ * Groups catalog rows by product key (slug) into the existing BulkParseResult preview model.
+ * Both Bulk Upload v2 sources (pasted wholesale lists and Excel uploads) pass through here, so
+ * the Android "1 Year" warranty default is applied here, before Bulk Preview. It is not written
+ * into generated workbooks, so a re-uploaded file never turns it into an explicit value.
+ */
 export function catalogSheetToBulkParseResult(
   data: Pick<CatalogWorkbookData, "rows" | "specifications"> & { fileErrors?: string[] },
 ): BulkParseResult {
   const groups = new Map<string, CatalogSheetRow[]>();
-  for (const row of data.rows) {
+  for (const row of applyAndroidMobileWarrantyDefault(data.rows)) {
     const key = row.slug ?? `unkeyed-${row.lineNumber}`;
     groups.set(key, [...(groups.get(key) ?? []), row]);
   }
