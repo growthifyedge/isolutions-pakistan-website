@@ -66,10 +66,21 @@ function prepare(name, sql) {
   return text;
 }
 
+// Hosted Supabase grants anon/authenticated ALL on every new public table, view, function and
+// sequence (default privileges), so on the live database RLS and explicit revokes are the only
+// barrier. Security tests opt into the same defaults so they cannot pass on a missing grant.
+const SUPABASE_DEFAULT_PRIVILEGES = `
+grant usage on schema public to anon, authenticated, service_role;
+alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+`;
+
 /** Returns a fresh database with every migration applied (see the adjustments above). */
-export async function createCatalogTestDatabase() {
+export async function createCatalogTestDatabase({ supabaseDefaultPrivileges = false } = {}) {
   const db = new PGlite();
   await db.exec(PRELUDE);
+  if (supabaseDefaultPrivileges) await db.exec(SUPABASE_DEFAULT_PRIVILEGES);
   const files = readdirSync(MIGRATIONS).filter((name) => name.endsWith(".sql")).sort();
   for (const name of files) {
     if (SKIPPED.has(name)) continue;
