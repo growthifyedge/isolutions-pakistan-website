@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
+import { adminProductMatchesQuery } from "../lib/adminProductSearch";
 import {
   formatPkrMinor,
   parsePkrMajorToMinor,
@@ -42,7 +43,7 @@ type ProductRow = {
   data_class: "development" | "real";
   brand: { name: string } | null;
   category: { name: string } | null;
-  product_variants: { id: string }[];
+  product_variants: { id: string; sku: string | null; storage_display: string | null; color_finish: string | null }[];
   product_media: { is_primary: boolean; cloudinary_public_id: string | null }[];
 };
 type Draft = {
@@ -147,7 +148,7 @@ export function Phase4ProductList() {
     supabase
       .from("products")
       .select(
-        "id,title,slug,publication_status,data_class,brand:brands(name),category:categories(name),product_variants(id),product_media(is_primary,cloudinary_public_id)",
+        "id,title,slug,publication_status,data_class,brand:brands(name),category:categories(name),product_variants(id,sku,storage_display,color_finish),product_media(is_primary,cloudinary_public_id)",
       )
       .order("updated_at", { ascending: false })
       .then(({ data, error }) => {
@@ -161,9 +162,7 @@ export function Phase4ProductList() {
     new URLSearchParams(location.search).get("missing") === "images";
   const shown = products.filter(
     (p) =>
-      `${p.title} ${p.slug} ${p.brand?.name ?? ""}`
-        .toLowerCase()
-        .includes(query.toLowerCase()) &&
+      adminProductMatchesQuery(p, query) &&
       (!missingImagesOnly ||
         !p.product_media.some((media) => media.is_primary && media.cloudinary_public_id)),
   );
@@ -191,7 +190,7 @@ export function Phase4ProductList() {
             aria-label="Search products"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search title, slug or brand"
+            placeholder="Search title, brand, SKU, storage or colour"
           />
         </div>
         <a className="admin-secondary" href="/admin/taxonomy">
