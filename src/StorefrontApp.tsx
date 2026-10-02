@@ -77,6 +77,7 @@ import {
   cartLineLimit,
   isValidOrderPhone,
 } from "./lib/orderRules";
+import { RATE_LIMIT_MESSAGE, isRateLimitError } from "./lib/rateLimit";
 import {
   hasStorefrontWishlistItem,
   removeStorefrontWishlistItem,
@@ -2655,7 +2656,9 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
     } catch (error) {
       const detail = error instanceof Error ? error.message : "";
       setCheckoutError(
-        detail.includes("karachi_delivery_required")
+        isRateLimitError(error)
+          ? RATE_LIMIT_MESSAGE
+          : detail.includes("karachi_delivery_required")
           ? "This order includes a mobile phone and must be delivered in Karachi."
           : detail.includes("phone_invalid")
             ? PHONE_VALIDATION_MESSAGE
@@ -3526,8 +3529,8 @@ function AboutNewsletter() {
           : "You're subscribed! We'll keep you updated.",
       });
       setEmail("");
-    } catch {
-      setFeedback({ tone: "error", message: "Something went wrong. Please try again." });
+    } catch (error) {
+      setFeedback({ tone: "error", message: isRateLimitError(error) ? RATE_LIMIT_MESSAGE : "Something went wrong. Please try again." });
     } finally {
       setSubmitting(false);
     }
@@ -3724,8 +3727,8 @@ function ContactPage({ taxonomy }: { taxonomy: Taxonomy }) {
       if (error) throw error;
       setFormValues({ name: "", email: "", phone: "", message: "" });
       setFeedback({ tone: "success", message: "Thank you! Your message has been sent." });
-    } catch {
-      setFeedback({ tone: "error", message: "Something went wrong. Please try again." });
+    } catch (error) {
+      setFeedback({ tone: "error", message: isRateLimitError(error) ? RATE_LIMIT_MESSAGE : "Something went wrong. Please try again." });
     } finally {
       setSubmitting(false);
     }

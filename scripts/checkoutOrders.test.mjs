@@ -98,8 +98,11 @@ async function as(role, userId, run) {
   }
 }
 
+// Each order gets its own phone so the per-phone rate limit (202610020001) never interferes with
+// these checks; rate limiting itself is covered by storefrontRateLimit.test.mjs.
+let phoneSequence = 0;
 const order = (overrides = {}) => ({
-  name: "TEST Customer", phone: "03000000000", email: "test@example.test", city: "Karachi", otherCity: null,
+  name: "TEST Customer", phone: `0300${String(++phoneSequence).padStart(7, "0")}`, email: "test@example.test", city: "Karachi", otherCity: null,
   address: "TEST Address, Block 1", landmark: null, notes: "TEST order", payment: "cash_on_delivery",
   shipping: "standard", items: [{ variant_id: PHONE, quantity: 1 }], ...overrides,
 });
