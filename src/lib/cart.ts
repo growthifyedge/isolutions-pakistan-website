@@ -1,3 +1,5 @@
+import { MAX_ORDER_LINE_QUANTITY, cartLineLimit } from "./orderRules.ts";
+
 export type StorefrontCartItem = {
   productId: string;
   productSlug: string;
@@ -14,7 +16,11 @@ const CART_STORAGE_KEY = "isolutions-storefront-cart";
 function readCart() {
   try {
     const parsed = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) ?? "[]");
-    return Array.isArray(parsed) ? parsed as StorefrontCartItem[] : [];
+    // Carts saved before the per-line maximum existed are capped on read.
+    return Array.isArray(parsed)
+      ? (parsed as StorefrontCartItem[]).map((entry) =>
+          entry.quantity > MAX_ORDER_LINE_QUANTITY ? { ...entry, quantity: MAX_ORDER_LINE_QUANTITY } : entry)
+      : [];
   } catch {
     return [];
   }
@@ -40,7 +46,8 @@ export function clearStorefrontCart() {
 export function addStorefrontCartItem(item: StorefrontCartItem, inventoryLimit: number) {
   const cart = readCart();
   const existing = cart.find((entry) => entry.variantId === item.variantId);
-  const nextQuantity = Math.min((existing?.quantity ?? 0) + item.quantity, inventoryLimit);
+  // Never above stock or the server's per-line maximum (create_storefront_order rejects more).
+  const nextQuantity = Math.min((existing?.quantity ?? 0) + item.quantity, cartLineLimit(inventoryLimit));
   const nextItem = { ...item, quantity: nextQuantity };
   const nextCart = existing
     ? cart.map((entry) => entry.variantId === item.variantId ? nextItem : entry)

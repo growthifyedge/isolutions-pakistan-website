@@ -72,6 +72,12 @@ import {
   type StorefrontCartItem,
 } from "./lib/cart";
 import {
+  MAX_ORDER_LINE_QUANTITY,
+  PHONE_VALIDATION_MESSAGE,
+  cartLineLimit,
+  isValidOrderPhone,
+} from "./lib/orderRules";
+import {
   hasStorefrontWishlistItem,
   removeStorefrontWishlistItem,
   storefrontWishlistItems,
@@ -380,7 +386,7 @@ function StorefrontCartDrawer({
   const subtotal = items.reduce((total, item) => total + item.priceMinor * item.quantity, 0);
   const increaseQuantity = (item: StorefrontCartItem) => {
     const inventoryLimit = inventoryByVariant[item.variantId];
-    if (typeof inventoryLimit !== "number" || item.quantity >= inventoryLimit) return;
+    if (typeof inventoryLimit !== "number" || item.quantity >= cartLineLimit(inventoryLimit)) return;
     addStorefrontCartItem({ ...item, quantity: 1 }, inventoryLimit);
   };
 
@@ -420,7 +426,7 @@ function StorefrontCartDrawer({
             <div className="storefront-cart-items">
               {items.map((item) => {
                 const inventoryLimit = inventoryByVariant[item.variantId];
-                const cannotIncrease = typeof inventoryLimit !== "number" || item.quantity >= inventoryLimit;
+                const cannotIncrease = typeof inventoryLimit !== "number" || item.quantity >= cartLineLimit(inventoryLimit);
                 return (
                   <article className="storefront-cart-item" key={item.variantId}>
                     <div className="storefront-cart-item-image">
@@ -2518,9 +2524,13 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
   useEffect(() => {
     if (items.length === 0) return;
     let active = true;
-    fetchPublicCatalog({ limit: 100 })
-      .then((products) => {
+    // Look up each cart product by slug: the catalog search returns at most 100 products, so a
+    // single page would miss delivery scopes once more than 100 products are published.
+    const slugs = [...new Set(items.map((item) => item.productSlug))];
+    Promise.all(slugs.map((slug) => fetchPublicCatalog({ slug, limit: 1 })))
+      .then((results) => {
         if (!active) return;
+        const products = results.flat();
         setDeliveryScopes(Object.fromEntries(products.flatMap((product) =>
           product.variants.map((variant) => [variant.id, variant.deliveryScope]),
         )));
@@ -2609,6 +2619,10 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
       setCheckoutError("Please complete your name, phone, city, and delivery address.");
       return;
     }
+    if (!isValidOrderPhone(phone)) {
+      setCheckoutError(PHONE_VALIDATION_MESSAGE);
+      return;
+    }
     if (selectedCity === "Other city in Pakistan" && !otherCityName.trim()) {
       setCheckoutError("Please enter your city name for nationwide delivery.");
       return;
@@ -2643,6 +2657,10 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
       setCheckoutError(
         detail.includes("karachi_delivery_required")
           ? "This order includes a mobile phone and must be delivered in Karachi."
+          : detail.includes("phone_invalid")
+            ? PHONE_VALIDATION_MESSAGE
+          : detail.includes("order_item_quantity_invalid")
+            ? `Each item can be ordered up to ${MAX_ORDER_LINE_QUANTITY} units per order. Please update your cart.`
           : detail.includes("variant_out_of_stock")
             ? "One or more items are no longer available in the requested quantity. Please review your cart."
             : detail.includes("payment_method_unsupported")
@@ -3033,7 +3051,7 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
   const selectVariant = (candidate: CatalogVariant | undefined) => {
     if (!candidate || candidate.quantity <= 0) return;
     setVariantId(candidate.id);
-    setQuantity((current) => Math.max(1, Math.min(current, candidate.quantity)));
+    setQuantity((current) => Math.max(1, Math.min(current, cartLineLimit(candidate.quantity))));
     setPurchaseFeedback("");
     const media = product.media.find((item) => mediaIsAssignedToVariant(item, candidate.id))
       ?? product.media.find((item) => mediaMatchesVariant(item, candidate.id))
@@ -3261,7 +3279,7 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
                 <div>
                   <button type="button" onClick={() => setQuantity((current) => Math.max(1, current - 1))} disabled={quantity <= 1} aria-label="Decrease quantity"><Minus /></button>
                   <output aria-live="polite">{quantity}</output>
-                  <button type="button" onClick={() => setQuantity((current) => Math.min(variant.quantity, current + 1))} disabled={variant.quantity <= 0 || quantity >= variant.quantity} aria-label="Increase quantity"><Plus /></button>
+                  <button type="button" onClick={() => setQuantity((current) => Math.min(cartLineLimit(variant.quantity), current + 1))} disabled={variant.quantity <= 0 || quantity >= cartLineLimit(variant.quantity)} aria-label="Increase quantity"><Plus /></button>
                 </div>
               </div>
               {recommendations.length > 0 && (
