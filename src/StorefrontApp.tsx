@@ -1237,6 +1237,7 @@ function ProductCard({ product }: { product: CatalogProduct }) {
   const price = pricedVariant?.priceMinor ?? productPrice(product);
   const compareAt = pricedVariant ? validCompareAt(pricedVariant) : null;
   const inStock = product.variants.some((variant) => variant.quantity > 0);
+  const shortDescription = product.short_description?.trim();
   return (
     <article className="product-card">
       <a className="product-image" href={`/product/${product.slug}`}>
@@ -1257,9 +1258,7 @@ function ProductCard({ product }: { product: CatalogProduct }) {
         <h3>
           <a href={`/product/${product.slug}`}>{product.title}</a>
         </h3>
-        <p className="detail">
-          {product.short_description ?? "View verified product details"}
-        </p>
+        {shortDescription && <p className="detail">{shortDescription}</p>}
         <div className="price">
           {price !== null && (
             <strong>
