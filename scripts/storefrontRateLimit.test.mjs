@@ -185,7 +185,8 @@ test("privacy: only peppered hashes are stored; the log, pepper and helpers are 
   assert.ok(rows.length > 0);
   for (const row of rows) assert.match(row.identity_hash, /^[0-9a-f]{64}$/);
   const stored = JSON.stringify(rows);
-  for (const raw of ["0301", "1111111", "example.test", "203.0.113", "visitor", "reader"]) assert.ok(!stored.includes(raw), raw);
+  // Raw phones are excluded by the 64-hex check above; digit-only probes would randomly match hex hashes.
+  for (const raw of ["example.test", "203.0.113", "visitor", "reader"]) assert.ok(!stored.includes(raw), raw);
   // Not the plain sha256 of the identity either (the pepper is mixed in).
   const plain = (await one(`select encode(sha256(convert_to('03011111111', 'UTF8')), 'hex') as h`)).h;
   assert.ok(!rows.some((row) => row.identity_hash === plain));
