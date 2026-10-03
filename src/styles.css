@@ -5384,31 +5384,6 @@ body:has(.home-page) .trustbar {
     color: #F0643A;
   }
 }
-@media (min-width: 901px) {
-  body:has(.home-page) .trustbar {
-    color: #e5eae7 !important;
-    box-shadow: none !important;
-    background: linear-gradient(
-      180deg,
-      #101a17 0%,
-      #3961db 100%
-    ) !important;
-    border-bottom: 2px solid #3961db !important;
-  }
-}
-@media (min-width: 901px) {
-  body:has(.home-page) header.storefront-navbar {
-    background: linear-gradient(
-      90deg,
-      #e7edff 0%,
-      #f7f8f7 50%,
-      #e7edff 100%
-    ) !important;
-    color: #101a17 !important;
-    border-bottom: 0 !important;
-    box-shadow: none !important;
-  }
-}
 
   body:has(.home-page) .storefront-navbar .wordmark,
   body:has(.home-page) .navbar-links > a,
@@ -5480,30 +5455,6 @@ body:has(.home-page) .trustbar {
 @media (max-width:540px) {
   .storefront-footer-brand .wordmark { width:72px; height:72px; }
 }
-@media (max-width: 600px) {
-  body:has(.home-page) .trustbar {
-    color: #e5eae7 !important;
-    box-shadow: none !important;
-    background: linear-gradient(
-      180deg,
-      #101a17 0%,
-      #3961db 100%
-    ) !important;
-    border-bottom: 2px solid #3961db !important;
-  }
-
-  body:has(.home-page) header.storefront-navbar {
-    background: linear-gradient(
-      90deg,
-      #e7edff 0%,
-      #f7f8f7 50%,
-      #e7edff 100%
-    ) !important;
-    color: #101a17 !important;
-    border-bottom: 0 !important;
-    box-shadow: none !important;
-  }
-}
 
 /* Storefront navbar and drawer brand lockup. */
 .storefront-navbar > .wordmark,
@@ -5535,7 +5486,7 @@ body:has(.home-page) .trustbar {
   white-space: nowrap;
 }
 .storefront-brand-name strong { font-weight: 750; }
-.storefront-brand-name > span { color:#5F6964; font-weight:540; }
+.storefront-brand-name > span { color:#4F5A5A; font-weight:540; }
 
 .drawer-head .storefront-brand-logo {
   width: 48px;
@@ -6520,4 +6471,56 @@ body:has(.home-page) .trustbar {
   .shop-product-grid .detail { display:none; }
   .shop-product-grid .price strong { font-size:15px; }
   .shop-product-grid .status { margin-top:5px; font-size:11px; }
+}
+
+/* =========================================================================
+   UNIFIED STOREFRONT SHELL — one ticker + navbar treatment on every route
+   and every width (Home, collections, Shop, product, checkout, info pages),
+   plus a Home-only coral-to-blush surround behind the hero banner. Replaces
+   the former Home-only ticker/navbar overrides.
+   ========================================================================= */
+:root {
+  --shell-ticker-bg: linear-gradient(180deg, #101A17 0%, #3961DB 100%);
+  --shell-ticker-ink: #E5EAE7;
+  --shell-ticker-edge: #3961DB;
+  /* Warm blush -> soft blue-grey -> pale cool blue; low intensity so text and icons stay crisp. */
+  --shell-nav-bg: linear-gradient(90deg, #F4D3D7 0%, #E7D7E1 26%, #DDD9E8 52%, #C9D7F3 100%);
+  --shell-nav-ink: #101A17;
+  --shell-nav-edge: rgba(57, 97, 219, .16);
+  --shell-nav-shadow: 0 6px 18px rgba(16, 26, 23, .05);
+  /* Home hero surround: rich coral-red at the top, fading through blush to the page colour. */
+  --home-hero-surround: linear-gradient(180deg, #D7344B 0%, #E5606F 16%, #F09CA4 38%, #F8D5D8 62%, #FCEEEF 82%, #F8F9F8 100%);
+  --shell-hero-gutter: clamp(16px, 2vw, 28px);
+}
+
+.trustbar,
+body:has(.home-page) .trustbar {
+  background: var(--shell-ticker-bg);
+  color: var(--shell-ticker-ink);
+  border-bottom: 2px solid var(--shell-ticker-edge);
+  box-shadow: none;
+}
+
+header.storefront-navbar,
+body:has(.home-page) header.storefront-navbar,
+body:has(.shop-page) header.storefront-navbar,
+body:has(.pdp-page) header.storefront-navbar {
+  background: var(--shell-nav-bg);
+  color: var(--shell-nav-ink);
+  border-bottom: 1px solid var(--shell-nav-edge);
+  box-shadow: var(--shell-nav-shadow);
+}
+
+/* Home only: the banner sits in a red/coral-to-blush surround that fades into the page. */
+.home-page {
+  background-image: var(--home-hero-surround);
+  background-size: 100% clamp(420px, 52vw, 780px);
+  background-repeat: no-repeat;
+}
+/* The surround replaces the banner's own pink frame (which was clipped at the sides). */
+.home-banner-carousel::before { display: none; }
+/* Desktop: the banner sits inside the surround with equal gutters (it used to be 24px wider
+   than its column and lost its right-hand rounded corners to the column's overflow clip). */
+@media (min-width: 901px) {
+  .home-banner-carousel { width: calc(100% - 2 * var(--shell-hero-gutter)); }
 }
