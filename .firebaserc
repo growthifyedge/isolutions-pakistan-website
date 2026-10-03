@@ -1,6 +1,7 @@
 {
   "projects": {
-    "development": "isolutions-development-cb1ea"
+    "development": "isolutions-development-cb1ea",
+    "production": "isolutions-pakistan-production"
   },
   "targets": {},
   "etags": {}
