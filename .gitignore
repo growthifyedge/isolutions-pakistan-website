@@ -13,3 +13,6 @@ supabase/.temp/
 # Local-only tool config
 .claude/launch.json
 .claude/settings.local.json
+
+# Local-only env files (.env.local, .env.production.local, ...)
+*.local

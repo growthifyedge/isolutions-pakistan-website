@@ -1081,12 +1081,9 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
 function Footer() {
   const footerBrandSlugs = new Set(["apple", "samsung", "xiaomi", "motorola", "honor", "nothing"]);
   const exploreBrands = homepageBrands.filter((brand) => footerBrandSlugs.has(brand.slug));
-  const customerCareItems = ["My Account", "Contact Us", "How to Order", "FAQs"];
   const paymentMethods = [
-    { title: "Credit / Debit Card", src: "/assets/payment-methods/credit-debit-card.svg" },
     { title: "Bank Transfer", src: "/assets/payment-methods/bank-transfer.svg" },
     { title: "Cash on Delivery", src: "/assets/payment-methods/cash-on-delivery.svg" },
-    { title: "Installments", src: "/assets/payment-methods/installments.svg" },
   ] as const;
 
   return (
@@ -1124,7 +1121,6 @@ function Footer() {
 
           <nav className="storefront-footer-links" aria-labelledby="footer-care-title">
             <h2 id="footer-care-title">Customer Care</h2>
-            <span>{customerCareItems[0]}</span>
             <a href="/contact">Contact Us</a>
             <a href="/about">About Us</a>
             <a href="/how-to-order">How to Order</a>
@@ -3372,10 +3368,10 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
   );
 }
 const aboutPaymentMethods = [
-  { title: "Credit/Debit Card", image: "/assets/about/payment/credit-debit-card.png" },
-  { title: "Bank Transfer", image: "/assets/about/payment/bank-transfer.png" },
-  { title: "Cash On Delivery", image: "/assets/about/payment/cash-on-delivery.png" },
-  { title: "Installments", image: "/assets/about/payment/installments.png" },
+  { title: "Cash On Delivery", image: "/assets/about/payment/cash-on-delivery.png", comingSoon: false },
+  { title: "Bank Transfer", image: "/assets/about/payment/bank-transfer.png", comingSoon: false },
+  { title: "Credit/Debit Card", image: "/assets/about/payment/credit-debit-card.png", comingSoon: true },
+  { title: "Installments", image: "/assets/about/payment/installments.png", comingSoon: true },
 ] as const;
 
 const aboutValues = [
@@ -3631,13 +3627,14 @@ function AboutPage({ taxonomy }: { taxonomy: Taxonomy }) {
         <section className="about-payments" aria-labelledby="about-payments-title">
           <div className="about-payments-head">
             <h2 id="about-payments-title">Payment Methods</h2>
-            <p>Multiple convenient ways to pay at iSolutions Pakistan.</p>
+            <p>Pay with Cash on Delivery or Bank Transfer. More payment options are coming soon.</p>
           </div>
           <div className="about-payments-grid">
             {aboutPaymentMethods.map((method) => (
-              <article className="about-payment-card" key={method.title}>
+              <article className={`about-payment-card${method.comingSoon ? " is-coming-soon" : ""}`} key={method.title}>
                 <img src={method.image} alt="" loading="lazy" />
                 <h3>{method.title}</h3>
+                {method.comingSoon && <small>Coming soon</small>}
               </article>
             ))}
           </div>
@@ -3847,7 +3844,7 @@ const frequentlyAskedQuestions = [
   },
   {
     question: "What payment methods do you accept?",
-    answer: "Available methods include Credit or Debit Card, Bank Transfer, Cash on Delivery and Installments. Confirm availability for your purchase with our team.",
+    answer: "We currently accept Cash on Delivery and Bank Transfer. Credit/Debit Card and Installment payments are not available yet.",
   },
   {
     question: "Do you offer Cash on Delivery?",

@@ -5,6 +5,11 @@
     requireCloudinaryEnvironment,
   } from "../_shared/admin.ts";
 
+  // Per-environment Cloudinary folder root (e.g. "isolutions-production"); unset keeps development.
+  const folderRoot =
+    Deno.env.get("CLOUDINARY_FOLDER_ROOT")?.trim().replace(/^\/+|\/+$/g, "") ||
+    "isolutions-development";
+
   Deno.serve(async (request) => {
     if (request.method === "OPTIONS")
       return new Response("ok", { headers: corsHeaders });
@@ -18,12 +23,14 @@
         const { data: bundle, error } = await client.from("bundles").select("id").eq("id", bundleId).single();
         if (error || !bundle) throw new Error("bundle_not_found");
       }
+      if (!/^[A-Za-z0-9_-]+(\/[A-Za-z0-9_-]+)*$/.test(folderRoot))
+        throw new Error("invalid_cloudinary_folder_root");
       const { cloudName, apiKey, apiSecret } = requireCloudinaryEnvironment();
       const timestamp = Math.floor(Date.now() / 1000);
       const params = {
         folder: bundleId
-          ? `isolutions-development/bundles/${bundleId}`
-          : `isolutions-development/products/${productId}`,
+          ? `${folderRoot}/bundles/${bundleId}`
+          : `${folderRoot}/products/${productId}`,
         timestamp,
         transformation: "c_limit,w_3000,h_3000,q_90,fl_force_strip",
       };

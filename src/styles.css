@@ -4461,6 +4461,8 @@ body:has(.pdp-page) header.storefront-navbar {
 .about-payment-card { min-width:0; margin:0; padding:0; overflow:visible; border:0; border-radius:0; background:transparent; box-shadow:none; }
 .about-payment-card img { width:100%; aspect-ratio:3/2; display:block; object-fit:cover; object-position:center; border-radius:16px; background:#ECEFED; }
 .about-payment-card h3 { margin:15px 4px 0; color:#101A17; text-align:center; font:700 16px/1.3 Manrope,sans-serif; }
+.about-payment-card.is-coming-soon img { opacity:.55; }
+.about-payment-card small { display:block; margin-top:5px; color:#66706B; text-align:center; font:600 12px/1.3 Manrope,sans-serif; }
 @media (max-width:900px) {
   .about-payments-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
