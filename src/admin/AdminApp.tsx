@@ -1,12 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
 import {
-  Archive,
   ArrowLeft,
-  BarChart3,
   Boxes,
   ChevronRight,
   CircleDollarSign,
-  FileText,
   Image,
   ListPlus,
   LayoutDashboard,
@@ -34,7 +31,12 @@ import {
   Phase4ProductList,
   TaxonomyManager,
 } from "./AdminCatalog";
-import { hasSupabaseEnvironment, supabase } from "../lib/supabase";
+import {
+  hasSupabaseEnvironment,
+  supabase,
+  supabaseEnvironmentLabel,
+} from "../lib/supabase";
+import { AdminDashboard } from "./AdminDashboard";
 import { MediaManager } from "./MediaManager";
 import { MediaLibrary } from "./MediaLibrary";
 import { BulkImport } from "./BulkImport";
@@ -56,12 +58,27 @@ const nav = [
   ["Promotions", "", CircleDollarSign],
   ["Settings", "/admin/settings", Settings],
 ] as const;
-function DevNotice() {
+function EnvironmentBadge() {
   return (
-    <div className="admin-dev-note">
-      <span /> Development workspace · Real catalog isolated from test data
+    <div
+      className={`admin-env-badge ${supabaseEnvironmentLabel.toLowerCase()}`}
+    >
+      <span /> {supabaseEnvironmentLabel}
     </div>
   );
+}
+function useSignedInEmail() {
+  const [email, setEmail] = useState("");
+  useEffect(() => {
+    let active = true;
+    void supabase?.auth.getSession().then(({ data }) => {
+      if (active) setEmail(data.session?.user.email ?? "");
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return email;
 }
 function AdminLayout({
   children,
@@ -71,6 +88,7 @@ function AdminLayout({
   section: string;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const email = useSignedInEmail();
   return (
     <div className="admin-shell">
       <aside className={menuOpen ? "admin-sidebar open" : "admin-sidebar"}>
@@ -121,11 +139,14 @@ function AdminLayout({
           >
             <Menu />
           </button>
-          <DevNotice />
+          <EnvironmentBadge />
           <div className="admin-user">
-            <span>MJ</span>
+            <span aria-hidden="true">
+              {(email[0] ?? "A").toUpperCase()}
+            </span>
             <div>
-              Development Admin<small>Verified Owner / Admin</small>
+              {email || "Signed in"}
+              <small>Verified Owner / Admin</small>
             </div>
           </div>
         </header>
@@ -179,7 +200,7 @@ function Login() {
           iSolutions <b>Pakistan</b>
         </a>
         <div className="login-panel">
-          <span className="admin-kicker">ADMIN STUDIO · PHASE 3A</span>
+          <span className="admin-kicker">ADMIN STUDIO</span>
           <h1>
             Catalog control,
             <br />
@@ -229,9 +250,7 @@ function Login() {
             </span>
           </div>
         </div>
-        <footer>
-          Development authentication state · No customer accounts or commerce
-        </footer>
+        <footer>Authorized iSolutions Pakistan staff only</footer>
       </section>
       <div className="login-art">
         <div className="login-orbit">
@@ -242,7 +261,7 @@ function Login() {
         <div className="login-status">
           <i />{" "}
           {hasSupabaseEnvironment
-            ? "Development client configured"
+            ? `${supabaseEnvironmentLabel} store connected`
             : "Environment configuration required"}
         </div>
       </div>
@@ -298,89 +317,7 @@ function AuthorizedAdmin({ children }: { children: React.ReactNode }) {
 function Dashboard() {
   return (
     <AdminLayout section="Dashboard">
-      <div className="admin-heading">
-        <div>
-          <span className="admin-kicker">THURSDAY · DEVELOPMENT</span>
-          <h1>Good morning.</h1>
-          <p>Phase 3A catalog readiness at a glance.</p>
-        </div>
-        <a href="/admin/products/new" className="admin-primary">
-          <Plus /> New product
-        </a>
-      </div>
-      <div className="metrics">
-        <article>
-          <small>Published</small>
-          <strong>1</strong>
-          <span>Development record</span>
-        </article>
-        <article>
-          <small>Drafts</small>
-          <strong>2</strong>
-          <span>Need commercial facts</span>
-        </article>
-        <article>
-          <small>Low / out of stock</small>
-          <strong>2</strong>
-          <span>Numeric movement totals</span>
-        </article>
-        <article className="metric-accent">
-          <small>Publication readiness</small>
-          <strong>33%</strong>
-          <span>1 of 3 development records</span>
-        </article>
-      </div>
-      <div className="dashboard-grid">
-        <section className="admin-panel">
-          <div className="panel-title">
-            <div>
-              <span className="admin-kicker">CATALOG ACTIVITY</span>
-              <h2>Recent work</h2>
-            </div>
-            <a href="/admin/products">
-              View catalog <ChevronRight />
-            </a>
-          </div>
-          {adminDevelopmentProducts.map((p) => (
-            <a className="activity-row" href="/admin/products/new" key={p.id}>
-              <div className="activity-icon">
-                <FileText />
-              </div>
-              <div>
-                <strong>{p.title}</strong>
-                <span>
-                  {p.brand} · {p.variants} explicit variant
-                  {p.variants > 1 ? "s" : ""}
-                </span>
-              </div>
-              <em className={`state ${p.status}`}>{p.status}</em>
-              <ChevronRight />
-            </a>
-          ))}
-        </section>
-        <aside className="readiness">
-          <span className="admin-kicker">FOUNDATION STATUS</span>
-          <h2>Secure by default.</h2>
-          <ul>
-            <li>
-              <ShieldCheck /> Database-backed roles
-            </li>
-            <li>
-              <PackageCheck /> Explicit variants
-            </li>
-            <li>
-              <BarChart3 /> Numeric inventory ledger
-            </li>
-            <li>
-              <Archive /> Drafts public-invisible
-            </li>
-          </ul>
-          <p>
-            Cloudinary, real catalog, orders and payments remain outside this
-            phase.
-          </p>
-        </aside>
-      </div>
+      <AdminDashboard />
     </AdminLayout>
   );
 }
@@ -662,12 +599,9 @@ function Future({ title }: { title: string }) {
   return (
     <AdminLayout section={title}>
       <div className="future-screen">
-        <span className="admin-kicker">PHASE BOUNDARY</span>
+        <span className="admin-kicker">COMING LATER</span>
         <h1>{title}</h1>
-        <p>
-          This area is intentionally unavailable until a later Owner-approved
-          phase.
-        </p>
+        <p>This area will be available in a later release.</p>
         <a href="/admin">Return to dashboard</a>
       </div>
     </AdminLayout>
@@ -712,7 +646,7 @@ export function AdminApp() {
       <AdminLayout section="Media">
         <div className="admin-heading compact media-library-heading">
           <div>
-            <span className="admin-kicker">PHASE 3B · CLOUDINARY</span>
+            <span className="admin-kicker">CATALOG · MEDIA</span>
             <h1>Product media</h1>
             <p>
               Review media records here, then open the product Media editor for

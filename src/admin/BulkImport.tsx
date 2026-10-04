@@ -937,7 +937,7 @@ export function BulkImport() {
     <section className="bulk-import">
       <div className="admin-heading compact">
         <div>
-          <span className="admin-kicker">PHASE 4 · OWNER-APPROVED DATA</span>
+          <span className="admin-kicker">CATALOG · BULK IMPORT</span>
           <h1>Bulk catalog import</h1>
           <p>
             Paste rough product blocks or upload CSV. Nothing writes until this

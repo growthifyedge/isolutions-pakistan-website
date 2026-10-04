@@ -26,7 +26,7 @@ export function CatalogReadiness() {
     <section>
       <div className="admin-heading compact">
         <div>
-          <span className="admin-kicker">PHASE 4 · REAL DRAFT CATALOG</span>
+          <span className="admin-kicker">CATALOG · DRAFT READINESS</span>
           <h1>Catalog readiness</h1>
           <p>
             Publication remains an explicit Owner action. This report never

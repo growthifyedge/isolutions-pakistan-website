@@ -72,10 +72,10 @@ export function MediaLibrary() {
         <Image />
         <h2>No media records yet</h2>
         <p>
-          Open a saved development product and use its Media tab to upload the
-          first optimized master.
+          Open a saved product and use its Media tab to upload its first
+          image.
         </p>
-        <a href="/admin/products">Open development products</a>
+        <a href="/admin/products">Open products</a>
       </div>
     );
 
@@ -85,8 +85,8 @@ export function MediaLibrary() {
         <article key={product?.id ?? media[0].product_id}>
           <div className="media-library-product">
             <div>
-              <span className="admin-kicker">DEVELOPMENT PRODUCT</span>
-              <h2>{product?.title ?? "Development product"}</h2>
+              <span className="admin-kicker">PRODUCT</span>
+              <h2>{product?.title ?? "Untitled product"}</h2>
               <p>
                 {media.length} media record{media.length === 1 ? "" : "s"}
                 {product?.publication_status
