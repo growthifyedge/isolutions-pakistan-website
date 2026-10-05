@@ -26,7 +26,55 @@ export type StorefrontOrderConfirmation = {
   deliveryFeeMinor: number;
   shippingSurchargeMinor: number;
   totalMinor: number;
+  couponCode?: string | null;
+  discountMinor?: number;
+  shippingDiscountMinor?: number;
 };
+
+export type CouponPreview = {
+  valid: boolean;
+  reason: string;
+  code: string;
+  discountType: "percentage" | "fixed_amount" | "free_shipping" | null;
+  subtotalMinor: number;
+  eligibleSubtotalMinor: number;
+  discountMinor: number;
+  deliveryFeeMinor: number;
+  shippingDiscountMinor: number;
+  totalMinor: number;
+};
+
+// Informational preview from validate_storefront_coupon. The order itself is re-validated and
+// priced by create_storefront_order, so a stale or edited preview can never change the total.
+export async function validateStorefrontCoupon(input: {
+  code: string;
+  items: Array<{ variantId: string; quantity: number }>;
+  shippingMethod: ShippingMethod;
+  phone: string | null;
+}): Promise<CouponPreview> {
+  if (!supabase) throw new Error("Checkout is not configured yet.");
+  const { data, error } = await supabase.rpc("validate_storefront_coupon", {
+    p_code: input.code,
+    p_items: input.items.map((item) => ({ variant_id: item.variantId, quantity: item.quantity })),
+    p_shipping_method: input.shippingMethod,
+    p_phone: input.phone,
+  });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error("We could not check this coupon. Please try again.");
+  return {
+    valid: Boolean(row.valid),
+    reason: String(row.reason ?? "coupon_invalid"),
+    code: String(row.code ?? input.code),
+    discountType: row.discount_type ?? null,
+    subtotalMinor: Number(row.subtotal_minor ?? 0),
+    eligibleSubtotalMinor: Number(row.eligible_subtotal_minor ?? 0),
+    discountMinor: Number(row.discount_minor ?? 0),
+    deliveryFeeMinor: Number(row.delivery_fee_minor ?? 0),
+    shippingDiscountMinor: Number(row.shipping_discount_minor ?? 0),
+    totalMinor: Number(row.total_minor ?? 0),
+  };
+}
 
 type CreateStorefrontOrderInput = {
   customerName: string;
@@ -40,6 +88,7 @@ type CreateStorefrontOrderInput = {
   paymentMethod: "cash_on_delivery" | "bank_transfer";
   shippingMethod: ShippingMethod;
   items: Array<{ variantId: string; quantity: number }>;
+  couponCode?: string | null;
 };
 
 export async function createStorefrontOrder(input: CreateStorefrontOrderInput) {
@@ -57,6 +106,8 @@ export async function createStorefrontOrder(input: CreateStorefrontOrderInput) {
     p_payment_method: input.paymentMethod,
     p_shipping_method: input.shippingMethod,
     p_items: input.items.map((item) => ({ variant_id: item.variantId, quantity: item.quantity })),
+    // Sent only with a coupon, so a coupon-free checkout calls the same signature as before.
+    ...(input.couponCode ? { p_coupon_code: input.couponCode } : {}),
   });
   if (error) throw error;
 
@@ -71,6 +122,9 @@ export async function createStorefrontOrder(input: CreateStorefrontOrderInput) {
     deliveryFeeMinor: Number(row.delivery_fee_minor),
     shippingSurchargeMinor: Number(row.shipping_surcharge_minor ?? 0),
     totalMinor: Number(row.total_minor),
+    couponCode: (row.coupon_code as string | null) ?? null,
+    discountMinor: Number(row.discount_minor ?? 0),
+    shippingDiscountMinor: Number(row.shipping_discount_minor ?? 0),
   } satisfies StorefrontOrderConfirmation;
 }
 

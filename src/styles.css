@@ -6401,6 +6401,27 @@ body:has(.home-page) .trustbar {
 .checkout-summary-item p,.checkout-summary-item span { margin:3px 0 0; color:#667085; font:500 10.5px/1.35 Manrope,sans-serif; }
 .checkout-summary-item span { display:block; }
 .checkout-summary-item > strong { align-self:start; color:#082F55; font:800 12px/1.25 Manrope,sans-serif; white-space:nowrap; }
+.checkout-coupon { margin-top:18px; padding-top:16px; border-top:1px solid #E4EBF2; }
+.checkout-coupon-entry label { display:block; margin-bottom:7px; color:#344054; font:700 12px/1.3 Manrope,sans-serif; }
+.checkout-coupon-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+.checkout-coupon-row input { min-width:0; height:44px; padding:0 12px; border:1px solid #CFDAE5; border-radius:9px; background:#FFF; color:#082F55; font:700 13px/1 Manrope,sans-serif; letter-spacing:.04em; text-transform:uppercase; }
+.checkout-coupon-row input::placeholder { color:#98A2B3; font-weight:600; letter-spacing:0; text-transform:none; }
+.checkout-coupon-row input:focus { outline:0; border-color:#082F55; box-shadow:0 0 0 3px rgba(8,47,85,.12); }
+.checkout-coupon-row button { min-width:82px; height:44px; padding:0 16px; border:1px solid #082F55; border-radius:9px; background:#082F55; color:#FFF; cursor:pointer; font:800 12.5px/1 Manrope,sans-serif; transition:background-color .18s ease,opacity .18s ease; }
+.checkout-coupon-row button:hover:not(:disabled) { background:#0B3E70; }
+.checkout-coupon-row button:disabled { cursor:not-allowed; opacity:.45; }
+.checkout-coupon-applied { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:10px; padding:11px 12px; border:1px dashed #9FD1B4; border-radius:10px; background:#F1FAF4; }
+.checkout-coupon-applied > svg { width:19px; height:19px; color:#1F7A47; }
+.checkout-coupon-applied strong,.checkout-coupon-applied span { display:block; }
+.checkout-coupon-applied strong { overflow:hidden; color:#14532D; font:800 13px/1.2 Manrope,sans-serif; letter-spacing:.03em; text-overflow:ellipsis; white-space:nowrap; }
+.checkout-coupon-applied span { margin-top:3px; color:#2E6B47; font:600 11.5px/1.3 Manrope,sans-serif; }
+.checkout-coupon-applied button { padding:6px 4px; border:0; background:transparent; color:#B42318; cursor:pointer; font:700 12px/1 Manrope,sans-serif; text-decoration:underline; text-underline-offset:3px; }
+.checkout-coupon-message { margin:8px 0 0; font:600 12px/1.4 Manrope,sans-serif; }
+.checkout-coupon-message.is-success { color:#1F7A47; }
+.checkout-coupon-message.is-error { color:#B42318; }
+.checkout-totals .checkout-discount dd { color:#1F7A47; }
+.checkout-totals s { color:#98A2B3; font-weight:600; }
+.checkout-free-shipping { color:#1F7A47; }
 .checkout-totals { display:grid; gap:12px; margin:20px 0; color:#667085; font:600 12.5px/1.4 Manrope,sans-serif; }
 .checkout-totals > div { display:flex; justify-content:space-between; gap:16px; }
 .checkout-totals dd { margin:0; color:#082F55; font-weight:700; text-align:right; }

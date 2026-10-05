@@ -85,7 +85,7 @@ async function blocked(sql, params = []) {
 }
 
 const PRIVATE_TABLES = ["orders", "order_items", "inventory_movements", "contact_messages", "newsletter_subscribers",
-  "product_recommendations", "bundles", "bundle_items", "product_media_variant_assignments"];
+  "product_recommendations", "bundles", "bundle_items", "product_media_variant_assignments", "coupons", "coupon_redemptions"];
 const ALL_TABLES = (await all(`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind in ('r', 'p') order by 1`)).map((r) => r.relname);
 const rowCounts = async () => Object.fromEntries(await Promise.all(ALL_TABLES.map(async (t) =>
@@ -114,7 +114,7 @@ test("SECURITY DEFINER RPCs callable by visitors are exactly the reviewed set", 
   // Public storefront RPCs, plus admin RPCs that refuse non-admins themselves (catalog_admin_required).
   const reviewed = ["create_storefront_order", "delete_product_variant", "frequently_bought_together", "homepage_bundles",
     "homepage_featured_products", "is_catalog_admin", "public_catalog_taxonomy", "search_public_catalog",
-    "set_product_media_color_assignment", "submit_contact_message", "subscribe_newsletter"];
+    "set_product_media_color_assignment", "submit_contact_message", "subscribe_newsletter", "validate_storefront_coupon"];
   assert.deepEqual(await callable("anon"), reviewed);
   assert.deepEqual(await callable("authenticated"),
     [...reviewed, "apply_catalog_bulk_import", "apply_catalog_bulk_import_v2"].sort());

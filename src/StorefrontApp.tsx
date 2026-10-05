@@ -37,6 +37,7 @@ import {
   Smartphone,
   Star,
   Tag,
+  TicketPercent,
   Truck,
   User,
   Zap,
@@ -104,8 +105,16 @@ import {
   FREE_STANDARD_DELIVERY_THRESHOLD_MINOR,
   STANDARD_DELIVERY_FEE_MINOR,
   FAST_DELIVERY_SURCHARGE_MINOR,
+  validateStorefrontCoupon,
+  type CouponPreview,
   type ShippingMethod,
 } from "./lib/orders";
+import {
+  canonicalCouponCode,
+  couponReasonFromError,
+  couponReasonMessage,
+  isValidCouponCode,
+} from "./lib/coupons";
 
 type Taxonomy = Awaited<ReturnType<typeof fetchPublicTaxonomy>>;
 
@@ -2508,7 +2517,12 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
   const [activeCheckoutStep, setActiveCheckoutStep] = useState(0);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<CouponPreview | null>(null);
+  const [couponMessage, setCouponMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [isCheckingCoupon, setIsCheckingCoupon] = useState(false);
   const checkoutSectionRefs = useRef<Array<HTMLElement | null>>([]);
+  const checkoutFormRef = useRef<HTMLFormElement | null>(null);
   const orderSubmissionRef = useRef(false);
 
   useEffect(() => {
@@ -2556,7 +2570,11 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
   const standardDeliveryFeeMinor = calculateDeliveryFeeMinor(subtotal, "standard");
   const fastDeliveryFeeMinor = calculateDeliveryFeeMinor(subtotal, "fast");
   const deliveryFeeMinor = shippingMethod === "fast" ? fastDeliveryFeeMinor : standardDeliveryFeeMinor;
-  const totalMinor = subtotal + deliveryFeeMinor;
+  // Coupon amounts are an informational preview from the server; create_storefront_order re-prices
+  // and re-validates the coupon. A free-shipping coupon always removes the selected delivery fee.
+  const couponDiscountMinor = appliedCoupon ? Math.min(appliedCoupon.discountMinor, subtotal) : 0;
+  const couponShippingDiscountMinor = appliedCoupon?.discountType === "free_shipping" ? deliveryFeeMinor : 0;
+  const totalMinor = subtotal - couponDiscountMinor + deliveryFeeMinor - couponShippingDiscountMinor;
   const knownScopes = items.map((item) => deliveryScopes[item.variantId]).filter((scope): scope is "karachi_only" | "nationwide" => Boolean(scope));
   const hasKarachiOnly = knownScopes.includes("karachi_only");
   const hasNationwide = knownScopes.includes("nationwide");
@@ -2572,6 +2590,77 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
       setOtherCityName("");
     }
   }, [city, requiresKarachi]);
+
+  const couponCheckKey = useRef("");
+  const couponKeyFor = (code: string) =>
+    `${code}|${shippingMethod}|${items.map((item) => `${item.variantId}:${item.quantity}`).join(",")}`;
+  const checkoutPhone = () => {
+    const value = checkoutFormRef.current ? String(new FormData(checkoutFormRef.current).get("phone") ?? "").trim() : "";
+    return isValidOrderPhone(value) ? value : null;
+  };
+  const applyCoupon = async () => {
+    const code = canonicalCouponCode(couponInput);
+    if (!code || isCheckingCoupon) return;
+    if (!isValidCouponCode(code)) {
+      setCouponMessage({ tone: "error", text: couponReasonMessage("coupon_invalid") });
+      return;
+    }
+    setIsCheckingCoupon(true);
+    try {
+      const preview = await validateStorefrontCoupon({
+        code,
+        items: items.map((item) => ({ variantId: item.variantId, quantity: item.quantity })),
+        shippingMethod,
+        phone: checkoutPhone(),
+      });
+      if (preview.valid) {
+        couponCheckKey.current = couponKeyFor(preview.code);
+        setAppliedCoupon(preview);
+        setCouponInput("");
+        setCouponMessage({ tone: "success", text: couponReasonMessage("ok") });
+      } else {
+        setAppliedCoupon(null);
+        setCouponMessage({ tone: "error", text: couponReasonMessage(preview.reason) });
+      }
+    } catch (error) {
+      setCouponMessage({ tone: "error", text: isRateLimitError(error) ? RATE_LIMIT_MESSAGE : "We could not check this coupon. Please try again." });
+    } finally {
+      setIsCheckingCoupon(false);
+    }
+  };
+  const removeCoupon = () => {
+    couponCheckKey.current = "";
+    setAppliedCoupon(null);
+    setCouponMessage(null);
+  };
+
+  // Re-check an applied coupon whenever the cart or delivery method changes.
+  const appliedCouponCode = appliedCoupon?.code ?? null;
+  useEffect(() => {
+    if (!appliedCouponCode || items.length === 0) return;
+    const key = `${appliedCouponCode}|${shippingMethod}|${items.map((item) => `${item.variantId}:${item.quantity}`).join(",")}`;
+    if (couponCheckKey.current === key) return;
+    couponCheckKey.current = key;
+    let active = true;
+    validateStorefrontCoupon({
+      code: appliedCouponCode,
+      items: items.map((item) => ({ variantId: item.variantId, quantity: item.quantity })),
+      shippingMethod,
+      phone: null,
+    })
+      .then((preview) => {
+        if (!active) return;
+        if (preview.valid) {
+          setAppliedCoupon(preview);
+        } else {
+          couponCheckKey.current = "";
+          setAppliedCoupon(null);
+          setCouponMessage({ tone: "error", text: `${couponReasonMessage(preview.reason)}. The coupon was removed.` });
+        }
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [appliedCouponCode, items, shippingMethod]);
   const paymentMethods = [
     { id: "cash-on-delivery", label: "Cash on Delivery", asset: "/assets/payment-methods/cash-on-delivery.svg", comingSoon: false },
     { id: "bank-transfer", label: "Bank Transfer", asset: "/assets/payment-methods/bank-transfer.svg", comingSoon: false },
@@ -2644,15 +2733,24 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
         paymentMethod: paymentMethod === "cash-on-delivery" ? "cash_on_delivery" : "bank_transfer",
         shippingMethod,
         items: items.map((item) => ({ variantId: item.variantId, quantity: item.quantity })),
+        couponCode: appliedCoupon?.code ?? null,
       });
       saveStorefrontOrderConfirmation(confirmation);
       clearStorefrontCart();
       window.location.assign("/order-success");
     } catch (error) {
       const detail = error instanceof Error ? error.message : "";
+      const couponReason = couponReasonFromError(detail);
+      if (couponReason) {
+        couponCheckKey.current = "";
+        setAppliedCoupon(null);
+        setCouponMessage({ tone: "error", text: `${couponReasonMessage(couponReason)}. The coupon was removed.` });
+      }
       setCheckoutError(
         isRateLimitError(error)
           ? RATE_LIMIT_MESSAGE
+          : couponReason
+          ? `${couponReasonMessage(couponReason)}. Your coupon was removed — please review your total and place the order again.`
           : detail.includes("karachi_delivery_required")
           ? "This order includes a mobile phone and must be delivered in Karachi."
           : detail.includes("phone_invalid")
@@ -2685,7 +2783,7 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
           </ol>
 
           <div className="checkout-layout">
-            <form id="checkout-details-form" className="checkout-details" onSubmit={(event) => { event.preventDefault(); void placeOrder(event.currentTarget); }}>
+            <form id="checkout-details-form" ref={checkoutFormRef} className="checkout-details" onSubmit={(event) => { event.preventDefault(); void placeOrder(event.currentTarget); }}>
               {checkoutError && <p className="checkout-form-error" role="alert">{checkoutError}</p>}
               <section className="checkout-card" ref={(node) => { checkoutSectionRefs.current[0] = node; }} data-checkout-step="0" onFocusCapture={() => setActiveCheckoutStep(0)} aria-labelledby="customer-details-title">
                 <div className="checkout-card-heading"><span>01</span><div><h2 id="customer-details-title">Customer Details</h2><p>How we can reach you about this order.</p></div></div>
@@ -2763,10 +2861,47 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
                     <strong>{formatPkrMinor(item.priceMinor * item.quantity)}</strong>
                   </article>)}
                 </div>
+                <div className="checkout-coupon">
+                  {appliedCoupon ? (
+                    <div className="checkout-coupon-applied">
+                      <TicketPercent aria-hidden="true" />
+                      <div>
+                        <strong>{appliedCoupon.code}</strong>
+                        <span>{appliedCoupon.discountType === "free_shipping" ? "Free delivery applied" : `${formatPkrMinor(couponDiscountMinor)} off${appliedCoupon.eligibleSubtotalMinor < appliedCoupon.subtotalMinor ? " eligible items" : ""}`}</span>
+                      </div>
+                      <button type="button" onClick={removeCoupon}>Remove</button>
+                    </div>
+                  ) : (
+                    <div className="checkout-coupon-entry">
+                      <label htmlFor="checkout-coupon-input">Coupon code</label>
+                      <div className="checkout-coupon-row">
+                        <input
+                          id="checkout-coupon-input"
+                          value={couponInput}
+                          onChange={(event) => { setCouponInput(event.target.value); if (couponMessage?.tone === "error") setCouponMessage(null); }}
+                          onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void applyCoupon(); } }}
+                          placeholder="Enter code"
+                          autoComplete="off"
+                          autoCapitalize="characters"
+                          spellCheck={false}
+                          maxLength={32}
+                          aria-describedby={couponMessage ? "checkout-coupon-message" : undefined}
+                        />
+                        <button type="button" onClick={() => void applyCoupon()} disabled={!couponInput.trim() || isCheckingCoupon}>
+                          {isCheckingCoupon ? "Checking…" : "Apply"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {couponMessage && <p id="checkout-coupon-message" className={`checkout-coupon-message is-${couponMessage.tone}`} role="status">{couponMessage.text}</p>}
+                </div>
                 <dl className="checkout-totals">
                   <div><dt>Subtotal</dt><dd>{formatPkrMinor(subtotal)}</dd></div>
+                  {couponDiscountMinor > 0 && <div className="checkout-discount"><dt>Coupon discount</dt><dd>−{formatPkrMinor(couponDiscountMinor)}</dd></div>}
                   <div><dt>Delivery Method</dt><dd>{shippingMethod === "fast" ? "Fast Delivery" : "Standard Delivery"}</dd></div>
-                  <div><dt>Delivery</dt><dd>{deliveryFeeMinor === 0 ? "FREE" : formatPkrMinor(deliveryFeeMinor)}</dd></div>
+                  <div><dt>Delivery</dt><dd>{couponShippingDiscountMinor > 0
+                    ? <><s>{formatPkrMinor(deliveryFeeMinor)}</s> <span className="checkout-free-shipping">Free with coupon</span></>
+                    : deliveryFeeMinor === 0 ? "FREE" : formatPkrMinor(deliveryFeeMinor)}</dd></div>
                   <div className="checkout-total"><dt>Total</dt><dd>{formatPkrMinor(totalMinor)}</dd></div>
                 </dl>
                 <button className="checkout-place-order" form="checkout-details-form" type="submit" disabled={isSubmitting}>{isSubmitting ? "Placing Order..." : "Place Order"}</button>
@@ -2797,8 +2932,11 @@ function OrderSuccessPage({ taxonomy }: { taxonomy: Taxonomy }) {
               <div><dt>Order number</dt><dd>{confirmation.orderNumber}</dd></div>
               <div><dt>Payment method</dt><dd>{confirmation.paymentMethod === "bank_transfer" ? "Bank Transfer" : "Cash on Delivery"}</dd></div>
               <div><dt>Subtotal</dt><dd>{formatPkrMinor(confirmation.subtotalMinor)}</dd></div>
+              {confirmation.couponCode && (confirmation.discountMinor ?? 0) > 0 && <div><dt>Coupon discount ({confirmation.couponCode})</dt><dd>−{formatPkrMinor(confirmation.discountMinor ?? 0)}</dd></div>}
               <div><dt>Delivery Method</dt><dd>{confirmation.shippingMethod === "fast" ? "Fast Delivery" : "Standard Delivery"}</dd></div>
-              <div><dt>Delivery</dt><dd>{confirmation.deliveryFeeMinor === 0 ? "FREE" : formatPkrMinor(confirmation.deliveryFeeMinor)}</dd></div>
+              <div><dt>Delivery</dt><dd>{(confirmation.shippingDiscountMinor ?? 0) > 0
+                ? `Free with coupon${confirmation.couponCode ? ` (${confirmation.couponCode})` : ""}`
+                : confirmation.deliveryFeeMinor === 0 ? "FREE" : formatPkrMinor(confirmation.deliveryFeeMinor)}</dd></div>
               <div className="order-success-total"><dt>Total</dt><dd>{formatPkrMinor(confirmation.totalMinor)}</dd></div>
             </dl>
             {confirmation.shippingMethod === "fast" && <p className="order-success-shipping-note">Fast Delivery selected (includes {formatPkrMinor(confirmation.shippingSurchargeMinor)} priority surcharge)</p>}

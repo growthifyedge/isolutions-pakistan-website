@@ -20,6 +20,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import {
   adminDevelopmentProducts,
@@ -44,9 +45,11 @@ import { CatalogReadiness } from "./CatalogReadiness";
 import { ContactEnquiries } from "./ContactEnquiries";
 import { BundleManager } from "./BundleManager";
 import { AdminOrders } from "./AdminOrders";
+import { AdminPromotions } from "./AdminPromotions";
 import "./admin.css";
 
-const nav = [
+// An empty href renders a disabled "Later" item.
+const nav: ReadonlyArray<readonly [string, string, LucideIcon]> = [
   ["Dashboard", "/admin", LayoutDashboard],
   ["Catalog", "/admin/products", Boxes],
   ["Media", "/admin/media", Image],
@@ -55,9 +58,9 @@ const nav = [
   ["Enquiries", "/admin/contact-enquiries", MessageSquareText],
   ["Homepage", "/admin/homepage", Sparkles],
   ["Orders", "/admin/orders", ShoppingBag],
-  ["Promotions", "", CircleDollarSign],
+  ["Promotions", "/admin/promotions", CircleDollarSign],
   ["Settings", "/admin/settings", Settings],
-] as const;
+];
 function EnvironmentBadge() {
   return (
     <div
@@ -667,6 +670,12 @@ export function AdminApp() {
     page = (
       <AdminLayout section="Orders">
         <AdminOrders />
+      </AdminLayout>
+    );
+  else if (path === "/admin/promotions")
+    page = (
+      <AdminLayout section="Promotions">
+        <AdminPromotions />
       </AdminLayout>
     );
   else if (path === "/admin/settings") page = <Future title="Settings" />;
