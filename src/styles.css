@@ -903,49 +903,6 @@ footer {
     gap: 18px;
     padding: 0 22px;
   }
-  .menu {
-    display: block;
-  }
-  .search {
-    border: 0;
-    margin-left: auto;
-  }
-  .search input {
-    display: none;
-  }
-  .drawer {
-    display: block;
-    position: fixed;
-    inset: 0;
-    background: #f7f4ee;
-    z-index: 100;
-    padding: 20px;
-    overflow: auto;
-  }
-  .drawer-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .mobile-search {
-    border-bottom: 1px solid;
-    margin: 28px 0 25px;
-  }
-  .mobile-search input {
-    display: block;
-  }
-  .drawer nav a {
-    display: flex;
-    justify-content: space-between;
-    padding: 18px 4px;
-    border-bottom: 1px solid var(--line);
-    font: 500 24px Manrope;
-  }
-  .drawer-meta {
-    font-size: 10px;
-    color: #999;
-    margin-top: 35px;
-  }
   .hero {
     grid-template-columns: 1fr 1fr;
     min-height: 520px;
@@ -1021,6 +978,52 @@ footer {
   }
   .details {
     gap: 55px;
+  }
+}
+/* Header/drawer part of the block above: the storefront header switches to its hamburger layout at 1079px. */
+@media (max-width:1079px) {
+  .menu {
+    display: block;
+  }
+  .search {
+    border: 0;
+    margin-left: auto;
+  }
+  .search input {
+    display: none;
+  }
+  .drawer {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: #f7f4ee;
+    z-index: 100;
+    padding: 20px;
+    overflow: auto;
+  }
+  .drawer-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .mobile-search {
+    border-bottom: 1px solid;
+    margin: 28px 0 25px;
+  }
+  .mobile-search input {
+    display: block;
+  }
+  .drawer nav a {
+    display: flex;
+    justify-content: space-between;
+    padding: 18px 4px;
+    border-bottom: 1px solid var(--line);
+    font: 500 24px Manrope;
+  }
+  .drawer-meta {
+    font-size: 10px;
+    color: #999;
+    margin-top: 35px;
   }
 }
 @media (max-width: 600px) {
@@ -2507,6 +2510,14 @@ body:has(.shop-page) .icons svg { width:20px; height:20px; stroke-width:1.7; }
     gap:0 14px;
     padding:0 20px 12px;
   }
+  .collection-heading { grid-template-columns:1fr; gap:18px; padding-top:42px; padding-bottom:34px; }
+  .collection-heading p { max-width:520px; }
+  .collection-products { padding-top:34px; padding-bottom:82px; }
+}
+
+/* Header/drawer part of the block above: the storefront header switches to its hamburger layout at 1079px. */
+
+@media (max-width:1079px) {
   header > .menu { display:grid; place-items:center; grid-column:1; grid-row:1; order:0; }
   header > .wordmark { grid-column:2; grid-row:1; justify-self:center; }
   header > .icons { display:flex; grid-column:3; grid-row:1; gap:0; }
@@ -2544,9 +2555,6 @@ body:has(.shop-page) .icons svg { width:20px; height:20px; stroke-width:1.7; }
     color:#66706B;
     font:600 14px Manrope,sans-serif;
   }
-  .collection-heading { grid-template-columns:1fr; gap:18px; padding-top:42px; padding-bottom:34px; }
-  .collection-heading p { max-width:520px; }
-  .collection-products { padding-top:34px; padding-bottom:82px; }
 }
 
 @media (max-width:600px) {
@@ -2655,7 +2663,7 @@ body:has(.shop-page) .icons svg { width:20px; height:20px; stroke-width:1.7; }
 }
 
 /* Compact mobile header: the shared search panel replaces the persistent row. */
-@media (max-width:900px) {
+@media (max-width:1079px) {
   .mobile-header-left-actions { display:flex; grid-column:1; grid-row:1; align-items:center; }
   .mobile-header-left-actions .menu { display:grid; place-items:center; color:#111614; }
   .mobile-search-trigger { display:none; }
@@ -2784,7 +2792,7 @@ body:has(.shop-page) .icons svg { width:20px; height:20px; stroke-width:1.7; }
 .storefront-wishlist-empty p { margin:0 0 4px; color:#4D5752; font-size:14px; font-weight:600; }
 .storefront-wishlist-empty button { width:auto; min-width:168px; min-height:42px; padding:0 16px; border:1px solid #CFD6D1; border-radius:9px; background:#FFF; color:#101A17; font-size:13px; font-weight:700; }
 
-@media (max-width:900px) {
+@media (max-width:1079px) {
   .navbar-actions .navbar-search-button { display:none; }
   .navbar-wishlist-count { top:0; right:-1px; border-color:#FFF; }
   .storefront-account-feedback { top:138px; right:14px; font-size:11.5px; }
@@ -3196,7 +3204,7 @@ body:has(.pdp-page) header.storefront-navbar {
 .storefront-navbar > .menu,
 .storefront-navbar > .mobile-header-search { display:none; }
 
-@media (max-width:1180px) and (min-width:901px) {
+@media (max-width:1180px) and (min-width:1080px) {
   header.storefront-navbar,
   body:has(.home-page) header.storefront-navbar,
   body:has(.shop-page) header.storefront-navbar,
@@ -3211,7 +3219,7 @@ body:has(.pdp-page) header.storefront-navbar {
   .navbar-actions button { width:34px; }
 }
 
-@media (max-width:900px) {
+@media (max-width:1079px) {
   header.storefront-navbar,
   body:has(.home-page) header.storefront-navbar,
   body:has(.shop-page) header.storefront-navbar,
@@ -3274,7 +3282,7 @@ body:has(.pdp-page) header.storefront-navbar {
 }
 
 /* Navbar step 1A: desktop color treatment only. */
-@media (min-width:901px) {
+@media (min-width:1080px) {
   header.storefront-navbar,
   body:has(.home-page) header.storefront-navbar,
   body:has(.shop-page) header.storefront-navbar,
@@ -3329,7 +3337,7 @@ body:has(.pdp-page) header.storefront-navbar {
   }
 }
 /* Desktop Mobile Phones mega menu only. */
-@media (min-width:901px) {
+@media (min-width:1080px) {
   .navbar-links { overflow:visible; }
   .navbar-mega-menu {
     height:100%;
@@ -5096,7 +5104,7 @@ body:has(.home-page) .trustbar {
 }
 
 /* Main storefront desktop navbar sizing. */
-@media (min-width:901px) {
+@media (min-width:1080px) {
   header.storefront-navbar,
   body:has(.home-page) header.storefront-navbar,
   body:has(.shop-page) header.storefront-navbar,
@@ -5131,6 +5139,9 @@ body:has(.home-page) .trustbar {
   background: linear-gradient(#101a17 0%, #3961db 100%);
   border-bottom: 2px solid #3961db;
 }
+}
+/* Header/drawer part of the block above: the storefront header switches to its hamburger layout at 1079px. */
+@media (min-width:1080px) {
   header.storefront-navbar,
   body:has(.home-page) header.storefront-navbar,
   body:has(.shop-page) header.storefront-navbar,
@@ -5165,6 +5176,9 @@ body:has(.home-page) .trustbar {
     background: linear-gradient(180deg, #3961db 0%, #14221d 100%);
     border-bottom: 2px solid #3961db;
   }
+}
+/* Header/drawer part of the block above: the storefront header switches to its hamburger layout at 1079px. */
+@media (min-width:1080px) {
   .navbar-mega-trigger::after { background:#3961DB; }
   .navbar-links > a,
   .navbar-mega-trigger { position:relative; isolation:isolate; border-radius:6px; transition:color .16s ease; }
@@ -5318,6 +5332,11 @@ body:has(.home-page) .trustbar {
     box-shadow: none;
   }
 
+  /* No permanent underline/pill on the current page. */
+}
+/* Header/drawer part of the block above: the storefront header switches to its hamburger layout at 1079px. */
+@media (min-width:1080px) {
+
   header.storefront-navbar,
   body:has(.home-page) header.storefront-navbar,
   body:has(.shop-page) header.storefront-navbar,
@@ -5339,8 +5358,6 @@ body:has(.home-page) .trustbar {
   .storefront-navbar .wordmark b {
     color: #687169;
   }
-
-  /* No permanent underline/pill on the current page. */
   .navbar-links > a,
   .navbar-links > a.active,
   .navbar-links > a[aria-current="page"],
@@ -5387,30 +5404,6 @@ body:has(.home-page) .trustbar {
   }
 }
 
-  body:has(.home-page) .storefront-navbar .wordmark,
-  body:has(.home-page) .navbar-links > a,
-  body:has(.home-page) .navbar-mega-trigger,
-  body:has(.home-page) .navbar-actions a,
-  body:has(.home-page) .navbar-actions button {
-    color: #101a17 !important;
-  }
-
-  body:has(.home-page) .navbar-links > a::after,
-  body:has(.home-page) .navbar-mega-trigger::after {
-    display: none !important;
-  }
-
-  body:has(.home-page) .navbar-links > a[aria-current="page"],
-  body:has(.home-page) .navbar-mega-trigger[aria-current="page"] {
-    background: transparent !important;
-    color: #101a17 !important;
-    text-decoration: none !important;
-  }
-
-  body:has(.home-page) .navbar-links .navbar-deals {
-    color: #f0643a !important;
-  }
-
 @media (min-width:901px) {
   .home-category-carousel-head h2 { font-size:34px; }
 }
@@ -5433,7 +5426,7 @@ body:has(.home-page) .trustbar {
   display:block;
   flex:none;
 }
-@media (min-width:901px) {
+@media (min-width:1080px) {
   .storefront-navbar > .wordmark {
     width:60px;
     height:60px;
@@ -5442,7 +5435,7 @@ body:has(.home-page) .trustbar {
     justify-content:flex-start;
   }
 }
-@media (max-width:900px) {
+@media (max-width:1079px) {
   .storefront-navbar > .wordmark {
     width:46px;
     height:46px;
@@ -5502,7 +5495,7 @@ body:has(.home-page) .trustbar {
   letter-spacing: -0.02em;
 }
 
-@media (max-width: 900px) {
+@media (max-width:1079px) {
   .storefront-navbar > .wordmark {
     width: auto;
     gap: 7px;
@@ -5566,7 +5559,7 @@ body:has(.home-page) .trustbar {
 
 /* Premium mobile storefront drawer. */
 .drawer-backdrop { display:none; }
-@media (max-width:900px) {
+@media (max-width:1079px) {
   .drawer-backdrop {
     position:fixed;
     inset:0;
@@ -5808,7 +5801,7 @@ body:has(.home-page) .trustbar {
 }
 
 /* Final mobile Header override: keep controls in a single compact row. */
-@media (max-width:900px) {
+@media (max-width:1079px) {
   .mobile-header-left-actions { display:flex; grid-column:1; grid-row:1; align-items:center; }
   .mobile-header-left-actions .menu { display:grid; place-items:center; color:#111614; }
   .mobile-search-trigger { display:none; }
@@ -6503,14 +6496,14 @@ body:has(.home-page) .trustbar {
    the former Home-only ticker/navbar overrides.
    ========================================================================= */
 :root {
-  --shell-ticker-bg: linear-gradient(180deg, #101A17 0%, #3961DB 100%);
+  /* Subtle deep-navy gradient (starts at the navbar pill colour): no bright blue or accent line, so the navbar stays the focus. */
+  --shell-ticker-bg: linear-gradient(90deg, #0B1220 0%, #172554 50%, #243B6B 100%);
   --shell-ticker-ink: #E5EAE7;
-  --shell-ticker-edge: #3961DB;
-  /* Warm blush -> soft blue-grey -> pale cool blue; low intensity so text and icons stay crisp. */
-  --shell-nav-bg: linear-gradient(90deg, #F4D3D7 0%, #E7D7E1 26%, #DDD9E8 52%, #C9D7F3 100%);
-  --shell-nav-ink: #101A17;
-  --shell-nav-edge: rgba(57, 97, 219, .16);
-  --shell-nav-shadow: 0 6px 18px rgba(16, 26, 23, .05);
+  /* Cool white with the faintest vertical falloff; a hairline edge and soft shadow separate it from the page. */
+  --shell-nav-bg: linear-gradient(180deg, #FBFCFE 0%, #F6F8FB 100%);
+  --shell-nav-ink: #0F172A;
+  --shell-nav-edge: rgba(15, 23, 42, .08);
+  --shell-nav-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 10px 24px -18px rgba(15, 23, 42, .22);
   /* Home hero surround: rich coral-red at the top, fading through blush to the page colour. */
   --home-hero-surround: linear-gradient(180deg, #D7344B 0%, #E5606F 16%, #F09CA4 38%, #F8D5D8 62%, #FCEEEF 82%, #F8F9F8 100%);
   --shell-hero-gutter: clamp(16px, 2vw, 28px);
@@ -6520,7 +6513,7 @@ body:has(.home-page) .trustbar {
 body:has(.home-page) .trustbar {
   background: var(--shell-ticker-bg);
   color: var(--shell-ticker-ink);
-  border-bottom: 2px solid var(--shell-ticker-edge);
+  border-bottom: 0;
   box-shadow: none;
 }
 
@@ -6546,4 +6539,224 @@ body:has(.pdp-page) header.storefront-navbar {
    than its column and lost its right-hand rounded corners to the column's overflow clip). */
 @media (min-width: 901px) {
   .home-banner-carousel { width: calc(100% - 2 * var(--shell-hero-gutter)); }
+}
+
+/* =========================================================================
+   PREMIUM NAVBAR — cool-white bar, dark-neutral ink, and one dark navy pill
+   language: solid pill on hover/focus, tinted pill for the current route.
+   Colour and interaction only; grid layout and breakpoints stay as above.
+   ========================================================================= */
+:root {
+  --nav-ink: #0F172A;
+  --nav-ink-muted: #64748B;
+  --nav-pill: #0F172A;
+  --nav-pill-ink: #F8FAFC;
+  --nav-pill-shadow: 0 8px 18px -8px rgba(15, 23, 42, .5), 0 2px 5px rgba(15, 23, 42, .12);
+  --nav-current-bg: rgba(15, 23, 42, .07);
+  --nav-current-edge: inset 0 0 0 1px rgba(15, 23, 42, .06);
+  --nav-accent: #D9480F;
+  --nav-accent-tint: rgba(217, 72, 15, .09);
+  --nav-focus-ring: 0 0 0 2px #F8FAFC, 0 0 0 4px rgba(37, 99, 235, .55);
+  --nav-motion: 200ms cubic-bezier(.2, .7, .2, 1);
+}
+
+/* Brand lockup: strong "iSolutions", softer "Pakistan". */
+.storefront-navbar > .wordmark .storefront-brand-name { color:var(--nav-ink); letter-spacing:-.02em; }
+.storefront-navbar > .wordmark .storefront-brand-name strong { color:var(--nav-ink); font-weight:750; }
+.storefront-navbar > .wordmark .storefront-brand-name > span { color:var(--nav-ink-muted); font-weight:500; }
+
+/* Right-side icons and mobile header triggers share the pill language. */
+.navbar-actions a,
+.navbar-actions button,
+.mobile-header-left-actions .menu,
+.mobile-search-trigger {
+  border-radius:999px;
+  color:var(--nav-ink);
+  transition:background-color var(--nav-motion), color var(--nav-motion), box-shadow var(--nav-motion), transform var(--nav-motion);
+}
+.navbar-actions a:focus-visible,
+.navbar-actions button:focus-visible,
+.mobile-header-left-actions .menu:focus-visible,
+.mobile-search-trigger:focus-visible {
+  outline:none;
+  background:var(--nav-pill);
+  color:var(--nav-pill-ink);
+  box-shadow:var(--nav-pill-shadow), var(--nav-focus-ring);
+}
+@media (hover:hover) {
+  .navbar-actions a:hover,
+  .navbar-actions button:hover,
+  .mobile-header-left-actions .menu:hover,
+  .mobile-search-trigger:hover {
+    background:var(--nav-pill);
+    color:var(--nav-pill-ink);
+    box-shadow:var(--nav-pill-shadow);
+    transform:translateY(-1px);
+  }
+}
+.navbar-actions a:active,
+.navbar-actions button:active,
+.mobile-header-left-actions .menu:active,
+.mobile-search-trigger:active { transform:translateY(0) scale(.96); }
+@media (hover:none) {
+  /* Touch browsers keep :hover after a tap; cancel the older unconditional hover colours. */
+  .navbar-actions a:hover,
+  .navbar-actions button:hover,
+  .mobile-header-left-actions .menu:hover,
+  .mobile-search-trigger:hover { background:transparent; color:var(--nav-ink); box-shadow:none; transform:none; }
+  .navbar-actions a:active,
+  .navbar-actions button:active,
+  .mobile-header-left-actions .menu:active,
+  .mobile-search-trigger:active { background:var(--nav-current-bg); }
+}
+@media (max-width:1079px) {
+  /* Mobile hit areas are taller than wide; a rounded rectangle reads better than a stretched pill. */
+  .navbar-actions a,
+  .navbar-actions button,
+  .mobile-header-left-actions .menu,
+  .mobile-search-trigger { border-radius:12px; }
+}
+
+/* Cart / wishlist quantity badges. */
+.navbar-cart-count,
+.navbar-wishlist-count {
+  min-width:17px;
+  height:17px;
+  padding:0 4px;
+  border:2px solid #F8FAFC;
+  background:var(--nav-accent);
+  color:#FFFFFF;
+  font:700 9.5px/1 Manrope,sans-serif;
+  font-variant-numeric:tabular-nums;
+  box-shadow:0 1px 2px rgba(15, 23, 42, .2);
+  transition:border-color var(--nav-motion);
+}
+.navbar-actions button:hover .navbar-cart-count,
+.navbar-actions button:hover .navbar-wishlist-count,
+.navbar-actions button:focus-visible .navbar-cart-count,
+.navbar-actions button:focus-visible .navbar-wishlist-count { border-color:var(--nav-pill); }
+
+@media (min-width:1080px) {
+  .navbar-cart-count,
+  .navbar-wishlist-count { top:4px; right:2px; }
+
+  .storefront-navbar > .wordmark { gap:11px; }
+  .storefront-navbar > .wordmark .storefront-brand-logo { width:52px; height:52px; flex-basis:52px; }
+  .storefront-navbar > .wordmark .storefront-brand-name { font-size:19px; }
+
+  .navbar-links { gap:4px; }
+  .navbar-links > a,
+  .navbar-links .navbar-mega-trigger {
+    position:relative;
+    isolation:isolate;
+    padding:0 15px;
+    color:var(--nav-ink);
+    font-size:15px;
+    font-weight:560;
+    letter-spacing:-.005em;
+    transition:color var(--nav-motion), transform var(--nav-motion);
+  }
+  .navbar-mega-trigger::after { display:none; }
+  /* The pill is a pseudo-element so the full-height mega-menu triggers and plain links match. */
+  .navbar-links > a::before,
+  .navbar-mega-trigger::before {
+    content:"";
+    position:absolute;
+    z-index:-1;
+    inset:auto 0;
+    top:50%;
+    height:38px;
+    margin-top:-19px;
+    border-radius:999px;
+    background:transparent;
+    box-shadow:none;
+    transition:background-color var(--nav-motion), box-shadow var(--nav-motion);
+  }
+
+  /* Current route: tinted pill with stronger text, visible without hover. */
+  .navbar-links > a[aria-current="page"],
+  .navbar-mega-trigger[aria-current="page"] { color:var(--nav-ink); font-weight:650; }
+  .navbar-links > a[aria-current="page"]::before,
+  .navbar-mega-trigger[aria-current="page"]::before { background:var(--nav-current-bg); box-shadow:var(--nav-current-edge); }
+
+  /* Keyboard focus: solid navy pill plus a visible ring. */
+  .navbar-links > a:focus-visible,
+  .navbar-mega-menu:focus-within .navbar-mega-trigger { outline:none; color:var(--nav-pill-ink); }
+  .navbar-links > a:focus-visible::before,
+  .navbar-mega-menu:focus-within .navbar-mega-trigger::before { background:var(--nav-pill); box-shadow:var(--nav-pill-shadow); }
+  .navbar-links > a:focus-visible::before,
+  .navbar-mega-menu .navbar-mega-trigger:focus-visible::before { box-shadow:var(--nav-pill-shadow), var(--nav-focus-ring); }
+  .navbar-mega-trigger:focus-visible { outline:none; }
+
+  /* Deals: toned orange by default, same navy pill on hover. */
+  .navbar-links .navbar-deals { gap:6px; color:var(--nav-accent); font-weight:600; }
+  .navbar-links .navbar-deals span { font-size:14px; }
+  .navbar-links .navbar-deals[aria-current="page"] { color:var(--nav-accent); }
+  .navbar-links .navbar-deals[aria-current="page"]::before { background:var(--nav-accent-tint); box-shadow:none; }
+  .navbar-links .navbar-deals:focus-visible { color:var(--nav-pill-ink); }
+}
+@media (min-width:1080px) and (hover:hover) {
+  /* Hover: solid navy pill with light text, a soft shadow and a 1px lift. */
+  .navbar-links > a:hover,
+  .navbar-mega-menu:hover .navbar-mega-trigger { color:var(--nav-pill-ink); transform:translateY(-1px); }
+  .navbar-links > a:hover::before,
+  .navbar-mega-menu:hover .navbar-mega-trigger::before { background:var(--nav-pill); box-shadow:var(--nav-pill-shadow); }
+  .navbar-links .navbar-deals:hover { color:var(--nav-pill-ink); }
+}
+/* Compact desktop (1080–1180px): let the brand column size to its content and tighten every element
+   so the six links, wordmark and four icons share one row. Below 1080px the header uses its hamburger layout. */
+@media (min-width:1080px) and (max-width:1180px) {
+  header.storefront-navbar,
+  body:has(.home-page) header.storefront-navbar,
+  body:has(.shop-page) header.storefront-navbar,
+  body:has(.pdp-page) header.storefront-navbar {
+    grid-template-columns:auto minmax(0,1fr) auto;
+    gap:12px;
+    padding-inline:16px;
+  }
+  .storefront-navbar > .wordmark { gap:8px; }
+  .storefront-navbar > .wordmark .storefront-brand-logo { width:40px; height:40px; flex-basis:40px; }
+  .storefront-navbar > .wordmark .storefront-brand-name { font-size:15px; }
+  .navbar-links { gap:0; }
+  .navbar-links > a,
+  .navbar-links .navbar-mega-trigger { padding:0 7px; font-size:13px; }
+  .navbar-actions { gap:0; }
+  .navbar-actions a,
+  .navbar-actions button { width:36px; height:36px; }
+  .navbar-actions svg { width:18px; height:18px; }
+}
+
+/* Mobile drawer follows the same system: cool-white surface, navy ink, tinted open state. */
+@media (max-width:1079px) {
+  .drawer,
+  .drawer-head { background:#F8FAFC; }
+  .drawer-head button { border-radius:999px; color:var(--nav-ink); transition:background-color var(--nav-motion), color var(--nav-motion); }
+  .drawer-head button:focus-visible { outline:none; background:var(--nav-pill); color:var(--nav-pill-ink); box-shadow:var(--nav-focus-ring); }
+  .drawer-category-trigger { border-radius:12px; color:var(--nav-ink); transition:background-color var(--nav-motion); }
+  .drawer-category[data-open="true"] .drawer-category-trigger { background:var(--nav-current-bg); }
+  .drawer-category-label > svg { color:#475569; }
+  .drawer-expand-icon { color:var(--nav-ink-muted); }
+  .drawer-deals { background:var(--nav-pill); box-shadow:var(--nav-pill-shadow); }
+  .drawer-deals-icon { background:rgba(248, 250, 252, .1); }
+}
+@media (max-width:1079px) and (hover:hover) {
+  .drawer-head button:hover { background:var(--nav-pill); color:var(--nav-pill-ink); }
+  .drawer-category-trigger:hover { background:var(--nav-current-bg); }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  .navbar-links > a,
+  .navbar-mega-trigger,
+  .navbar-links > a::before,
+  .navbar-mega-trigger::before,
+  .navbar-actions a,
+  .navbar-actions button,
+  .mobile-header-left-actions .menu,
+  .mobile-search-trigger { transition:none; }
+  .navbar-links > a:hover,
+  .navbar-mega-menu:hover .navbar-mega-trigger,
+  .navbar-actions a:hover,
+  .navbar-actions button:hover,
+  .mobile-header-left-actions .menu:hover,
+  .mobile-search-trigger:hover { transform:none; }
 }
