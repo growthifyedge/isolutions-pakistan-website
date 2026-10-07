@@ -116,7 +116,7 @@ const GLUED_MODEL_SUFFIX = /^([a-z]*\d+[a-z]?)(pro|max|plus|ultra|lite|mini|neo|
 // upper-case series letter while trailing letters stay as written (a16 -> A16,
 // Y05e, X5c+); plain all-lower/all-upper words get an initial capital; any other
 // deliberate mixed casing (e.g. "OnePlus", "X9D", "17T") is kept as written.
-function canonicalModel(model: string) {
+export function canonicalModel(model: string) {
   return collapse(model)
     .split(" ")
     .flatMap((word) => {
@@ -473,6 +473,18 @@ function applyToken(attributes: Attributes, token: string): boolean {
 const NO_WARRANTY = "No Warranty";
 const OFFICIAL_WARRANTY = "Official Warranty";
 export const EXTENDED_RAM = "RAM uses extended/virtual notation — verify physical RAM";
+
+/**
+ * Physical RAM from an extended/virtual RAM expression written as physical + extended
+ * ("3+5GB", "4 + 8 GB", "4GB+4GB" -> "3 GB" / "4 GB"). Only exactly two whole numbers qualify;
+ * anything else returns null and stays for review. Used by the master-workbook workflow,
+ * which reports every conversion; the importer itself never splits extended RAM.
+ */
+export function physicalRamFromExtended(value: string | null | undefined) {
+  const match = normalizeDigits(String(value ?? "")).trim().match(/^(\d+)\s*(?:GB)?\s*\+\s*(\d+)\s*(?:GB)?$/i);
+  if (!match || Number(match[1]) <= 0) return null;
+  return { ram: `${Number(match[1])} GB`, extended: `${Number(match[2])} GB` };
+}
 // Exact supplier trailing forms after a parsed price: "active <date>", a standalone "non",
 // or the accessory note "with charger". Anything else ("without charger") still needs review.
 const SUPPLIER_TRAILING_NOTE = /^(?:active\s+\d{1,2}[-./]\d{1,2}[-./]\d{2,4}|non|with\s+charger)$/i;

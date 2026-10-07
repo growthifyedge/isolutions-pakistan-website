@@ -48,8 +48,11 @@ import {
   readCatalogWorkbook,
   validateCatalogSheet,
   type CatalogReference,
+  type CatalogWorkbookData,
 } from "../lib/catalogWorkbook";
+import type { MasterReference } from "../lib/catalogMasterImport";
 import { simConfigurationLabel } from "../lib/variantFacts";
+import { PrepareImportWorkbook } from "./PrepareImportWorkbook";
 
 type Taxonomy = {
   id: string;
@@ -703,6 +706,33 @@ export function BulkImport() {
     };
   };
 
+  // Prepare Import Workbook: the same reference data plus the titles of real products already
+  // in this catalog, so Create / Replace Existing can be checked before the workbook is built.
+  const loadMasterReference = async (): Promise<MasterReference> => {
+    if (!supabase) throw new Error("Supabase environment is not configured.");
+    const client = supabase;
+    const loadTitles = async () => {
+      const pageSize = 1000;
+      const titles: string[] = [];
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await client
+          .from("products")
+          .select("title")
+          .eq("data_class", "real")
+          .order("id")
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        titles.push(...(data ?? []).map((item) => item.title as string));
+        if ((data ?? []).length < pageSize) return titles;
+      }
+    };
+    const [reference, existingTitles] = await Promise.all([loadCatalogReference(), loadTitles()]);
+    return { ...reference, existingTitles };
+  };
+
+  const previewPreparedWorkbook = (data: CatalogWorkbookData) =>
+    parseAndPreview(catalogSheetToBulkParseResult(data));
+
   const normalizeStock = async () => {
     const reference = await loadCatalogReference();
     const { rows } = normalizeStockLines(stockSource, {
@@ -945,6 +975,12 @@ export function BulkImport() {
           </p>
         </div>
       </div>
+      <PrepareImportWorkbook
+        loadReference={loadMasterReference}
+        onDownload={downloadWorkbook}
+        onPreview={previewPreparedWorkbook}
+        disabled={working}
+      />
       <div className="bulk-step">
         <b>Bulk Upload v2 · Excel staging</b>
         <span>Raw stock → Excel → review → upload → preview · no database writes</span>
