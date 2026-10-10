@@ -6,6 +6,31 @@
 
 ---
 
+## 2026-10-11 (newest) — Bulk commercial facts for the Android batch: IMPLEMENTED, PROD write NOT run
+
+> **No DB write (DEV or PROD), no publish, no deploy, no commit, no push.** The PROD preview below is a read-only query (`begin transaction read only … rollback`). The PROD update is waiting for the Owner's explicit go-ahead.
+
+**Business rule (do not re-ask per product):** every imported Android phone in this batch is **PTA Approved** and **Brand New (box pack)**.
+- Canonical schema values (existing enums, nothing invented): `pta_status = 'approved'` (UI "PTA Approved"), `condition = 'brand_new'` (UI "Brand New"; this is the "New / Box Pack" state). Product-level mirrors: `products.default_pta_status = 'approved'`, `products.default_condition = 'brand_new'`.
+
+**What was added**
+- `src/lib/commercialDefaults.ts` (pure): canonical values, `commercialWriteTarget` (exact build-mode ↔ Supabase pairing, same rule as the image uploader: DEV `acwatgxkcyrdxpcljxjb`, PROD `nlxfwppywxumymbjkvwt`; unknown/mismatched blocked), `selectAndroidBatch`, `planCommercialDefaults` (dry run), `verifyCommercialUpdate`, `runCommercialDefaults` (product-by-product write loop). `src/lib/commercialDefaultsDb.ts`: the only Supabase adapters — two `update`s (variants: `pta_status` + `condition` only; products: `default_pta_status` + `default_condition` only) plus selects. `src/lib/androidImportBatch.ts`: the exact 82 imported Android titles.
+- **Product editor** (`AdminCatalog.tsx`, Variants & Pricing tab): `Apply commercial defaults to all variants` — uses the product's Default PTA / Default condition (button disabled until both are set), confirmation "Apply to N variants? PTA … Condition …", then "Applied to N variants." after read-back verification. Per-product action may overwrite explicit values.
+- **Batch action** (`AndroidCommercialDefaults.tsx`, shown under Bulk Import): `Preview (read-only)` → counts → `Apply Android commercial defaults` → confirmation (environment, project, target products/variants, PTA, Condition; PRODUCTION needs the typed word `PRODUCTION`) → progress → verified result → read-only publication check (`validate_product_for_publication` per target, nothing published, Samsung A07 shown explicitly).
+- **Targeting (no provenance column exists):** products whose title exactly equals one of the 82 batch titles (case/space-insensitive) — never by brand/category alone. Ambiguous (duplicate-title), Apple-branded or non-`real` products are skipped. iPhones, accessories and every other product are never targeted.
+- **Batch write policy:** fills Unknown → desired; a product with a variant that already carries a different explicit PTA/Condition, used-phone grade facts, or whose change would create two identical variants is SKIPPED and listed. Already-correct variants are never written.
+- **Verification (per product, read-back):** variant count; PTA/Condition equal desired on targets and none Unknown; untargeted variants untouched; SKU, prices (incl. compare-at), RAM/storage/colour, carrier, delivery, warranty, SIM, used facts, active flag, sort order identical; media count unchanged; stock-ledger rows and sum unchanged; product defaults match. A product is "updated" only if every check passes; an interrupted/changed product is reported failed and the others continue. Each product's variants are re-read right before its write ("changed since preview" blocks it).
+- Only `product_variants.pta_status/condition` and `products.default_pta_status/default_condition` are ever written. No price, stock, SKU, media, title, brand, category, delivery or publication write exists (source-scan tested).
+
+**PROD read-only preview (2026-10-11, no writes):** target products **82** (all 82 batch titles found, 0 missing, 0 skipped) · target variants **262** (SKUs MB001–MB262, all active) · PTA Unknown **262** · Condition Unknown **262** · already correct **0** · variants to change **262** · product defaults to set **82** · conflicting explicit values **0** · used-phone grade facts **0** · identical-variant collisions **0** · products without variants **0** · existing media rows on targets **267** (will not change) · targets already published **0**.
+- **Publication check (read-only, PROD, current state):** 82/82 products fail `validate_product_for_publication` ONLY with `variant_commercial_facts_unresolved` (media is already in place). **Samsung A07: `variant_commercial_facts_unresolved` is its only blocker**, so it should become valid after the update. Not yet run post-update.
+
+**Checks:** `npm test` **559 / 559** (+11 in `scripts/commercialDefaults.test.mjs`) · `tsc -b` clean · `npm run lint` 0 errors (1 pre-existing warning) · `build:dev` OK · `build:prod` OK · `dist/` left as the DEV build. Local DEV UI (mocked data): preview showed 3 products / 6 variants and excluded an Apple product; the confirmation listed environment/project/targets/PTA/Condition; no write requests were made.
+
+**Exact next Owner action:** (1) open the PRODUCTION admin → Bulk Import page → `Apply Android commercial defaults` → `Preview (read-only)`; expect Target products 82 / variants 262 / will change 262. (2) Only if the counts match, click `Apply Android commercial defaults`, type `PRODUCTION`, confirm. (3) Check the result (82 products updated, 262 variants, 0 failed) and the publication check (`variant_commercial_facts_unresolved` should be 0; Samsung A07 valid). (4) Publishing stays a separate decision. Opening the PROD admin needs the new code deployed to PROD hosting or `npm run build:prod && npm run preview:prod` — both are separate approvals; the code in this section is uncommitted.
+
+---
+
 ## 2026-10-11 — Pre-commit hardening applied (code ready for commit review)
 
 > Small fixes from the final review. **No upload, no DEV/PROD write, no deploy, no commit, no push.** The verified Bulk Product Images workflow and the uploader/preflight logic are unchanged.
