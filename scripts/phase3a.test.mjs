@@ -17,6 +17,8 @@ const mediaMigration = await readFile(
   "utf8",
 );
 const mediaManager = await readFile("src/admin/MediaManager.tsx", "utf8");
+// The signed upload (form fields, XHR) lives in the shared helper MediaManager calls.
+const mediaUpload = await readFile("src/lib/productMediaUpload.ts", "utf8");
 const cloudinaryClient = await readFile("src/lib/cloudinary.ts", "utf8");
 const uploadFunction = await readFile(
   "supabase/functions/cloudinary-upload-signature/index.ts",
@@ -171,16 +173,18 @@ test("Cloudinary master and delivery policies stay distinct", () => {
   assert.match(adminFunction, /"SHA-256"/);
   assert.doesNotMatch(uploadFunction, /overwrite|unique_filename|use_filename/);
   const fixedFormFields = [
-    ...mediaManager.matchAll(/form\.set\("([^"]+)"/g),
+    ...mediaUpload.matchAll(/form\.set\("([^"]+)"/g),
   ].map((match) => match[1]);
   assert.deepEqual(fixedFormFields, ["file", "api_key", "signature"]);
   assert.match(
-    mediaManager,
+    mediaUpload,
     /Object\.entries\(data\.signedParameters\)[\s\S]*form\.set\(key, String\(value\)\)/,
   );
+  assert.doesNotMatch(mediaManager, /form\.set\(/);
+  assert.match(mediaManager, /uploadToCloudinary\(data, file,/);
   assert.match(uploadFunction, /signedParameters: params/);
   assert.doesNotMatch(
-    mediaManager,
+    mediaUpload,
     /form\.set\("(?:overwrite|unique_filename|use_filename|expiresAt|cloud_name|resource_type)"/,
   );
 });
@@ -189,6 +193,7 @@ test("Cloudinary secrets never enter frontend source", async () => {
   const frontend = [
     adminApp,
     mediaManager,
+    mediaUpload,
     cloudinaryClient,
     await readFile("src/lib/supabase.ts", "utf8"),
   ].join("\n");

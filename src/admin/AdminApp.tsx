@@ -40,6 +40,7 @@ import {
 import { AdminDashboard } from "./AdminDashboard";
 import { MediaManager } from "./MediaManager";
 import { MediaLibrary } from "./MediaLibrary";
+import { BulkProductImages } from "./BulkProductImages";
 import { BulkImport } from "./BulkImport";
 import { CatalogReadiness } from "./CatalogReadiness";
 import { ContactEnquiries } from "./ContactEnquiries";
@@ -657,6 +658,7 @@ export function AdminApp() {
             </p>
           </div>
         </div>
+        <BulkProductImages />
         <MediaLibrary />
       </AdminLayout>
     );

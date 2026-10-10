@@ -128,8 +128,9 @@ test("Owner and Admin receive authenticated execute permission", () =>
     rpc,
     /grant execute on function public\.apply_catalog_bulk_import\(jsonb\) to authenticated/,
   ));
-test("Phase 3B media workflow remains authoritative", () => {
-  assert.match(media, /cloudinary-upload-signature/);
+test("Phase 3B media workflow remains authoritative", async () => {
+  assert.match(media, /requestProductUploadSignature\(supabase, productId\)/);
+  assert.match(await readFile("src/lib/productMediaUpload.ts", "utf8"), /"cloudinary-upload-signature"/);
   assert.doesNotMatch(admin, /cloudinary|product_media/);
 });
 test("rough parser visibly marks uncertain lines for Owner review", () => {

@@ -14,39 +14,10 @@ import {
   containsBinaryMediaData,
   validateSourceImage,
 } from "../lib/cloudinary";
-
-type UploadSignature = {
-  cloudName: string;
-  apiKey: string;
-  signature: string;
-  signedParameters: {
-    folder: string;
-    timestamp: number;
-    transformation: string;
-  };
-};
-
-function safeCloudinaryUploadError(responseText: string) {
-  let message = "";
-  try {
-    const parsed = JSON.parse(responseText) as {
-      error?: { message?: unknown };
-    };
-    if (typeof parsed.error?.message === "string")
-      message = parsed.error.message;
-  } catch {
-    return "Cloudinary rejected the upload with an invalid response.";
-  }
-  if (/invalid transformation/i.test(message))
-    return "Cloudinary rejected the optimized-master transformation.";
-  if (/invalid signature/i.test(message))
-    return "Cloudinary rejected the upload signature.";
-  if (/file size|too large/i.test(message))
-    return "Cloudinary rejected the source file size.";
-  if (/format|unsupported|invalid image/i.test(message))
-    return "Cloudinary rejected the image format or file contents.";
-  return "Cloudinary rejected the upload.";
-}
+import {
+  requestProductUploadSignature,
+  uploadToCloudinary,
+} from "../lib/productMediaUpload";
 
 const cloudinaryConfigured = Boolean(
   import.meta.env.VITE_CLOUDINARY_CLOUD_NAME,
@@ -114,45 +85,10 @@ export function MediaManager({ productId }: { productId: string | null }) {
     setProgress(0);
     setMessage("Requesting secure upload authorization…");
     try {
-      const { data, error } = await supabase.functions.invoke<UploadSignature>(
-        "cloudinary-upload-signature",
-        { body: { productId } },
-      );
-      if (error || !data)
-        throw new Error(error?.message || "Upload authorization failed.");
-      const form = new FormData();
-      form.set("file", file);
-      form.set("api_key", data.apiKey);
-      form.set("signature", data.signature);
-      for (const [key, value] of Object.entries(data.signedParameters))
-        form.set(key, String(value));
-      const result = await new Promise<Record<string, unknown>>(
-        (resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open(
-            "POST",
-            `https://api.cloudinary.com/v1_1/${data.cloudName}/image/upload`,
-          );
-          xhr.upload.onprogress = (event) =>
-            event.lengthComputable &&
-            setProgress(Math.round((event.loaded / event.total) * 100));
-          xhr.onerror = () => reject(new Error("Cloudinary upload failed."));
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              try {
-                resolve(JSON.parse(xhr.responseText));
-              } catch {
-                reject(
-                  new Error("Cloudinary returned an invalid upload response."),
-                );
-              }
-              return;
-            }
-            reject(new Error(safeCloudinaryUploadError(xhr.responseText)));
-          };
-          xhr.send(form);
-        },
-      );
+      const data = await requestProductUploadSignature(supabase, productId);
+      const result = await uploadToCloudinary(data, file, {
+        onProgress: setProgress,
+      });
       const metadata = {
         product_id: productId,
         variant_id: null,
