@@ -27,6 +27,8 @@ import {
   variantFacts,
 } from "../lib/variantFacts";
 import { MediaManager } from "./MediaManager";
+import { commercialDbDeps } from "../lib/commercialDefaultsDb";
+import { commercialWriteTarget, planCommercialDefaults, runCommercialDefaults, type CommercialVariant } from "../lib/commercialDefaults";
 
 type Option = {
   id: string;
@@ -419,6 +421,8 @@ export function Phase4ProductEditor() {
   const [variantDeleting, setVariantDeleting] = useState(false);
   const [variantEditing, setVariantEditing] = useState<VariantEdit | null>(null);
   const [variantSaving, setVariantSaving] = useState(false);
+  const [commercialConfirm, setCommercialConfirm] = useState(false);
+  const [commercialBusy, setCommercialBusy] = useState(false);
   const load = useCallback(async () => {
     if (!supabase) return;
     const [b, c, catalog] = await Promise.all([
@@ -796,6 +800,45 @@ export function Phase4ProductEditor() {
     setMessage("Variant details saved.");
     await load();
   };
+  /** Product-level commercial defaults -> every explicit variant. Writes only pta_status/condition (+ the product defaults). */
+  const applyCommercialDefaults = async () => {
+    if (!supabase || !productId || commercialBusy) return;
+    const target = commercialWriteTarget(import.meta.env.VITE_SUPABASE_URL, import.meta.env.MODE);
+    if (!target.allowed) {
+      setMessage(target.reason ?? "Blocked: unknown environment.");
+      setCommercialConfirm(false);
+      return;
+    }
+    setCommercialBusy(true);
+    setCommercialConfirm(false);
+    try {
+      const db = commercialDbDeps(supabase);
+      const snapshot = await db.readSnapshot(productId);
+      const stored = await db.readProduct(productId);
+      const desired = { pta: draft.default_pta_status, condition: draft.default_condition };
+      const plan = planCommercialDefaults(
+        [{ id: productId, title: draft.title, slug: draft.slug, brandName: null, dataClass: draft.data_class, publicationStatus: null, defaultPta: stored.defaultPta, defaultCondition: stored.defaultCondition }],
+        snapshot.variants as CommercialVariant[],
+        desired,
+        { overwriteExplicit: true },
+      );
+      const run = await runCommercialDefaults(plan, { supabaseUrl: import.meta.env.VITE_SUPABASE_URL, buildMode: import.meta.env.MODE, ...db });
+      const entry = run.products[0];
+      setMessage(
+        run.outcome === "verified" && entry?.status === "updated"
+          ? `Applied to ${entry.variantsUpdated} variant${entry.variantsUpdated === 1 ? "" : "s"}.`
+          : run.outcome === "verified" && entry?.status === "already_correct"
+            ? "All variants already have these defaults."
+            : (entry?.message ?? run.message),
+      );
+      await load();
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "Could not apply the commercial defaults.");
+    } finally {
+      setCommercialBusy(false);
+    }
+  };
+  const commercialDefaultsReady = draft.default_pta_status !== "unknown" && draft.default_condition !== "unknown";
   const deleteVariant = async () => {
     if (!supabase || !variantPendingDelete || variantDeleting) return;
     setVariantDeleting(true);
@@ -1095,6 +1138,36 @@ export function Phase4ProductEditor() {
                   Each row is one actual combination. Unknown facts remain
                   unresolved and block publication.
                 </p>
+              </div>
+              <div className="commercial-defaults-action">
+                <button
+                  type="button"
+                  className="admin-secondary"
+                  disabled={!commercialDefaultsReady || variants.length === 0 || commercialBusy}
+                  title={commercialDefaultsReady ? undefined : "Set Default PTA status and Default condition (Product Details) first"}
+                  onClick={() => setCommercialConfirm(true)}
+                >
+                  Apply commercial defaults to all variants
+                </button>
+                {!commercialDefaultsReady && <small>Set Default PTA status and Default condition first.</small>}
+                {commercialConfirm && (
+                  <div className="commercial-defaults-confirm" role="alertdialog" aria-label="Confirm commercial defaults">
+                    <strong>
+                      Apply to {variants.length} variant{variants.length === 1 ? "" : "s"}?
+                    </strong>
+                    <span>PTA: {ptaLabel(draft.default_pta_status)}</span>
+                    <span>Condition: {draft.default_condition === "brand_new" ? "New / Box Pack (Brand New)" : draft.default_condition.replace("_", " ")}</span>
+                    <small>Only PTA and Condition change. Prices, stock, SKUs, images and publication are untouched.</small>
+                    <div>
+                      <button type="button" className="admin-primary" onClick={() => void applyCommercialDefaults()}>
+                        Confirm
+                      </button>
+                      <button type="button" className="admin-secondary" onClick={() => setCommercialConfirm(false)}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="form-grid">
                 <label>

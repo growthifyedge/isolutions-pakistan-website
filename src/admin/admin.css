@@ -2314,3 +2314,8 @@ p.bulk-images-error { padding-left: 14px; }
 .bulk-images-prod-banner { margin: -20px -20px 14px; padding: 10px 20px; background: #8e1b1b; color: #fff; font-weight: 700; letter-spacing: 0.12em; }
 .bulk-images-typed { display: grid; gap: 6px; margin-top: 12px; font-size: 12.5px; }
 .bulk-images-typed input { padding: 8px 10px; border: 1px solid var(--a-line); font: inherit; }
+
+.android-commercial { margin-top: 24px; }
+.commercial-defaults-action { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 8px 0 14px; }
+.commercial-defaults-confirm { display: grid; gap: 4px; flex-basis: 100%; padding: 12px 14px; border: 1px solid var(--a-line); background: #fafbf8; font-size: 12.5px; }
+.commercial-defaults-confirm > div { display: flex; gap: 8px; margin-top: 6px; }
