@@ -383,7 +383,7 @@ function parseCommercialLine(product: BulkProduct, sourceLine: string) {
   return true;
 }
 
-function csvRows(text: string) {
+export function csvRows(text: string) {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";
