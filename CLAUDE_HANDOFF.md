@@ -2,7 +2,499 @@
 
 **Purpose:** This file is the authoritative continuation reference for the next Claude Code / ChatGPT session on this project. Read this before touching any code.
 
-**Last updated:** 2026-09-24
+**Last updated:** 2026-10-11 (PROD bulk images COMPLETED 82/82, 267 images) · 2026-10-10 environment-aware uploader + PROD preflight IMPLEMENTED (no PROD write) · DEV bulk upload VERIFIED + PROD rollout plan (newest section first; older sections below are history — where they conflict with the top section, the top section wins)
+
+---
+
+## 2026-10-11 — Pre-commit hardening applied (code ready for commit review)
+
+> Small fixes from the final review. **No upload, no DEV/PROD write, no deploy, no commit, no push.** The verified Bulk Product Images workflow and the uploader/preflight logic are unchanged.
+
+- **Stale Vite shadow files removed:** deleted the gitignored `vite.config.js` and `vite.config.d.ts` (Vite loads `.js` before `.ts`, so bare `vite`/`npx vite build`/`vite --mode production` bypassed every guard). New regression test `scripts/configShadow.test.mjs` fails if either file exists next to `vite.config.ts`. `vite.config.ts` itself is unchanged. If a tool ever regenerates them, delete them again.
+- **beforeunload guard:** new `src/lib/unloadGuard.ts` (`installUnloadGuard`); `BulkProductImages.tsx` installs it only while `uploading` is true and removes it when the run ends (effect cleanup). Idle pages are never blocked. Tested: none when idle, one while active (calls `preventDefault` + `returnValue = ""`), removed afterwards, no stacking across runs. Upload execution is untouched.
+- **Partial-retry warning (documentation + UI note):** if a product was partly saved, untick the images that were already saved before retrying; uploading a saved image again creates another Cloudinary asset and `product_media` row. There is no automatic de-duplication, no source hashing and no schema change. The upload result now shows this note whenever a product has saved images but is not Verified.
+- **Two-tab warning (handoff only):** do NOT run the bulk uploader from more than one browser tab at the same time. The submit latch is per tab; there is no cross-tab locking (the per-product pre-write media re-read narrows, but does not close, the race).
+- **Selection Summary wording:** "Selection is valid" → "Selection review is valid: N images for M products ready for preflight on <ENV>. The upload panel below is the final check." The upload panel (and preflight) remains the only write gate.
+- **Checks:** `npm test` **548 / 548** (+3 in `configShadow.test.mjs`) · `tsc -b` clean · `npm run lint` 0 errors (1 pre-existing `StorefrontApp.tsx` warning) · `build:dev` OK · `build:prod` OK · `dist/` left as the DEV build (`preview-dist.mjs development --check` OK). Environment-separation and serve-guard tests still pass; no `vite.config.js` / `vite.config.d.ts` present.
+- **Status:** 36 uncommitted paths on `feature/checkout-orders-shipping` (HEAD `9e793c3`). Ready for commit review; commit/push/PROD-hosting deploy each still need the Owner's explicit go-ahead (a hosting deploy only exposes the Admin workflow and never re-runs media upload).
+
+---
+
+# 2026-10-10 — PROD BULK PRODUCT IMAGES COMPLETED
+
+> **The PRODUCTION bulk image upload finished successfully and is verified. Do NOT upload these images again.** This section was recorded from the Owner's report; it only documents state — no upload, write, commit, push or deploy happened while updating it.
+
+## Final PROD result
+- Catalog products: **82** · products attempted **82** · **verified 82** · failed **0** · partial **0**
+- Images uploaded **267** · images failed **0**
+- UI final result: **`PROD upload verified`**
+- All 82 selected PROD products passed post-write read-back verification.
+- PROD catalog now has media for all 82 products involved in this import.
+
+## PROD preparation state before upload
+- Shopify export: `C:\Users\User\Downloads\products_export_1 (3).zip` — 1850 CSV rows · 585 source sets (Handles) · 1726 source images.
+- Initial PROD catalog: 82 products, 0 existing primary images.
+- Initial matching: 53 exact Matched · 22 Review · 4 Conflict products / 9 source sets · 1 Multiple · 2 without a safe source.
+- Bulk review: `Confirm all review suggestions` → 22 confirmed, 0 skipped, Review → 0.
+- Conflict: all 4 conflict products resolved manually with `Use This Source Set`.
+- Multiple: Honor X5C+ chosen for the X5C+ source set → Multiple → 0.
+- Manual missing products: **Oppo Reno 16f 5G** and **Tecno Go 3** — local images added for both before the run.
+- Final selection before upload: 82 products · 82 image sets · 267 images · Ready 82 · Needs review 0 · Conflicts 0 · Existing images 0.
+
+## PROD environment / safety (as used)
+- PROD preview showed: badge PRODUCTION · reference catalog 82 products · PROD Supabase `nlxfwppywxumymbjkvwt` · only the PROD uploader (DEV uploader not active).
+- The environment-aware uploader/preflight provided: exact build-mode ↔ Supabase pairing; PROD Cloudinary folder validation (`isolutions-production/products/`); signed-folder validation; returned `public_id` root validation; PROD preflight (incl. signature-only Cloudinary check); typed `PRODUCTION` confirmation; sequential product upload; per-product read-back verification; Failed/Partial/Verified/Blocked reporting; no destructive delete by default; no price, inventory, variant or publication changes.
+
+## DEV history (kept — see the sections below)
+- Main DEV batch: 73 attempted · 71 verified · 2 partial · 206 uploaded · 3 failed. The partials (Nokia HMD 102, Nokia HMD 106 2026) were later resolved with smaller local gallery images.
+- Motorola Moto Edge Fusion one-product test verified the upload pipeline first.
+
+## Current project status
+Bulk Product Images is **proven end-to-end in DEV and PROD**. Workflow: load Shopify ZIP/CSV → `Confirm all review suggestions` → resolve Conflict/Multiple manually → add local images for missing products → Select all eligible → environment-aware preflight → confirm → product-by-product upload → read-back verification.
+- PROD media is uploaded and verified. A PROD **hosting** deploy is only needed to expose the new Admin workflow/code, never to apply media again.
+
+## Current code / git (recorded 2026-10-11)
+- Branch `feature/checkout-orders-shipping` · HEAD `9e793c3` (unchanged — nothing from the Bulk Product Images / environment-safety work is committed or pushed).
+- `git status --short`: 34 paths — 12 modified (`CLAUDE_HANDOFF.md`, `firebase.json`, `package.json`, `scripts/bulkCatalog.test.mjs`, `scripts/phase3a.test.mjs`, `src/admin/AdminApp.tsx`, `src/admin/MediaManager.tsx`, `src/admin/admin.css`, `src/lib/bulkCatalog.ts`, `src/lib/supabase.ts`, `tsconfig.node.json`, `vite.config.ts`) and 22 untracked (the new bulk-image / environment-safety libs, admin panel, scripts and tests).
+- Checks re-run: `npm test` **545 / 545** · `tsc -b` clean · `npm run lint` 0 errors (1 pre-existing `StorefrontApp.tsx` warning) · `build:dev` OK · `build:prod` OK. `dist/` left as the DEV build.
+
+## Next recommended step (NOT another image upload)
+1. Review the current uncommitted code and decide whether to commit and push the completed Bulk Product Images + environment-safety work.
+2. Decide separately whether to deploy PROD hosting with the new Admin workflow (`npm run build:prod`, predeploy guard must pass, explicit Owner approval).
+
+---
+
+## 2026-10-10 (newest) — "Confirm all review suggestions" added (review-only; no upload run)
+
+> Faster PROD review preparation without weakening matching. **No PROD write, no Cloudinary upload, no PROD deploy, no commit, no push.** The PROD uploader was not run. Matching rules are unchanged.
+
+- **What:** a button `Confirm all review suggestions` above the Source Sets table, first in the row: `Confirm all review suggestions` · `Select all eligible` · `Deselect all`. It is disabled when no eligible Review set exists. Code: `eligibleReviewSetIds` / `confirmAllReviewSuggestions` in `src/lib/bulkProductImagesReview.ts`; handler `confirmAllReview` in `BulkProductImages.tsx`.
+- **Exact eligibility (all must hold):** current status = Review (so it is not Invalid, Multiple, Conflict, Unmatched, Not used or Skipped); the matcher's own Review result (`match.status === "review"`) has exactly ONE candidate product and the set's target is still that candidate (an Owner-changed target is not touched); not already confirmed; the source has a valid image; the target product exists in the catalog; and no other active source set targets the same product (such a set would already be a Conflict). It only accepts suggestions the existing matcher already produced — no new equivalence rules.
+- **Effect:** identical to clicking `Confirm Match` on each eligible row (tested for equality). Images, Primary, Existing-image mode are preserved; an already-included set stays included (a newly confirmed product without a primary becomes included, exactly as per-row Confirm Match). Conflict, Multiple, Unmatched, Invalid and Not used rows keep the same decision objects.
+- **Message (live state, nothing hard-coded):** `Confirmed N review suggestions. M skipped[ — manual review still required]. Review complete. Remaining manual actions: X Conflict product(s), Y Multiple, Z Missing.`
+- **PROD 82-product fixture (real `products_export_1 (3).zip` vs the 82 PROD titles, current matcher):** Review 22 → **22 confirmed, 0 skipped**; Review now 0; Matched/Confirmed 53 → 75; **Conflict unchanged (9 sets / 4 products), Multiple 1, Missing 2 (Oppo Reno 16f 5G, Tecno Go 3)**. Remaining manual actions: 4 Conflict products (use `Use This Source Set`), 1 Multiple (product-choice UI), 2 Missing (Local Images / Missing Images). Oppo Reno 16f 5G and Tecno Go 3 are NOT Review rows under the current rules — they have no safe source and stay manual.
+- **Tests:** `npm test` **545 / 545** (+8 in `scripts/bulkReviewConfirm.test.mjs`, incl. the real-fixture test, which is skipped if the ZIP is absent) · `tsc -b` clean · lint 0 errors (1 pre-existing warning) · `build:dev` and `build:prod` OK (`dist/` left as the DEV build).
+- **Local PROD-mode check (approved flag, mocked read-only catalog of the 82 PROD titles, no real PROD contact):** header PRODUCTION; only `Upload Selected Images to PROD`; with a 7-set sample (3 Review, 2 Conflict, 1 Multiple, 1 exact) the click moved Review 3 → 0 and Matched 1 → 4, Conflict (1 product) and Multiple (1) unchanged, button became disabled, selection summary 4 products / 5 images, notice shown, no dialog, no preflight, no non-GET request, no Cloudinary XHR.
+- **Next Owner action (PROD review):** open the PRODUCTION admin → Media → Bulk Product Images → load `products_export_1 (3).zip` → `Confirm all review suggestions` (expect 22 confirmed) → resolve the 4 Conflict products with `Use This Source Set` → choose the product for the 1 Multiple → add local images for Oppo Reno 16f 5G and Tecno Go 3 (and any oversized originals) → `Select all eligible` → check the Selection Summary → first PROD run with ONE product (`Keep only this set`) → read the preflight cloud/folder → type `PRODUCTION` → verify → then the rest. Do not run the PROD uploader without the Owner's explicit go-ahead.
+
+---
+
+## 2026-10-10 (newest) — Environment-aware bulk image uploader + PROD preflight/confirmation IMPLEMENTED (PROD upload NOT performed)
+
+> **Status:** the plan from the section below is implemented locally and tested. **Nothing was written to PROD, nothing uploaded to PROD Cloudinary, no PROD deploy, no new DEV bulk upload, no commit, no push** (HEAD `9e793c3`, all work uncommitted). The first real PROD upload still needs the Owner's explicit go-ahead.
+
+### What changed
+- `src/lib/devBulkImageUpload.ts` → **`src/lib/bulkImageUpload.ts`** (types `BulkUpload*`, `planBulkUpload`, `runBulkUpload`). **`resolveUploadTarget(supabaseUrl, buildMode)`** is the only write gate: it needs a known project, build mode == that project's environment, and exactly (development ↔ `acwatgxkcyrdxpcljxjb`) or (production ↔ `nlxfwppywxumymbjkvwt`). Unknown / lookalike / missing / mismatched (DEV project in a production build, PROD project in a development build) are blocked — in the plan, the preflight AND again inside the runner for every product.
+- **Cloudinary roots** (`CLOUDINARY_ROOTS`): DEV `isolutions-development/products/`, PROD `isolutions-production/products/`. The signed folder must equal `<root><productId>` and the returned `public_id` must start with `<root><productId>/`. A wrong folder blocks the product before any upload (no insert); a wrong returned `public_id` is reported as an orphan and nothing is inserted. The old "folder must not contain production" rule is gone.
+- **`src/lib/bulkImagePreflight.ts`** (new): `evaluateBulkPreflight` (sync) + `runBulkPreflight`. Returns `{ passed, errors[], warnings[], environment, projectRef, buildMode, productCount, imageCount, actions{newMedia,addImages,makePrimary}, unresolved{review,multiple,conflict,invalid}, mediaSnapshot, cloudinary, plan }`. Checks: environment/project/build-mode pair; catalog loaded + existing-media snapshot; ≥1 selected product; Review/Multiple/Conflict/Invalid = 0; valid sources; primary rules; existing-primary mode explicit; no duplicate target sets; no foreign Supabase ref in the active bundle config (`runtimeRefs`). **PRODUCTION only:** a signature-only Cloudinary check — ONE `cloudinary-upload-signature` request for the first selected product, verifies the folder is under `isolutions-production/products/`, shows cloud name + folder. The preflight dependency type has NO upload/insert/delete capability.
+- **UI (`BulkProductImages.tsx`):** exactly one action, labelled for the real environment — `Upload Selected Images to DEV` on a development build, `Upload Selected Images to PROD` on a production build, a disabled "Upload unavailable" on anything else. Click → preflight (failures listed, nothing uploaded) → confirmation. **PRODUCTION dialog:** red PRODUCTION banner, Supabase ref, Cloudinary cloud + folder, product/image counts, new/add/make-primary counts, unresolved = 0, "This will write production media.", and the confirm button stays disabled until the Owner types exactly `PRODUCTION`. DEV dialog has no typed text. The review controls stay locked during a run.
+- **Serve/mode guard:** `serveModeProblem` in `src/lib/supabaseEnvironment.ts`, called from `vite.config.ts` for every `serve` (dev server and preview): `vite --mode production` and `vite preview --mode production` now fail at config load with `[environment guard] Refusing to start …` unless `ISOLUTIONS_PROD_PREVIEW=1`, which only `scripts/preview-dist.mjs` sets — after `previewDistProblem` proves `dist/` references only the requested environment's project. Scripts: `dev` (unchanged, development mode), `preview` → `preview:dev`, `preview:dev` (needs a `build:dev` dist, port 4173), `preview:prod` (needs a `build:prod` dist, port 4174). Existing build guard (`buildEnvironmentProblem`) and the Firebase predeploy guard are untouched.
+- Preserved (all existing tests pass): sequential multi-product processing, per-product media re-read, multi-image galleries, Add Images / Add and make primary, one primary, no delete by default, Failed/Partial/Verified/Blocked, continue after a product failure, orphan reporting, read-back verification, "Media changed since review" block, Select all eligible / Deselect all / Keep only this set, Local Images behaviour.
+
+### Verification (2026-10-10)
+- `npm test` **537 / 537** (was 521; +16: environment/Cloudinary/preflight/confirmation/UI-gating tests in `scripts/bulkImagePreflight.test.mjs`, serve-guard tests in `scripts/serveGuard.test.mjs` including a real `vite --mode production` being refused) · `tsc -b` clean · `npm run lint` 0 errors (1 pre-existing StorefrontApp warning) · `build:dev` OK (dist → only `acwatgxkcyrdxpcljxjb`) · `build:prod` OK (dist → only `nlxfwppywxumymbjkvwt`). `dist/` was left as the DEV build.
+- Local DEV UI (dev server, mocked read-only catalog, no writes): header DEVELOPMENT, only `Upload Selected Images to DEV` (no PROD text), preflight → DEV dialog without typed input, Cancel; no non-GET requests, no Cloudinary XHR.
+- Local PROD UI (production-mode server started with the approved flag, **mocked network — no real PROD contact**): header PRODUCTION, only `Upload Selected Images to PROD`; preflight made exactly one (mocked) signature request and no upload; dialog showed PRODUCTION banner, `nlxfwppywxumymbjkvwt`, cloud/folder `isolutions-production/products/…`, 2 products/3 images, unresolved 0, "This will write production media."; confirm stayed disabled for `""`, `production`, `PRODUCTION ` and enabled only for `PRODUCTION`; a signature with a DEV folder produced "Preflight failed — nothing was uploaded". Servers stopped afterwards.
+- The REAL PROD signature endpoint, PROD Cloudinary root value, cloud name, PROD RLS/Admin profile were NOT exercised (no PROD credentials/sign-in used).
+
+### Known limitations
+- Source files are not recorded on `product_media`, so re-uploading identical images cannot be detected automatically (media-present block + Add modes only).
+- The PROD `CLOUDINARY_FOLDER_ROOT` secret value is still unread; the signature-only check proves it at run time. Same Cloudinary cloud for DEV and PROD is unknown (the preflight shows `cloudName`).
+- Cloudinary rejects some very large Shopify originals (fetch by URL); expect a few "source file size" failures and replace them with smaller local files.
+- PROD admin code is not deployed. Running the PROD Admin locally needs PROD sign-in and a production build served by `npm run preview:prod` (static dist; admin login still needs a PROD Owner/Admin account).
+
+### Exact next Owner action
+1. Decide how to open the PROD Admin: (a) deploy the new admin build to PROD hosting (separate explicit approval, `firebase deploy --only hosting --project production` — the predeploy guard must pass), or (b) `npm run build:prod` then `npm run preview:prod` and open `http://127.0.0.1:4174/admin/media` (signs in against PROD Supabase).
+2. In PRODUCTION admin: load the Shopify ZIP → resolve Review/Multiple/Conflict → add local images for manual/oversized products → **first run: one product only** (Keep only this set → Upload Selected Images to PROD → read the preflight cloud/folder → type PRODUCTION) and send the verification summary → then Select all eligible for the rest.
+3. Do not re-upload the verified DEV batch.
+
+---
+
+## 2026-10-10 (latest) — DEV bulk image upload VERIFIED end-to-end · PROD rollout is PLAN ONLY
+
+> **Status: the Bulk Product Images DEV workflow is verified end-to-end. PROD is NOT enabled.** Nothing has been written to PROD, no PROD Cloudinary upload, no PROD deploy, no commit, no push. All code below is still UNCOMMITTED on `feature/checkout-orders-shipping` (HEAD `9e793c3`, 29 modified/untracked paths). DEV Supabase `acwatgxkcyrdxpcljxjb` · DEV Firebase `isolutions-development-cb1ea` · PROD Supabase `nlxfwppywxumymbjkvwt` · PROD Firebase `isolutions-pakistan-production`.
+
+### A. Final verified DEV result
+- **Main DEV bulk run:** 73 products attempted · **71 verified** · 0 failed · **2 partial** · **206 images uploaded** · 3 images failed.
+- **Nokia HMD 102 (partial → resolved):** Position 1 uploaded; Position 2 failed (Cloudinary rejected the Shopify source file size). Replacement local blue image uploaded as gallery. Final retry: 1 product attempted · 1 verified · 1 image uploaded · 0 failed · "DEV upload verified". Existing primary retained.
+- **Nokia HMD 106 2026 (partial → resolved):** Positions 1–2 uploaded; Position 3 failed (source file size); Position 4 not attempted (product stopped after the failure). Local green + purple replacements uploaded with Existing Image mode = Add Images (gallery). Final retry: 1 product · 1 verified · 2 images uploaded · 0 failed · "DEV upload verified". Existing primary retained.
+- **Motorola Moto Edge Fusion:** 2 DEV media rows · 1 primary · 1 gallery · verified (the earlier one-product test).
+- **DO NOT re-upload the DEV batch.** Treat DEV as verified evidence that the pipeline works. A product that now has media defaults to "Skip" and is excluded from Select all eligible.
+- **Uploader behaviour proven:** multiple products; multi-image gallery sets; one primary preserved; Add Images; Add and make primary; per-product partial failures; continues after a product failure; read-back verification; blocks PROD and unknown environments; detects "Media changed since review"; never deletes existing media by default.
+- **Known cause of the 3 failed images:** Cloudinary rejects some Shopify CDN originals as too large when fetched by URL (`safeCloudinaryUploadError` → "rejected the source file size"). Workaround that worked: upload a smaller local file for that position. Expect the same on PROD; the end-of-run summary lists them.
+
+### B. UI fixes verified today
+1. **Local Images visibility:** local sets sort first in every filter; an unmatched local batch is always visible; search checks every local filename; 2–10 valid unmatched files added together with no auto-match stay as ONE local set; File objects are preserved. (Root cause: unmatched Local sets sorted behind hundreds of unmatched Shopify sets beyond the 60-row page.)
+2. **Keep only this set:** keeps Existing Image mode, include state, image selections and Primary; shows a result line (also when nothing changed or when refused, with the reason); works for Local sets whose product has an existing primary.
+3. **assignProduct:** re-confirming the SAME product (Confirm Match / Use This Source Set) no longer resets Existing Image mode or drops the include state; a different product starts again from "skip".
+
+### C. Latest verified checks (run 2026-10-10 after the last fixes)
+- `npm test` **521 / 521** pass · `tsc -b` clean · `npm run lint` 0 errors (1 pre-existing `StorefrontApp.tsx` hook warning) · `build:dev` OK (dist references only `acwatgxkcyrdxpcljxjb`) · `build:prod` OK (dist references only `nlxfwppywxumymbjkvwt`). `dist/` was left as the DEV build.
+
+### D. PROD rollout plan (NOT implemented — read/plan only)
+**Facts from the code:** the uploader is `src/lib/devBulkImageUpload.ts` (guard `devUploadGuard` hard-codes `DEV_UPLOAD_PROJECT_REF`; the runner rejects any signed folder containing "production"; confirm text and UI say "DEV"). The signed folder comes from the Edge Function `cloudinary-upload-signature`: `${CLOUDINARY_FOLDER_ROOT || "isolutions-development"}/products/<productId>`; PROD has the secret `CLOUDINARY_FOLDER_ROOT` set but its VALUE has not been read (expected `isolutions-production`; must be proven, not assumed). `productMediaPayload` already forces `public_id` to contain `/products/<productId>/`. `vite.config.ts` guards `build` only; `vite serve` (npm run dev) has no mode guard. `.firebaserc` aliases: `development` → `isolutions-development-cb1ea`, `production` → `isolutions-pakistan-production`; `firebase.json` predeploy runs `scripts/check-hosting-environment.mjs`. PROD currently has 82 draft Android products and 0 `product_media` rows.
+
+**1. Code changes required (small, mostly rename + generalise):**
+- Rename `devBulkImageUpload.ts` → `bulkImageUpload.ts` (and `DevBulk*` types → `BulkUpload*`); replace `devUploadGuard` with `uploadTargetGuard(supabaseUrl, buildMode)` that resolves the environment from the URL via `environmentForSupabaseUrl`, requires `import.meta.env.MODE` to equal that environment's name, and returns `{ environment, supabaseProjectRef, expectedFolderRoot }`. Allowed = exactly the two known pairs (development↔`acwatgxkcyrdxpcljxjb`, production↔`nlxfwppywxumymbjkvwt`); anything else is blocked.
+- Replace the "folder must not contain production" rule with a per-environment positive rule: folder must start with `isolutions-development/products/` (DEV) or `isolutions-production/products/` (PROD) and end with `/<productId>`; after upload the returned `public_id` must start with the same root (add to the payload check, not just the folder).
+- Make UI strings environment-aware (button "Upload Selected Images to DEV|PRODUCTION", confirm dialog, progress, report). Keep the DEV/PROD badge already shown by `referenceCatalogEnvironment`.
+- Add `bulkImagePreflight.ts` (pure + injected reads) and a typed PROD confirmation (see 7–8).
+- Add a `serve` guard in `vite.config.ts` (refuse `--mode production` dev servers unless an explicit `ALLOW_PROD_ADMIN_LOCAL=1`) so local PROD access is deliberate.
+- Update tests: environment matrix (dev/prod/unknown/lookalike × mode), folder-root matrix (DEV folder in PROD blocked, PROD folder in DEV blocked), PROD confirmation text, preflight checks; keep all 521 existing tests green. No migration, no Edge Function code change.
+
+**2. DEV-only guards that become explicit environment-aware guards:** `DEV_UPLOAD_PROJECT_REF`; `devUploadGuard`; the `/production/i` folder rejection; `DEV_UPLOAD_WARNING`; panel strings; the test assertions that forbid the PROD ref in the lib (replace with "PROD ref only appears via `SUPABASE_ENVIRONMENTS`").
+
+**3. Cloudinary rules for PROD:** folder root must be the PROD root (`isolutions-production`, to be confirmed by the signature-only preflight below); folders are `<root>/products/<productId>`; transformation `c_limit,w_3000,h_3000,q_90,fl_force_strip` unchanged; secrets stay in Edge Function secrets only. Whether PROD uses the same Cloudinary cloud as DEV is NOT known (the cloud name is a function secret, not read) — the preflight displays the `cloudName` returned by the signature and the Owner must recognise it.
+
+**4. Supabase for PROD:** exactly `nlxfwppywxumymbjkvwt`, from `.env.production.local` via `npm run build:prod` (or `--mode production` locally). **5. Firebase PROD:** `isolutions-pakistan-production` (`firebase deploy --only hosting --project production`, only with explicit approval; the predeploy guard must pass).
+
+**6. Cross-environment prevention (layers):** (a) build guard `buildEnvironmentProblem` (mode ↔ project, distinct keys); (b) hosting predeploy guard (bundle ref ↔ Firebase project); (c) NEW runtime guard in the uploader (MODE ↔ URL ↔ allowed pair); (d) NEW per-environment Cloudinary folder-root allow-list checked on the signature AND on the returned `public_id`; (e) per-product pre-write media re-read (existing); (f) preflight shows project ref + folder + cloud name before any write; (g) typed confirmation for PROD; (h) no DEV project reference in a production bundle and vice versa (existing `check:hosting-env`).
+
+**7. PROD preflight (read-only; runs when the Owner clicks Upload, before the confirmation):** target environment = PRODUCTION · exact Supabase project match · build mode = production · catalog loaded (count) · existing-media snapshot (products with media / with primary) · selected source sets and products · unresolved Review/Multiple/Conflict = 0 · Invalid sources = 0 · image counts per product and total · primary rules (exactly one primary for no-primary products) · existing-primary mode per product · no duplicate target source sets · no media already present for "new" products (re-read) · duplicate-media screen (a product that already has media is only touched via explicit Add modes; source files are not recorded on `product_media`, so identical re-uploads cannot be detected automatically — rely on the media-present block) · **signature-only Cloudinary check:** request ONE signed upload for the first product (no upload happens) and verify folder root = PROD root and show cloudName · the active bundle references no DEV Supabase ref. Any failure blocks with one reason.
+
+**8. PROD confirmation dialog:** red "PRODUCTION" banner · Supabase project `nlxfwppywxumymbjkvwt` · Cloudinary cloud + folder root · N products · M images · existing-media actions (X add as gallery, Y add and make primary) · unresolved = 0 · "This will write PRODUCTION media: it uploads images to Cloudinary and inserts product_media records. Nothing is deleted or published." · the Owner must type `PRODUCTION` to enable the confirm button.
+
+**9. PROD runner:** reuse the verified runner unchanged in behaviour (product-by-product; pre-write media read; upload; insert; RPC `set_product_media_primary` for make-primary; read-back verification; continue after product failure; Verified/Failed/Partial/Blocked; orphan `public_id` report; no delete; no publish/price/inventory/variant writes).
+
+**10. Canary:** no new temporary UI. A PROD canary is technically JUSTIFIED as the first run only because three things differ from DEV and cannot be proven by DEV or by read-only checks: the PROD `CLOUDINARY_FOLDER_ROOT` secret value / Cloudinary credentials, PROD RLS + the Owner/Admin profile for `product_media` insert and `set_product_media_primary`, and PROD Edge Function behaviour. The signature-only preflight proves the folder root and cloud name without a write; the remaining risk is closed by running the NORMAL uploader once with a single product (select one set → "Keep only this set" → upload), reading the verification, then Select all eligible for the rest. It is an operational step with the same UI, not extra code. Blast radius is small: PROD products are drafts with 0 media rows.
+
+**11. Owner workflow (target):** build/open PRODUCTION admin → load Shopify ZIP → resolve Review/Multiple/Conflict → add local images for missing/manual products (and small local replacements for any "source file size" failures) → Select all eligible → PROD preflight → type PRODUCTION → Upload Selected Images to PRODUCTION → monitor → read the verification summary. Admin sign-in is separate per environment. Local access to PROD admin without any hosting deploy is possible via `vite --mode production` once the serve guard exists; deploying the new admin code to PROD hosting is a separate approval.
+
+**12. Recommended next implementation step:** implement the environment-aware uploader refactor + preflight + typed confirmation + serve guard + tests (items 1–2, 6–8) with PROD writes still impossible until the Owner explicitly approves the first run; verify on DEV only (no new DEV bulk upload; the preflight's signature-only check may be run against DEV).
+
+---
+
+## 2026-10-10 — Final verified state (end of day)
+
+Summary of today's verified state. Details are in the "Step 3 correction: product image sets" section directly below.
+
+### 1. Status
+- **Bulk Product Images Step 3 is implemented locally** (uncommitted). Branch `feature/checkout-orders-shipping`, HEAD `9e793c3`.
+
+### 2. Corrected state model
+- One product supports **multiple gallery images**.
+- One Shopify Handle = **one source image set**. All valid images in the chosen set remain available.
+- The lowest Image Position is the default **Primary**; the remaining images are **gallery** images.
+- Changing Primary does **not** deselect gallery images.
+- **Conflict** = different source sets/Handles target the same iSolutions product.
+- **"Use This Source Set"** keeps the whole selected set and marks competing sets **Not Used**.
+
+### 3. Missing Images workflow
+- Catalog products with no usable Shopify source appear in a separate **Missing Images** section.
+- Multiple local images can be selected for one product. One image is Primary; the others remain gallery images.
+- Current manual products: **Oppo Reno 16f 5G**, **Tecno Go 3**.
+
+### 4. Real Shopify export status
+- File: `C:\Users\User\Downloads\products_export_1 (3).zip`
+- **585** source sets, **1,726** images.
+- **53** Matched · **22** Review · **4** Conflict products (**9** competing sets) · **1** Multiple · **2** manual / no safe Shopify source.
+- **80/82** catalog products coverable.
+- **53** matched sets selected by default, containing **157** images.
+
+### 5. Review UI behaviour
+- Review Images gallery, with a Primary selector and include/exclude for each gallery image.
+- Use This Source Set; Change Product / manual assignment.
+- Missing Images local upload.
+- Existing-primary products are skipped by default. "Add Images" and "Add and make primary" are explicit choices only.
+- **Apply Selected Images is still disabled.**
+
+### 6. Environment status
+- The environment separation fix is implemented locally.
+- `build:dev` points only to DEV Supabase (`acwatgxkcyrdxpcljxjb`); `build:prod` points only to PROD Supabase (`nlxfwppywxumymbjkvwt`).
+- **The live DEV site still needs a safe redeploy before any real DEV write or upload test.**
+
+### 7. Tests / build
+- `npm test` **490/490** pass · TypeScript clean · lint 0 errors (only the old `StorefrontApp.tsx` warning) · `build:dev` passes · `build:prod` passes.
+- No DEV writes · no PROD writes · no Cloudinary uploads · no commit · no push · no deploy.
+
+### 8. Tomorrow's exact first step
+1. **Signed-in localhost visual verification on `/admin/media`** (DEV build). Check that:
+   - Review Images shows multiple thumbnails;
+   - changing Primary keeps the gallery images;
+   - Use This Source Set keeps all images from the chosen Handle;
+   - Missing Images supports multiple local images.
+2. Then, **only after Owner approval**:
+   1. Safe DEV redeploy with `npm run build:dev` → `firebase deploy --only hosting --project development`.
+   2. One-product DEV upload test.
+   3. Later, the PROD bulk image upload.
+
+---
+
+## 2026-10-10 — Bulk Product Images Step 3 correction: product image sets (review only)
+
+Supersedes the "one row = one image" model in the 2026-10-09 (later) section below. Everything else there (Priority A, Shopify ZIP loading, environment badge, read-only catalog) still holds.
+
+### 1. Git state
+- Branch `feature/checkout-orders-shipping`, HEAD **`9e793c3`**. All work is uncommitted. No commit / push / deploy, no DEV or PROD writes, no Cloudinary calls. `dist/` = last **DEV** build.
+
+### 2. State model (`src/lib/bulkProductImagesReview.ts`, rewritten)
+- The review is a list of **source sets**, each with images and an Owner decision. A decision holds: target product, confirmed, included, dismissed (`not_used` / `skipped`), existing-image mode, selected image ids, and one primary image id.
+  - **Shopify set** = one Handle with **all** its images (sorted by Image Position, duplicate URLs dropped, each URL validated). The lowest position is the default Primary; the rest are selected gallery images.
+  - **Local set** = Owner files for one product. Files matched to the same product, files manually assigned to it, and Missing Images uploads all join **one** set. They never conflict with each other.
+- **Conflict** = two or more **different active source sets** target the same product: Shopify Handle vs Handle, or Shopify vs local. Several images inside one set are never a conflict. "Use This Source Set" keeps every image of that set and marks the competing sets **Not Used** (Restore is available).
+- The Step 1 matcher and its rules are **unchanged**. Global local files are matched one file at a time, so files for the same product group into one set instead of being flagged as a conflict. `buildImageAssignmentPlan` (single image per product) is no longer used by the review. It is left intact with its tests.
+- **Primary:** `setPrimaryImage` moves only the flag. The primary cannot be deselected; choose another primary first. Gallery images can be unticked and re-ticked (they stay in source order). Local images can also be removed, and a local set can be cleared.
+- **Existing primary image:** default **Skip**. "Add images" adds gallery images only and keeps the existing primary. "Add and make primary" inserts every image as gallery, then switches the chosen image to primary via `set_product_media_primary`; old media is kept. Both are explicit choices. Nothing is deleted or replaced.
+- **Insert plan** (`planImageSet`, display only, nothing executed): the primary goes first (reusing `planPrimaryAssignment`), gallery images follow, and sort orders continue after the product's existing media.
+- **Validation per included set:**
+  - exactly one target product, a valid source, and only valid images selected;
+  - at least one selected image;
+  - exactly one selected Primary when the product has no primary (or with "Add and make primary");
+  - no unresolved competing source set; Review / Multiple / Conflict resolved;
+  - existing-primary products need Add images or Add and make primary.
+  
+  The environment must be known and at least one set must be included. **Several images for one product are allowed.**
+- **Catalog coverage** (catalog perspective): total, with usable source, selected for images, still missing, existing primary, needs manual action. There is also a breakdown by best source (matched / confirmed / review / conflict / multiple / none).
+
+### 3. UI (`src/admin/BulkProductImages.tsx`, rewritten)
+- **Sources:** Shopify CSV / ZIP and Local Images are both kept. The two sources now **combine** in one review: a new Shopify load replaces only the Shopify sets, and local loads add to the review. A **Clear review** button resets everything.
+- **Catalog coverage cards**, then **Source sets** cards (Loaded + image count, Matched, Review, Multiple, Conflict + products, Unmatched + skipped, Invalid, Included + images).
+- **Table columns:** Include Set?, Source, Shopify Title / Files, Handle, Detected Brand, Detected Model, Matched iSolutions Product, Images (selected/total + thumbnail strip), Primary Preview, Status, Issue, Action.
+- **Actions by status:**
+
+  | Status | Actions |
+  |---|---|
+  | Matched | Review Images |
+  | Review | Confirm Match, Change Product, Review Images |
+  | Multiple | Use <candidate>, Choose Product, Review Images |
+  | Conflict | Use This Source Set, Review Images |
+  | Unmatched | Choose Product, Skip (no forced local upload) |
+  | Not used / Skipped | Restore |
+  | Existing image | Skip / Add images / Add and make primary (select) |
+  | Local sets | Remove set |
+
+- **Review Images** opens a gallery editor. Every image has a thumbnail, an Include box and a Primary radio, plus Remove for local images. Invalid images are shown with their reason.
+- **Missing Images** section (catalog perspective): products with no primary, no usable Shopify set, and not a candidate of an unresolved Multiple. Each row shows title, brand, current image status, the pending local thumbnails (Make primary / Remove), **Upload Images** (multiple files, contents validated, invalid files rejected with a message), Include and **Clear selected set**. It has search and pages of 20.
+- Local preview object URLs are revoked once they are no longer shown (`retainOnly`) and on unmount.
+- **Apply Selected Images** is still always `disabled`: "Not enabled until upload testing is approved."
+- CSS: about 50 more `.bulk-images-*` lines in `admin.css`.
+
+### 4. Real export (`products_export_1 (3).zip` vs the 82 PROD titles; test 14)
+- 585 sets / **1,726 images**.
+- Coverage by best source: **53 matched · 22 review · 4 conflict products (9 sets) · 1 multiple · 2 none**. The matching rules were not loosened.
+- The 53 matched sets start included with **157 images**: 53 primaries plus gallery images. They validate with no blockers.
+- Catalog coverage: with usable source **80** · selected **53** · still missing **2** · existing primary **0** · needs manual action **29** (22 + 4 + 1 + 2).
+- **Missing Images = exactly Oppo Reno 16f 5G and Tecno Go 3.** Both are ready for local gallery uploads; their Shopify candidates stay manual. The Oppo Handle can also be assigned with Choose Product.
+
+### 5. Tests / build
+- `scripts/bulkProductImagesReview.test.mjs` was rewritten with 15 tests covering items 1–15 of the brief, plus ZIP loading, object URLs, the environment label and Apply staying disabled.
+- `npm test` **490/490** · `tsc -b` clean · lint 0 errors (only the pre-existing `StorefrontApp.tsx` warning) · `build:prod` → only `nlxfwppywxumymbjkvwt` · `build:dev` → only `acwatgxkcyrdxpcljxjb`, hosting guard OK.
+
+### 6. Localhost
+- Port 4173 (DEV dist) shows "Development store connected", no console errors and no Supabase requests while signed out. The built `AdminApp-*.js` contains Missing Images, Use This Source Set, Review Images, Upload Images and Add and make primary.
+- **Not visually verified:** the signed-in `/admin/media`. It needs the Owner's DEV Admin sign-in, which was not available in this session. The behaviour is covered by the unit tests.
+
+### 7. Known limitations
+- Product-level gallery only: no variant or colour images.
+- Review state is in memory and is lost on reload.
+- Local `File` objects are not kept for the future Apply. Files must be re-selected once Apply exists, or Apply must hold them.
+- A Shopify set whose position-1 image URL is invalid is treated as invalid as a whole (Step 1 rule; the real export has 0 such sets).
+- Local filename grouping relies on the Step 1 stem rules. "Brand Model (1).jpg" and " - Copy" variants group together; "Brand Model-2.jpg" does not, by design (it could collide with real model numbers). Use Missing Images or Choose Product for those files.
+
+### 8. Exact next step
+1. The Owner signs in on localhost (DEV build) and visually checks `/admin/media`: the real ZIP, the gallery editor, a conflict choice, and Missing Images uploads for Tecno Go 3 / Oppo Reno 16f 5G.
+2. Safe DEV redeploy with Owner approval: `npm run build:dev` → `firebase deploy --only hosting --project development`.
+3. Only after separate approval: wire Apply for a **one-product DEV upload test**. It walks the `validation.plans[].inserts` order: `requestProductUploadSignature` → `uploadToCloudinary` (Shopify URL or File) → `productMediaPayload` → insert, plus `set_product_media_primary` where `makePrimaryAfterInsert`. Then flip `BULK_IMAGE_APPLY_ENABLED`.
+4. The PROD 82-product batch needs its own approval.
+
+---
+
+## 2026-10-09 (later) — Bulk Product Images Step 3: review UI (no uploads, no writes)
+
+### 1. Git state
+- Branch `feature/checkout-orders-shipping`, HEAD still **`9e793c3`**. Everything from today (Priority 1, Steps 1–3) is **uncommitted**. No commit / push / deploy. No DEV or PROD writes. No Cloudinary calls.
+- `dist/` now holds the last **DEV** build (`npm run build:dev`), not PROD.
+
+### 2. Priority A — DEV redeploy prep (re-verified, NOT deployed)
+- `npm run build:dev` → the only Supabase URL in the bundle is `https://acwatgxkcyrdxpcljxjb.supabase.co`. The PROD ref string `nlxfwppywxumymbjkvwt` appears once, only as the label constant in the shared environment map (`supabaseEnvironment.ts`), not as a connection URL. `GCLOUD_PROJECT=isolutions-development-cb1ea npm run check:hosting-env` → OK.
+- **The live DEV site is still the old PROD-wired bundle.** It must be redeployed with `npm run build:dev` → `firebase deploy --only hosting --project development` (Owner approval) **before any real DEV upload test**.
+
+### 3. Step 3 — what was built
+- `src/lib/bulkProductImagesReview.ts` (new, pure, no I/O): review state over the Step 1/2 modules. It does not duplicate matching or upload logic. It uses `matchImageSources` / `localImageSources` / `buildImageAssignmentPlan` (productImageMatching), `parseShopifyProductsCsv` / `shopifyImageSources` (shopifyProductCsv), `planPrimaryAssignment` (productMediaPayload), `validateSourceImage` (cloudinary) and `environmentForSupabaseUrl` (supabaseEnvironment). `BULK_IMAGE_APPLY_ENABLED = false`.
+- `src/admin/BulkProductImages.tsx` (new): the "Bulk Product Images" panel at the top of `/admin/media`, above the unchanged `MediaLibrary`. It is separate from `BulkImport.tsx`. `MediaManager.tsx` was not touched in Step 3.
+- `src/admin/AdminApp.tsx`: +2 lines (import + render on `/admin/media`). `src/admin/admin.css`: +90 lines of `.bulk-images-*` styles.
+- `scripts/bulkProductImagesReview.test.mjs` (new, 12 tests). `scripts/support/prodCatalogTitles.mjs` (new): the 82 PROD titles fixture, moved out of `bulkProductImages.test.mjs`, which now imports it. The tests themselves are unchanged.
+
+**Behaviour**
+- **Reference catalog:** read-only `products.select("id,title,slug,brand:brands(name),product_media(is_primary)")`, paged by 1000. It is the only database call in the panel. The badge shows **DEVELOPMENT / PRODUCTION / UNKNOWN** from the shared map. UNKNOWN blocks validation and Apply.
+- **Shopify CSV / ZIP:** accepts `.csv` or `.zip`. Inside a ZIP it finds the CSV whose header has Handle + Image Src. It rejects a ZIP with no Products CSV or with more than one, and caps files at 50 MB. Rows are grouped by Handle, the lowest Image Position is the primary candidate and duplicate URLs are ignored. Thumbnails load directly from the Shopify CDN with `?width=160`, `loading="lazy"` and `referrerPolicy="no-referrer"`; nothing is proxied or downloaded. The default filter is **Relevant**, which hides sources that touch no catalog product. The table shows 60 rows plus "Show more".
+- **Local Images:** multi-select of JPEG/PNG/WebP/AVIF (same types as MediaManager). The declared type and size are checked, then the magic bytes via `validateSourceImage`. Invalid files are rejected and get no preview. Valid files get object-URL previews, which are revoked on a new load, a source switch and unmount.
+- **Rows / statuses:** Matched (selected only if the product has no primary), Review (suggestion, not selected, **Confirm** / Change product), Multiple (not selected, one "Use <candidate>" button each + picker), Conflict (not selected, **Use this image** marks the other sources "Not used", or Not used), Unmatched (Choose product), Invalid, Not used (Restore).
+- **Manual picker:** search by title / brand / slug. Assigning a product recomputes conflicts live, so an assignment can create a conflict with an existing match.
+- **Existing image:** the row is skipped by default. It can only be used if the Owner ticks **"Add and make primary"**. Nothing is ever replaced or deleted.
+- **Validator** (selection summary: Selected products / Ready / Needs review / Conflicts / Existing images + blockers). It requires:
+  - a known environment and at least one selected row;
+  - exactly one target product per selected row and a valid source;
+  - Review / Multiple / Conflict rows explicitly resolved, and no duplicate targets;
+  - an explicit override for any product that already has a primary image.
+  
+  It then runs `buildImageAssignmentPlan` and shows the `planPrimaryAssignment` result per item.
+- **Apply Selected Images** is always `disabled`: "Not enabled until upload testing is approved." The panel and module contain no insert/update/delete/rpc/functions.invoke/fetch/Cloudinary code (test 15 checks this).
+
+### 4. Real Shopify coverage (`products_export_1 (3).zip` vs the 82 PROD titles fixture; test 17)
+- 1,850 CSV rows → 585 Shopify products. Rows: 53 matched · 22 review · 9 conflict (**4 products**) · 1 multiple · 489 unmatched · 11 invalid. **53 rows start selected.** Relevant view = 85 rows.
+- Catalog coverage: **53 Matched · 22 Review · 4 Conflict · 1 Multiple · 2 without a source (Oppo Reno 16f 5G, Tecno Go 3) = 80 / 82**. The 2 stay manual; matching rules were not loosened. The Owner can assign them through the picker if they decide the Shopify listing is the same model.
+- Test 17 reads the ZIP from `C:/Users/User/Downloads/products_export_1 (3).zip`, or from env `BULK_IMAGES_SHOPIFY_ZIP`. It is skipped, not failed, if the file is absent. The ZIP is not copied into the repo.
+- On localhost, the UI will show **DEV** catalog coverage, which differs from the 82-product PROD numbers.
+
+### 5. Tests / build
+- `npm test` **487/487 pass** (475 + 12 new) · `tsc -b` clean · `npm run lint` 0 errors (the only warning is the pre-existing `StorefrontApp.tsx` exhaustive-deps one) · `build:prod` OK (bundle only `nlxfwppywxumymbjkvwt`) · `build:dev` OK (bundle only `acwatgxkcyrdxpcljxjb`).
+
+### 6. Localhost UI result — partially verified
+- DEV build served at `localhost:4173` (`npm run preview`): the login page shows "Development store connected", there are no console errors, and the only requests are localhost GETs (no Supabase or Cloudinary writes). The built `AdminApp-*.js` contains the panel.
+- **Not yet verified in the browser:** the authenticated `/admin/media` panel (selecting the ZIP, counts, thumbnails, filters, picker). The Admin sign-in must be done by the Owner; it was not done this session. The panel logic is covered by the 12 unit tests.
+
+### 7. Known limitations
+- One primary image per product; no gallery or colour images yet.
+- The review state is in memory only and is lost on reload.
+- The full CSV is parsed in the browser (about 0.7 s for the real export in Node).
+- Shopify `?width=` thumbnails depend on the Shopify CDN.
+- The Shopify listing status (active/draft) is shown but does not affect matching.
+- An object-URL preview can be created for a file that is later shown as unmatched (it is still revoked on cleanup).
+
+### 8. Exact next step
+1. The Owner signs in on localhost (`npm run build:dev` + `npm run preview`, or `npm run dev`) and visually checks `/admin/media` with the real ZIP.
+2. With Owner approval: **safe DEV redeploy** — `npm run build:dev` → `firebase deploy --only hosting --project development` (the predeploy guard must pass).
+3. Only after separate Owner approval: wire Apply for a **one-image DEV upload test**. Per row: re-read media → `planPrimaryAssignment` → `requestProductUploadSignature` → `uploadToCloudinary` (Shopify URL or File) → `productMediaPayload` → insert (+ `set_product_media_primary` only for explicit make-primary). Then set `BULK_IMAGE_APPLY_ENABLED`.
+4. The PROD 82-product batch needs its own separate approval.
+
+---
+
+## 2026-10-09 — DEV/PROD build separation + Bulk Product Images Steps 1–2
+
+### 1. Git state
+- Branch `feature/checkout-orders-shipping`, HEAD still **`9e793c3`** (pushed). **All work below is uncommitted** — no commit/push/deploy, no DEV/PROD writes, no Cloudinary uploads were made today.
+- Modified: `CLAUDE_HANDOFF.md`, `firebase.json`, `package.json`, `tsconfig.node.json`, `vite.config.ts`, `src/lib/supabase.ts`, `src/lib/bulkCatalog.ts` (only `csvRows` exported), `src/admin/MediaManager.tsx`, `scripts/phase3a.test.mjs`, `scripts/bulkCatalog.test.mjs`.
+- New: `src/lib/supabaseEnvironment.ts`, `scripts/check-hosting-environment.mjs`, `scripts/environmentSeparation.test.mjs`, `src/lib/productImageMatching.ts`, `src/lib/shopifyProductCsv.ts`, `src/lib/productMediaPayload.ts`, `src/lib/productMediaUpload.ts`, `scripts/bulkProductImages.test.mjs`, `scripts/productMediaUpload.test.mjs`.
+
+### 2. Priority 1 — DEV/PROD environment separation (implemented + verified locally; NOT deployed)
+**Cause (verified):** plain `vite build` = mode `production`, which loads `.env.local` (DEV) and then `.env.production.local` (PROD, wins) → every build was PROD-wired. The Firebase active project for this directory is `isolutions-development-cb1ea`, so a bare `firebase deploy` put that PROD-wired build on DEV hosting. Also: a stale, git-ignored `vite.config.js` (Aug 19) shadows `vite.config.ts` in Vite's default lookup — scripts now pass `--config vite.config.ts` explicitly (the stale file was left in place; delete only with Owner approval).
+
+**Fix:**
+- `src/lib/supabaseEnvironment.ts` — single map (public ids only): development = Supabase `acwatgxkcyrdxpcljxjb` ↔ Firebase `isolutions-development-cb1ea`; production = Supabase `nlxfwppywxumymbjkvwt` ↔ Firebase `isolutions-pakistan-production`.
+- `vite.config.ts` build guard: throws unless mode is exactly `development`/`production` **and** the resolved `VITE_SUPABASE_URL` is that mode's project; a production build whose publishable key equals the development key also fails (mixed config).
+- `firebase.json` hosting `predeploy` runs `node scripts/check-hosting-environment.mjs`: scans `dist/assets/*.js` for `<ref>.supabase.co` and blocks the deploy unless exactly one ref is present and it matches the target Firebase project (`GCLOUD_PROJECT`).
+- `src/lib/supabase.ts` — Admin environment badge derived from the shared map; an unlisted project now shows **"Unknown"** (previously anything non-PROD showed "Development").
+
+**Exact build/deploy commands:**
+- DEV: `npm run build:dev` (= `tsc -b && vite build --config vite.config.ts --mode development`, uses `.env.local`) → `firebase deploy --only hosting --project development`
+- PROD: `npm run build:prod` (= `… --mode production`, uses `.env.production.local`) → `firebase deploy --only hosting --project production`
+- `npm run build` = `npm run build:prod`. Manual check: `GCLOUD_PROJECT=<firebase project id> npm run check:hosting-env`.
+
+**Verified locally:** `build:dev` bundle contains only `acwatgxkcyrdxpcljxjb`; `build:prod` only `nlxfwppywxumymbjkvwt`; DEV bundle has the same size as PROD (production-optimized); predeploy guard passes matching targets and BLOCKS DEV-build→PROD-hosting and PROD-build→DEV-hosting; DEV build with URL forced to PROD and an unsupported mode both fail; localhost `/admin/login` shows "Development store connected". `dist/` currently holds the last **PROD** build.
+
+**⚠ Still open:** the live DEV site (`isolutions-development-cb1ea.web.app`) still serves the old PROD-wired bundle until it is redeployed with `npm run build:dev` (needs Owner approval). Until then, DEV-hosted Admin = PROD data. Limitation: `sb_publishable_…` keys carry no project ref, so a DEV build cannot prove its key is DEV (the PROD build checks only that its key differs from DEV's).
+
+### 3. Bulk Product Images — architecture (read-only inspection, confirmed)
+- `product_media` (one-primary partial unique index, complete-Cloudinary-reference check, unique public/asset ids, admin-only RLS writes, public reads published only); `set_product_media_primary` / `reorder_product_media` RPCs; delete trigger promotes next image to primary; publication requires a valid primary Cloudinary image. Multiple images per product + colour assignments already supported. No bulk media code existed; no Shopify code existed.
+- PROD (read-only, `begin transaction read only … rollback`): 82 real draft products, all titled "Brand Model", **0 product_media rows**. PROD Edge Functions `cloudinary-upload-signature` + `cloudinary-delete-media` ACTIVE; PROD secret names include `CLOUDINARY_FOLDER_ROOT` (values not read).
+- **No migration and no Edge Function change are needed.** Cloudinary's upload API accepts an https URL as `file` (not part of the signature), so Shopify CDN images can be ingested through the existing signed upload — Cloudinary fetches them; the browser never downloads them. Shopify URLs are never hot-linked (publication needs a Cloudinary `public_id`).
+- Owner decisions: a product that already has a primary image is **skipped** unless the Owner explicitly chooses "add and make primary" (insert non-primary, then `set_product_media_primary`); old media is never deleted by the bulk flow. First version = one primary image per product; no variant/colour images.
+
+### 4. Step 1 — pure matching + Shopify CSV (done; no I/O)
+- `src/lib/productImageMatching.ts`: exact key = `catalogSlug` (case-insensitive; spaces/hyphens/underscores/dots equivalent; `+` = `plus`; copy markers "(1)" / " - Copy" stripped) → **Matched** (only these start selected, and only when the product has no primary). Review tier (both sides normalized; never auto-selected) strips bracketed specs, RAM/storage (`8/256`, `8GB/256GB`, `4+8GB`, `128GB` — a model's own `+` survives), 4G/5G, PTA/warranty/box/dual-SIM words, basic colours, family words Galaxy/Redmi/Poco, Samsung **`Z`** (only right after Samsung/Galaxy), and splits joined tokens (`2pro`→2 pro, `17tpro`→17t pro, `flip5`→flip 5). Statuses: matched / review / multiple / conflict (several sources → one product) / unmatched / invalid. Never prefix/fuzzy matching (X5c vs X5c+, Note 15 Pro vs Pro+, Phone 3A/3A Lite/3A Pro, A6/A6s, C100/C100i/x, Y05/Y05e stay apart). `buildImageAssignmentPlan` validates Owner choices (one image per product, invalid rows rejected, manual assignment of unmatched rows allowed, existing-primary products skipped unless explicit).
+- `src/lib/shopifyProductCsv.ts`: Shopify Products export → grouped by Handle (Title/Vendor from first row), primary = lowest Image Position, Variant Image ignored; image URL must be https Shopify CDN (`cdn.shopify.com` or a store domain `/cdn/shop/`) and JPEG/PNG/WebP/AVIF. Vendor used as brand only if it is a catalog brand; brand inferred from a family word is review-only.
+- `src/lib/productMediaPayload.ts`: Cloudinary response → `product_media` insert (same fields as MediaManager), rejects responses outside `…/products/<productId>/`, bad dimensions/format/URL, blank alt, binary data; `planPrimaryAssignment` implements the Owner-approved primary rule.
+- **Real Shopify export (Owner-confirmed file: `C:\Users\User\Downloads\products_export_1 (3).zip` — the other `products_export_1*.zip` files in Downloads are NOT to be used):** 1,850 CSV rows → 585 Shopify products, 574 with images, **574/574 valid URLs** (all `cdn.shopify.com`), Vendor = store name "iSolutionPakistan" on all (so title/handle drive matching). Read in memory only.
+- **Coverage of the 82 PROD products: 80/82 coverable** — **53 Matched** (safe, no action) · **22 Review** (Owner confirms: Honor X9D, Nothing Phone 2 Pro, Oppo Reno 15 Pro 5G, Samsung A07/A17/A27/A37/A56/A57, Samsung Flip 5/Flip 6/Fold 5/Fold 6/Fold 8 Ultra, Samsung S24 Ultra/S26/S26 Ultra, Xiaomi A5/A7 Pro/Note 14 Pro/Note 15/Note 15 Pro) · **4 Conflict** (Owner picks one Shopify product: Nothing Phone 3A Pro ← `nothing-phone-3a-pro` / `-1` / `-2`; Samsung S23 Ultra ← `samsung-s23-ultra` (active) / `samsung-s23-ultra-1` (draft); Tecno Spark 50 ← `tecno-spark-50` (draft) / `tecno-spark-51` (active); Realme 15 Pro 5G ← `realme-15-pro-5g` / `-1` (both draft)) · **1 Multiple** ("Honor X5C+", handle `honor-x5c` → title says X5c+, stale handle says X5c; correct pick is **X5c+** — Honor X5c is matched separately) · **2 none, kept manual/unmatched by Owner decision:** Oppo Reno 16f 5G (Shopify "Oppo 16f 5g"), Tecno Go 3 (Shopify "Tecno Spark GO 3" may be a different model).
+
+### 5. Step 2 — shared signed upload helper (done)
+- `src/lib/productMediaUpload.ts` (moved verbatim from MediaManager): `requestProductUploadSignature(client, productId)`, `cloudinaryUploadForm(source, data)` (only file/api_key/signature + signed folder/timestamp/transformation; `source` = File or https URL), `uploadToCloudinary(data, source, { onProgress, createRequest })`, `safeCloudinaryUploadError`. Client and request factory are injected (no import-time env; testable offline).
+- `MediaManager.tsx` now calls the helper; its validation, metadata (`is_primary: media.length === 0`, `sort_order: media.length`, filename alt text), binary guard, insert, replace (inherit primary → delete old asset via Edge Function), delete, make-primary, reorder and colour association are unchanged. Source-text assertions in `phase3a.test.mjs` / `bulkCatalog.test.mjs` were retargeted to the helper (same intent). Localhost smoke: Admin + MediaManager + helper load with no console errors; no real upload was run.
+
+### 6. Tests / build (2026-10-09)
+- `npm test` **475/475 pass** (442 at `9e793c3` + 7 environment + 19 bulk-image matching/Shopify/payload + 7 upload helper).
+- `tsc -b` clean · `npm run lint` 0 errors (only the pre-existing `StorefrontApp.tsx` exhaustive-deps warning) · `build:dev` / `build:prod` OK with the correct single Supabase ref each.
+
+### 7. Exact next step (tomorrow) — Step 3: Bulk Product Images UI (no uploads without approval)
+1. New `src/admin/BulkProductImages.tsx` panel at the top of `/admin/media` (keep it out of `BulkImport.tsx` — `bulkCatalog.test.mjs` forbids Cloudinary code there); render from `AdminApp.tsx` `/admin/media`; styles in `admin.css`.
+2. Read-only load of products (`id,title,brand,publication_status`) + existing `product_media` (primary flag) under Admin RLS.
+3. Two sources: multi-select local images, and Shopify Products CSV/ZIP (ZIP read in-browser with `jszip`, already a dependency).
+4. Review table: Image, Filename/Handle, Detected Brand, Detected Model, Matched Product (picker for review/multiple/conflict/unmatched), Status, Primary?, Action; counts (Files, Matched, Needs review, Unmatched, Invalid, Ready to upload) + search/filter.
+5. Upload only after an explicit confirm that shows the connected environment (DEVELOPMENT/PRODUCTION); per row: re-read media → `planPrimaryAssignment` → `requestProductUploadSignature` → `uploadToCloudinary` (file or Shopify URL) → `productMediaPayload` → insert (+ `set_product_media_primary` only for explicit make-primary). Result summary: uploaded / products updated / skipped / unmatched / failed + any uploaded-but-unsaved `public_id`s.
+6. Verify on localhost against DEV (matching/review only); a single-image DEV upload test only with Owner approval; PROD 82-product batch only with separate Owner approval and after DEV hosting is redeployed with `build:dev`.
+- Still pending before publishing PROD products: PTA Status and Condition on all 262 variants (still `unknown`); VgoTel/ZTE brands + V70 FE Activated (see 2026-10-07 §6).
+
+---
+
+## 2026-10-07 — Android PROD catalog import + permanent master-import workflow
+
+### 1. Git / branch / commit state
+- Branch `feature/checkout-orders-shipping`, HEAD **`9e793c3` feat: add validated master catalog import workflow**, pushed and in sync with `origin/feature/checkout-orders-shipping` (remote `origin` = GitHub `growthifyedge/isolutions-pakistan-website`). Working tree clean before this handover edit. `master` not updated.
+- Previous commits on the branch: `3dde556` navbar/trust ticker, `03e4eb3` checkout coupons, `ae4eaed` admin dashboard, `937b900` production Firebase alias.
+
+### 2. Bulk Import — permanent "Prepare Import Workbook" workflow (in `9e793c3`)
+Admin → Bulk Import now starts with **Prepare Import Workbook**:
+Upload Master Excel → Detect & Normalize → Review mapping / warnings → Generate Valid Workbook → self-validation with the importer's own parser → Download Ready XLSX / Preview Generated Import → **Apply separately** (Apply is still the first and only database write).
+- Rows go through the importer's own `catalogRowFromRecord` + `validateCatalogSheet`; the workbook is written by the Download Template builder (`buildCatalogWorkbook` via `buildCatalogImportWorkbook`); the exact bytes are read back with `readCatalogWorkbook` (`validateGeneratedCatalogWorkbook`). **Download/Preview stay disabled unless that self-validation passes** ("Validated with iSolutions importer"; on failure "Generated workbook failed internal validation" + parser errors).
+- Master headers matched by name (case/punctuation-insensitive): required Brand, Model (/Product Title), Price (/Price PKR/PKR Price); Stock (/Stock Qty/Qty/Quantity), Warranty, Category, PTA, Condition, BH, Cycle Count, SIM, Compare-at, Delivery optional. Source Date/Action/Product Type/SKU/Slug ignored and shown as such; unknown columns listed as ignored; two columns for one field = blocking error.
+- Blank stock → numeric default (input starts at **10**); explicit valid whole numbers kept (incl. 0); invalid text blocks the row.
+- Duplicate v2 variant identities (Brand+title, RAM, Storage, Color, PTA, Condition, Grade, BH, CC — not Warranty/Price/SIM/Stock) block **all** members; including only one member clears it.
+- Unknown brand → "Brand does not exist in target catalog: X"; category must exist and match Product Type; blocked rows start unchecked and Generate requires an explicit "Leave the N unchecked rows out" confirmation.
+- Models via project `canonicalModel` (A7pro → A7 Pro, V70FE → V70 FE, Note 15pro+ → Note 15 Pro+, Phone 3A lite → Phone 3A Lite …); brand casing from the catalog (Itel → itel). Extended RAM `N+M` → physical `N GB` with a visible Warning (`physicalRamFromExtended`); other forms blocked. (The exact-template Upload Excel reader still flags extended RAM as before.)
+- Action strategy: Create New Catalog / Replace Existing Catalog / Auto from target catalog (checked against existing product titles). SKU/Slug always blank (server assigns), PTA/Condition/BH/CC/SIM blank unless supplied, Mobile Phone → Karachi Only, Notes not exported.
+- Header shows the reference catalog the build is connected to: DEVELOPMENT / PRODUCTION (from `supabaseEnvironmentLabel`).
+- Master files written with namespace-prefixed OOXML (which ExcelJS cannot open — the cause of the earlier "could not be read as an .xlsx workbook" failures) are read via a read-only in-memory compatibility pass (`src/lib/xlsxCompatibility.ts`, `jszip`). The exact-template Upload Excel path is unchanged.
+- Files: `src/lib/catalogMasterImport.ts` (new), `src/lib/xlsxCompatibility.ts` (new), `src/admin/PrepareImportWorkbook.tsx` (new), `scripts/catalogMasterImport.test.mjs` (new), `src/lib/catalogWorkbook.ts`, `src/lib/catalogSheet.ts`, `src/admin/BulkImport.tsx`, `src/admin/admin.css`, `package.json` + `package-lock.json` (`jszip ^3.10.2` declared; it was already installed via ExcelJS).
+
+### 3. Test / build status (at `9e793c3`)
+- `npm test`: **442 / 442 pass** (428 previous + 14 new). The "6 pre-existing failing tests" note in Section 12 is superseded — baseline before this work was 428/428.
+- `tsc -b` clean; `npm run build` OK. Only known warnings: `lottie-web` direct `eval` (pre-existing, third-party), chunk-size (non-blocking), one `react-hooks/exhaustive-deps` lint warning in `StorefrontApp.tsx` (pre-existing).
+
+### 4. Deployment state (proved 2026-10-08 by reading the public sites, read-only)
+- **DEV hosting `isolutions-development-cb1ea.web.app`** serves `assets/index-N3NonMR3.js` = the local `dist/` build of `9e793c3` (local `dist/` built 2026-10-07 22:27, `.firebase/hosting.ZGlzdA.cache` written 22:28). Its Admin bundle contains Prepare Import Workbook.
+- **⚠ The DEV-hosted build is wired to the PRODUCTION Supabase project (`nlxfwppywxumymbjkvwt`), not DEV (`acwatgxkcyrdxpcljxjb`).** `vite build` uses `.env.production.local` (PROD) by default; `.env.local` (DEV) is only used by `npm run dev`. This is why the workflow showed "Reference catalog: PRODUCTION" and how the PROD import below was run. Anyone using the DEV site's Admin is currently working on **PROD data**. Decide/fix before the next DEV deploy (e.g. `vite build --mode development` with a DEV env file for DEV hosting) — do not assume DEV hosting = DEV database.
+- **PROD hosting `isolutions-pakistan-production.web.app`** still serves the older bundle `assets/index-DqKGUZ6X.js` (PROD-wired) **without** Prepare Import Workbook — no evidence of a PROD hosting deploy of `9e793c3`. No explicit PROD deploy command is recorded locally.
+- No Supabase migrations were added or applied in this work.
+
+### 5. Final PROD Android import result (Apply completed; verified read-only in PROD on 2026-10-08)
+- Owner-reported Apply result: products created **82**, replaced 0; variants created **262**, updated 0, hidden 0; assigned SKUs **MB001–MB262**; products missing images **82**.
+- Pre-Apply: workflow review Total 262 · Ready 261 · Warnings 1 · Blocked 0 · Included 262 rows / 82 products; generated workbook Rows 262 · Products 82 · Excluded 0 · File errors 0 · Rows needing review 0 · "Validated with iSolutions importer"; Preview Create 82 · Replace 0 · variants create 262 / update 0 / hide 0 · review 0.
+- PROD database now (read-only check): 82 real products, all **draft**, all in **Mobile Phones**; 262 active variants, SKUs MB001–MB262 only, `catalog_sku_mb_seq` last_value 262 (next MB263, MB999 ceiling); stock 10 on every variant; delivery `karachi_only` on all; PTA `unknown` and Condition `unknown` on all 262 (not supplied — not fabricated); warranty "1 Year" ×261, "Official Warranty" ×1; **0 product_media rows**; 0 orders.
+- Batch rules used: Action Create, Product Type Mobile Phone, Category Mobile Phones, Karachi Only, Stock 10, SKU blank (server-assigned), PTA/Condition/SIM blank, warranty from master.
+
+### 6. Excluded / deferred Android records (NOT in PROD yet — do not forget)
+- **VgoTel** (4 products / 8 rows: Onyx, New 16 Pro, New 17, Smart 9 Pro) and **ZTE** (4 products / 8 rows: A36, A56, V80 Max, V80 Pro) — brands missing from PROD (active PROD brands: Apple, Google, Honor, Infinix, itel, Motorola, Nothing, OnePlus, Oppo, Realme, Samsung, Tecno, Vivo, Xiaomi; DEV has them as `Vgotel` and `ZTE`). Import later, after the Owner adds the brands in PROD. ZTE A36 RAM correction: 4+8GB → **4 GB**.
+- **Vivo V70 FE 8/256 Silver Rs 110,000 "Activated" (activation date 25-Apr-2026)** — same v2 identity as the normal 8/256 Silver when PTA/Condition are blank; create later as a separate/special Admin product (Owner decides title and facts; DEV precedent "Vivo V70 FE 8/256 Silver Activated").
+- Imported normal V70 FE (product "Vivo V70 FE"): 8/256 Silver Rs 119,500 (MB259), 12/256 Blue Rs 137,000 (MB260), 12/256 Silver Rs 137,000 (MB261).
+- Realme Note 60x physical RAM used: 3+5GB → **3 GB**, 4+4GB → **4 GB**.
+- The original master `iSolutions_Android_Catalog_2026-09-14_final_v2.xlsx` and the PROD template were no longer in Downloads on 2026-10-07; a snapshot of the 279 master rows exists only in git-ignored `scratch/android-prod-upload/master-snapshot-279.json`. Tablets (5), keypad phones (22) and the held Tecno Spark 50 Pro row from that master were never part of this batch.
+
+### 7. Current catalog state
+- **PROD:** 82 draft Android Mobile Phone products / 262 variants, no images, PTA/Condition unresolved → nothing publishable yet.
+- **DEV:** still holds its earlier test/working catalog (≈116 products incl. the earlier Android list, Vivo V70 FE Activated/Non-Active test products) — keep it; no cleanup until the Owner starts that phase.
+
+### 8. Exact next task — Bulk Product Images
+Goal: a reusable Admin **bulk image assignment** workflow (not 82 manual one-by-one uploads).
+- Owner uploads many images / a folder / a ZIP; filenames identify Brand + Model (e.g. `Samsung-A07.jpg`, `Samsung-A17.jpg`, `Vivo-V70-FE.jpg`, `Nothing-Phone-3A-Pro.jpg`).
+- Match to existing products (reuse the importer's normalization: brand casing, `canonicalModel`, `catalogSlug`); statuses **Matched / Unmatched / Multiple matches – Review**; never auto-assign ambiguous matches; Owner reviews before upload.
+- Bulk upload to Cloudinary through the existing signed Edge Function path, then assign as **primary** product image; start with one primary image per product; colour/variant-specific images later.
+- **Before writing code, inspect:** `src/admin/MediaManager.tsx`, `src/admin/MediaLibrary.tsx`, `src/lib/cloudinary.ts`, the signed-upload Supabase Edge Function(s), `product_media` schema + primary-image rules/constraints (Phase 3B migrations, `202609100001_product_media_color_assignments.sql`), `validate_product_for_publication`, and any existing bulk-media code. Cloudinary secrets stay in Edge Function secrets only; no binaries in Postgres/Git/Hosting.
+- Resolve the DEV-hosting-points-at-PROD issue (Section 4 above) before any further DEV deploy.
+- Publishing will additionally need PTA Status and Condition set on every active variant (currently `unknown`) — images alone will not make these products publishable.
+
+### 8b. Bulk Product Images — DEV bulk uploader (implemented 2026-10-10, UNCOMMITTED, bulk run NOT yet performed)
+- **Verified earlier:** the one-product DEV upload test passed end-to-end for **Motorola Moto Edge Fusion** (Cloudinary upload, 2 `product_media` rows = 1 Primary + 1 gallery, sort_order, URLs, read-back, no duplicates). That product now has **2 DEV media rows** and is an existing-media product (default mode "Skip", excluded from Select all eligible, blocked if included).
+- **Replaced:** the temporary one-product test (`devImageUploadTest.ts`, its panel and test file) is gone. New: `src/lib/devBulkImageUpload.ts` (guard, plan, runner, verification) + `scripts/devBulkImageUpload.test.mjs`. The disabled "Apply Selected Images" button is removed; there is NO production upload option.
+- **Owner flow:** Load Shopify ZIP/CSV → review/resolve (Confirm Match, Use This Source Set, Choose Product) → add local images in Missing Images → **Select all eligible** (or Deselect all / Keep only this set) → check Selection Summary → **Upload Selected Images to DEV** → confirm dialog → progress → result. Review controls are locked (`<fieldset disabled>`) during a run; a latch prevents double submit.
+- **Eligibility:** DEV Supabase `acwatgxkcyrdxpcljxjb` exactly (PROD/unknown/lookalike blocked, re-checked inside the runner per product); ≥1 included set; each included set Matched/Confirmed with one confirmed product, no unresolved Review/Multiple/Conflict/Invalid, ≥1 valid selected image with a valid source, one Primary unless the product already has one; existing-primary products need an explicit "Add images" or "Add and make primary". One concise blocking reason is shown.
+- **Execution:** product by product. Before each product: environment re-check and a fresh `product_media` read; if count/primary differ from the review → blocked with "Media changed since review — re-review required" and nothing is written. Per image: signature → Cloudinary (Shopify https URL or File) → payload validation → `product_media` insert (`variant_id` null). "Add and make primary" inserts as gallery, then calls the existing `set_product_media_primary` RPC (old primary stays as gallery). Never deletes/replaces media, never publishes, no price/variant/inventory writes.
+- **Failures:** a failing product stops only itself (Failed if nothing saved, Partial if some rows saved or an orphan exists); the batch continues. Orphaned Cloudinary `public_id`s are listed and never auto-deleted. Final summary: attempted/verified/failed/partial/saved-not-verified/blocked, images uploaded/failed, orphans. "DEV upload verified" only if every product verified.
+- **Verification per product:** row count = before + inserted; existing rows kept; inserted rows exist; exactly one primary (new Primary, or the old one for Add Images); sort_order; https secure_url; no duplicate ids/public_ids; old primary demoted-not-deleted for make-primary. Status Verified only after read-back passes.
+- **After a run:** verified sets are un-included and the DEV catalog is re-read, so freshly uploaded products are recognised as existing-media.
+- **Validation:** `npm test` 509/509, `tsc -b` clean, lint 0 errors (1 pre-existing StorefrontApp warning), `build:dev` (only DEV ref) and `build:prod` (only PROD ref) OK; `dist/` holds the DEV build. Localhost: module loads, no new code errors; Admin needs a login so the signed-in UI was not exercised by Claude.
+- **Limitations:** no automatic duplicate merging; a changed product is blocked, not auto-reconciled; orphaned assets need manual cleanup; PROD upload is intentionally not built.
+- **Next Owner action:** on localhost sign in → Admin → Media → Bulk Product Images, load the ZIP, resolve what you want, Select all eligible, read the Selection Summary and "Ready: N images for M products", click Upload Selected Images to DEV and send me the result. No commit/push/deploy yet.
+
+### 9. Safety / business rules needed tomorrow
+- Mobile Phone SKU prefix **MB**; SKUs assigned server-side only, immutable, never reused (per-prefix sequences, max 999).
+- One Products row = one variant; product identity = Brand + title (case-insensitive); Replace Existing hides (never deletes) active variants absent from the file.
+- Server import limits: 500 products / 5,000 variants per import. New products import as **draft**; images not required for import.
+- Publication requires an active real category, active variant(s) with price > 0, delivery scope, PTA ≠ unknown, Condition ≠ unknown, a warranty, and a valid primary Cloudinary image.
+- Mobile Phones are Karachi Only; Android (non-Apple) phones default to "1 Year" warranty unless an explicit warranty is supplied (explicit values such as "Official Warranty" are never overwritten).
+- Never fabricate PTA / Condition / SIM. Read-only PROD checks: `npx supabase db query --linked --project-ref nlxfwppywxumymbjkvwt -f <file>.sql` with `begin transaction read only; … rollback;` (local link stays on DEV). No DEV/PROD writes, imports, migrations, deploys, commits or pushes without explicit Owner approval.
+
+---
 
 > **Note on how this project gets shipped:** Git commit state and database/hosting deployment state are independent. This project's workflow applies Supabase migrations by pasting them into the live Supabase SQL Editor, and deploys Firebase Hosting via the Firebase CLI — both can happen without a Git commit existing for the change. Do not infer live deployment/migration status from `git log`/`git status` alone; verify the live systems directly (see Section 3).
 
@@ -37,7 +529,7 @@
   - Real test order **ISP-ORD-000003** (see Section 13) stored `delivery_fee_minor = 20000`, `shipping_surcharge_minor = 0`, `total_minor = 719900`.
 - **Firebase development hosting was redeployed with the delivery-fee frontend** (build of commit `2e42146`, bundle `index-Dq8R6hFB.js`) and verified on the hosted site: Rs 9,999 Standard Rs 200 / Fast Rs 400, Rs 10,000 Standard FREE / Fast Rs 200, no "To be confirmed" text anywhere in the served bundle.
 - **The Bulk Upload v2 commits (`2ec8f00`, `32a34cd`, `d8a7859`) are NOT deployed.** They only change Admin Bulk Import; the storefront bundle is unaffected. Deploy only when explicitly asked.
-- Git: all work is committed locally on branch `feature/checkout-orders-shipping` — checkout/orders/shipping (`ce92dd9`, `15c8e17`, `4534fa8`, `6aec780`, `2e42146`) and Bulk Upload v2 (`2ec8f00`, `32a34cd`, `d8a7859`, plus the handoff update commit). `master` is untouched at `885059e`. **No Git remote is configured**, so nothing has been pushed.
+- Git: all work is committed locally on branch `feature/checkout-orders-shipping` — checkout/orders/shipping (`ce92dd9`, `15c8e17`, `4534fa8`, `6aec780`, `2e42146`) and Bulk Upload v2 (`2ec8f00`, `32a34cd`, `d8a7859`, plus the handoff update commit). `master` is untouched at `885059e`. **No Git remote is configured**, so nothing has been pushed. *(Superseded 2026-10-07: remote `origin` now exists and the branch is pushed up to `9e793c3` — see the top section.)*
 - Earlier history: `202609220003_checkout_shipping_methods.sql` (Standard/Fast shipping methods, 11-arg RPC) was applied live earlier and the Firebase dev site was redeployed with that build (user-confirmed "Deployed all good"). Its original below-threshold fee handling is superseded by `202609230001`.
 
 ## 4. Locked Business Rules
@@ -166,7 +658,7 @@ Applied to live Supabase (do not edit retroactively):
 - `react-hooks/exhaustive-deps` warning in `src/StorefrontApp.tsx` (~line 2924 at last check) for a `useEffect` missing `collection.*` dependencies — pre-existing, not introduced by recent work
 - `lottie-web` direct-`eval` warnings during `vite build` (from the `lottie-web` package itself, not project code)
 - "Some chunks are larger than 500 kB after minification" build warning (pre-existing, not addressed — would need code-splitting if ever tackled). `exceljs.min` (~930 kB) is its own lazily loaded Admin-only chunk.
-- `npm test`: **6 pre-existing failing tests** (source-text assertions that drifted from earlier committed code, e.g. they expect `persistChangedVariantPrices` but the code is `persistChangedVariantPricing`): `batchDefaultsReadiness` "inventory default 10 does not regress"; `bulkInventoryAutomation` "new variant with omitted inventory…" and "Bulk Preview renders default…"; `phase4` "storefront does not import the fictional mock catalog", "variants remain explicit rows…", "variant create, save, reload…". They fail identically on a clean checkout without the Bulk Upload v2 work. Not fixed yet — review each (stale vs real regression) before changing.
+- *(Superseded 2026-10-07: the full suite is 442/442 passing at `9e793c3`.)* `npm test`: **6 pre-existing failing tests** (source-text assertions that drifted from earlier committed code, e.g. they expect `persistChangedVariantPrices` but the code is `persistChangedVariantPricing`): `batchDefaultsReadiness` "inventory default 10 does not regress"; `bulkInventoryAutomation` "new variant with omitted inventory…" and "Bulk Preview renders default…"; `phase4` "storefront does not import the fictional mock catalog", "variants remain explicit rows…", "variant create, save, reload…". They fail identically on a clean checkout without the Bulk Upload v2 work. Not fixed yet — review each (stale vs real regression) before changing.
 - `npm audit`: moderate `uuid` advisory (GHSA-w5hq-g745-h8pq) via `exceljs` 4.4.0. It affects uuid v3/v5/v6 with a buffer argument; ExcelJS only calls `uuid` v4 without a buffer, so it is not reachable. Do not run `npm audit fix` (it downgrades ExcelJS to 3.4.0).
 
 ## 13. Latest Validation
@@ -216,7 +708,9 @@ Applied to live Supabase (do not edit retroactively):
 - Keep changes minimal and targeted to the specific request; don't touch the locked areas in Section 11 without explicit instruction.
 - Run `npm run lint` and `npm run build` after any meaningful code change.
 
-## 16. Bulk Upload v2 (Admin Bulk Import) — current state
+## 16. Bulk Upload v2 (Admin Bulk Import) — state as of 2026-09-24 (historical)
+
+> *Superseded 2026-10-07:* categories were finalized (Mobile Phones / Accessories / Gadgets > Laptops, Tablets), Phase 2 shipped (`apply_catalog_bulk_import_v2`, server-assigned MB/AC/GD/MC/IP SKUs, used-phone facts, SIM Configuration, Replace Existing hide/reactivate), Excel Apply is enabled, the Prepare Import Workbook flow was added, and the first PROD Android import is done. The SKU format below (`APPLE-IPHONE-…`) and the "Next steps" list are obsolete. See the top section for current state.
 
 ### Locked workflow
 Rough Data → Normalize → Generate fixed Excel → Owner review/edit → Upload Excel → Preview → Create / Replace Existing → Import → Upload Images → Publish
