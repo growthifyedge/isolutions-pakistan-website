@@ -43,6 +43,7 @@ import { MediaLibrary } from "./MediaLibrary";
 import { BulkProductImages } from "./BulkProductImages";
 import { BulkImport } from "./BulkImport";
 import { AndroidCommercialDefaults } from "./AndroidCommercialDefaults";
+import { AndroidBulkPublish } from "./AndroidBulkPublish";
 import { CatalogReadiness } from "./CatalogReadiness";
 import { ContactEnquiries } from "./ContactEnquiries";
 import { BundleManager } from "./BundleManager";
@@ -626,6 +627,7 @@ export function AdminApp() {
       <AdminLayout section="Bulk Import">
         <BulkImport />
         <AndroidCommercialDefaults />
+        <AndroidBulkPublish />
       </AdminLayout>
     );
   else if (path === "/admin/catalog-readiness")
