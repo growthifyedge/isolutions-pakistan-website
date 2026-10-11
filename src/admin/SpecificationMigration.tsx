@@ -9,7 +9,9 @@ import {
   emptyReview,
   parseShopifyReview,
   readShopifyExport,
+  restoreSet,
   reviewSetStates,
+  skipSet,
   type BulkImageCatalogProduct,
   type BulkImageReview,
 } from "../lib/bulkProductImagesReview";
@@ -191,7 +193,23 @@ export function SpecificationMigration() {
   const conflictGroups = useMemo(() => (matchReview ? buildConflictGroups(matchReview, products, descriptions) : []), [matchReview, products, descriptions]);
   const multiples = useMemo(() => (matchReview && states ? matchReview.sets.filter((set) => states.get(set.setId)?.status === "multiple") : []), [matchReview, states]);
 
-  const summary = specReview ? reviewSummary(specReview, products.length, usable.size) : null;
+  const skippedSources = useMemo(() => (matchReview && states ? matchReview.sets.filter((set) => states.get(set.setId)?.status === "skipped" && Boolean(set.handle)) : []), [matchReview, states]);
+  const summary = specReview ? reviewSummary(specReview, products.length, usable.size, skippedSources.length) : null;
+  const unresolvedSources = unresolved.length + multiples.length;
+
+  /** Bulk approval depends only on the proposals themselves — never on whether other sources are still unresolved. */
+  function approveHigh() {
+    if (!specReview) return;
+    const next = approveAllHighConfidence(specReview);
+    const gained = next.proposals.filter((proposal) => proposal.status === "approved").length - specReview.proposals.filter((proposal) => proposal.status === "approved").length;
+    const after = reviewSummary(next, products.length, usable.size, skippedSources.length);
+    setSpecReview(next);
+    setNotice(
+      gained > 0
+        ? `Approved ${gained} high-confidence specification${gained === 1 ? "" : "s"}. ${after.reviewRemaining} Review and ${after.conflictRemaining} Conflict row${after.conflictRemaining === 1 ? "" : "s"} stay manual.${unresolvedSources + skippedSources.length ? ` ${unresolvedSources + skippedSources.length} unresolved/skipped source(s) contribute no rows.` : ""}`
+        : "No high-confidence specification was waiting for approval (all eligible rows are already approved, rejected or need a decision).",
+    );
+  }
   const productTitles = useMemo(() => new Map(products.map((product) => [product.id, product.title])), [products]);
 
   const rows = useMemo(() => {
@@ -326,13 +344,15 @@ export function SpecificationMigration() {
                 ["Products targeted", summary.targetedProducts],
                 ["Safely matched source", summary.safelyMatchedProducts],
                 ["Need source review", summary.needingSourceReview],
+                ["Skipped / unresolved sources", summary.skippedSources + unresolvedSources],
                 ["With proposals", summary.productsWithProposals],
                 ["No extractable specs", summary.productsWithNoSpecs],
                 ["High confidence", summary.high],
-                ["Review", summary.review],
-                ["Conflicts", summary.conflicts],
-                ["Approved", summary.approved],
+                ["Approved specs", summary.approved],
+                ["Review specs remaining", summary.reviewRemaining],
+                ["Conflict specs remaining", summary.conflictRemaining],
                 ["Rejected", summary.rejected],
+                ["Products with no approved specs", summary.productsWithNoApproved],
               ] as const
             ).map(([label, value]) => (
               <article key={label}>
@@ -403,12 +423,18 @@ export function SpecificationMigration() {
                   Confirm all review suggestions
                 </button>
               </div>
+              <p className="spec-skip-note">
+                {unresolvedSources} source{unresolvedSources === 1 ? "" : "s"} unresolved — {unresolvedSources === 1 ? "it" : "they"} will be skipped. Safe specifications for resolved products can still be approved.
+              </p>
               <ul>
                 {unresolved.slice(0, 40).map(({ set, state }) => (
                   <li key={set.setId}>
                     {state.status === "review" ? "Review" : "Conflict"}: <code>{set.handle}</code> → {productTitles.get(state.targetId!)}{" "}
                     <button type="button" onClick={() => resolveSource((current) => (state.status === "review" ? confirmMatch(current, set.setId, products) : chooseSourceSet(current, set.setId, products)))}>
                       {state.status === "review" ? "Confirm match" : "Use this source"}
+                    </button>{" "}
+                    <button type="button" onClick={() => resolveSource((current) => skipSet(current, set.setId))}>
+                      Leave unresolved
                     </button>
                   </li>
                 ))}
@@ -419,7 +445,26 @@ export function SpecificationMigration() {
                       <button key={id} type="button" onClick={() => resolveSource((current) => assignProduct(current, set.setId, id, products))}>
                         Use {productTitles.get(id) ?? "product"}
                       </button>
-                    ))}
+                    ))}{" "}
+                    <button type="button" onClick={() => resolveSource((current) => skipSet(current, set.setId))}>
+                      Leave unresolved (skip source)
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {skippedSources.length > 0 && (
+            <div className="bulk-images-devreport" aria-label="Skipped sources">
+              <strong>Skipped sources ({skippedSources.length}) — mapped to no product, no specification from them can be approved or exported</strong>
+              <ul>
+                {skippedSources.map((set) => (
+                  <li key={set.setId}>
+                    <code>{set.handle}</code> ({set.title}){" "}
+                    <button type="button" onClick={() => resolveSource((current) => restoreSet(current, set.setId))}>
+                      Restore to the decision list
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -427,8 +472,8 @@ export function SpecificationMigration() {
           )}
 
           <div className="bulk-images-bulk" role="group" aria-label="Bulk approval">
-            <button type="button" className="admin-secondary" disabled={!specReview.proposals.some((proposal) => proposal.confidence === "High" && proposal.status === "proposed")} onClick={() => update((current) => approveAllHighConfidence(current))}>
-              Approve all high-confidence specs
+            <button type="button" className="admin-secondary" disabled={specReview.proposals.length === 0} onClick={approveHigh}>
+              Approve all high-confidence specs ({summary.highAwaitingApproval} waiting)
             </button>
             <button type="button" className="admin-secondary" disabled={exported.rows.length === 0 || exported.errors.length > 0} onClick={() => void exportApproved()}>
               Export approved Specifications workbook ({exported.rows.length} rows)

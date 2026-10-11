@@ -101,7 +101,7 @@ export function approveAllHighConfidence(review: SpecReview, productId?: string)
   return next;
 }
 
-export function reviewSummary(review: SpecReview, targetedProducts: number, safelyMatchedProducts: number) {
+export function reviewSummary(review: SpecReview, targetedProducts: number, safelyMatchedProducts: number, skippedSources = 0) {
   const rows = review.proposals;
   const count = (predicate: (proposal: SpecProposal) => boolean) => rows.filter(predicate).length;
   const productsWithProposals = new Set(rows.map((proposal) => proposal.productId));
@@ -119,6 +119,16 @@ export function reviewSummary(review: SpecReview, targetedProducts: number, safe
     rejected: count((proposal) => proposal.status === "rejected"),
     productsWithApproved: new Set(approved.map((proposal) => proposal.productId)).size,
     unresolvedReview: count((proposal) => proposal.confidence === "Review" && proposal.status === "proposed"),
+    /** Review-confidence rows still waiting for an Owner decision. */
+    reviewRemaining: count((proposal) => proposal.confidence === "Review" && proposal.status === "proposed"),
+    /** Conflicting spec rows with no value chosen yet. */
+    conflictRemaining: count((proposal) => proposal.status === "conflict"),
+    /** Sources the Owner explicitly left unresolved: excluded from extraction, never approved or exported. */
+    skippedSources,
+    /** Targeted products that would receive no specification row from the current approvals. */
+    productsWithNoApproved: targetedProducts - new Set(approved.map((proposal) => proposal.productId)).size,
+    /** High-confidence rows still waiting for approval (what the bulk action would approve). */
+    highAwaitingApproval: count((proposal) => proposal.confidence === "High" && proposal.status === "proposed" && proposal.alternatives.length === 0),
   };
 }
 
