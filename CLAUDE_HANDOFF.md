@@ -6,6 +6,21 @@
 
 ---
 
+## 2026-10-11 (newest) — "Leave unresolved" source action + clearer bulk approval in the Specification Migration tool (uncommitted)
+
+> Local review state only. **No DB write (DEV/PROD), no specification insert, no media change, no publish, no deploy, no commit, no push.** Extraction rules are unchanged.
+
+- **Situation:** 82 targeted, 79 safely matched sources, 3 need review, 1 Multiple source left (`honor-x5c`, a combined Honor X5c 4/64 + Honor X5c+ 4/128 listing — it must not be force-matched to either product).
+- **Root cause:** none found in the logic. Bulk approval (`approveAllHighConfidence`) never depended on other sources: on the real export with the same state (79 sources, Honor Multiple unresolved) the button was enabled and approved every High row, both in code and in a browser run of the real export. The button is only disabled when no High row is still waiting (e.g. all already approved), which looked like a dead button, and nothing on screen said what an unresolved source does.
+- **Added:** `Leave unresolved` on Review/Conflict list entries and `Leave unresolved (skip source)` on Multiple entries (existing `skipSet`): the source is mapped to no product, excluded from extraction, can contribute no approvable/exportable row; a "Skipped sources" panel lists them with `Restore to the decision list`. The unresolved panel now says "N source(s) unresolved — it will be skipped. Safe specifications for resolved products can still be approved."
+- **Bulk approval:** `Approve all high-confidence specs (N waiting)` is enabled whenever proposals exist, is independent of any source decision, approves only High / non-Conflict / non-Review / non-rejected rows with a unique Section + Name from Matched or Owner-Confirmed sources, and now reports what happened ("Approved N … X Review and Y Conflict rows stay manual … Z unresolved/skipped source(s) contribute no rows").
+- **Summary cards:** Skipped / unresolved sources · Approved specs · Review specs remaining · Conflict specs remaining · Products with no approved specs (plus the existing ones). `reviewSummary` gained `reviewRemaining`, `conflictRemaining`, `skippedSources`, `productsWithNoApproved`, `highAwaitingApproval`.
+- **Real export check (Honor X5c skipped, conflicts resolved with the first source of each):** 79 safe sources → 901 High approved, 46 Review and 10 Conflict remain, 76 products with approved specs, 6 without (Honor X5c, Honor X5c+, Xiaomi Redmi 15, Honor X5c and the products with no usable source); zero rows for `honor-x5c`. With the Owner's live conflict choices the High total is 917.
+- **Checks:** `npm test` **608 / 608** · `tsc -b` clean · lint 0 errors (1 pre-existing warning) · `build:dev` and `build:prod` OK (`dist/` = DEV). New file `scripts/specificationSkipSource.test.mjs` (6 tests incl. a real-export test).
+- **Exact next Owner click:** (after this is committed and deployed) in the migration tool click `Leave unresolved (skip source)` on `honor-x5c`, then `Approve all high-confidence specs`; the Honor X5c / X5c+ specifications must be added by hand later.
+
+---
+
 ## 2026-10-11 (newest) — Source-conflict comparator added to the Legacy Shopify Specification Migration tool (uncommitted)
 
 > Local review state only. **No DB write (DEV/PROD), no specification insert, no media change, no publish, no deploy, no commit, no push.** Extraction rules are unchanged.
