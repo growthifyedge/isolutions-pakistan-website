@@ -134,7 +134,7 @@ test("the review tool writes nothing: no database, spec insert, media or apply",
   assert.match(ui, /Conflict specs untouched/);
   assert.match(ui, /Wrong \/ speculative \/ ambiguous rows skipped/);
   assert.match(ui, /Manual: \$\{/);
-  assert.match(ui, /disabled title="Not enabled/, "Apply approved specifications stays disabled");
+  assert.match(ui, /disabled=\{Boolean\(applyBlocker\)/, "Apply approved specifications is gated by the preview / environment blocker");
 });
 
 // ---------------- Real export ----------------

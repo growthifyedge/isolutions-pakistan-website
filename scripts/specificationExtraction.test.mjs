@@ -325,7 +325,7 @@ test("23-24. the review/extraction libraries and the tool make zero database, me
   assert.doesNotMatch(ui, /\.insert\(|\.update\(|\.upsert\(|\.delete\(|\.rpc\(|functions\.invoke|cloudinary|product_media|product_variants/i);
   assert.match(ui, /Legacy Shopify Specification Migration/);
   assert.match(ui, /one-time migration/i);
-  assert.match(ui, /disabled[\s\S]{0,120}Apply approved specifications|Apply approved specifications[\s\S]{0,200}disabled/);
+  assert.match(ui, /disabled=\{Boolean\(applyBlocker\)[\s\S]{0,300}Apply approved specifications/);
   assert.equal((ui.match(/\.from\(/g) ?? []).length, 1, "the only direct read is product_specifications (products come from the shared read-only loader)");
   const app = await readFile("src/admin/AdminApp.tsx", "utf8");
   assert.match(app, /<SpecificationMigration \/>/);

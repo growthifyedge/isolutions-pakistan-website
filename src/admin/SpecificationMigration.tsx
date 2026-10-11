@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { csvRows } from "../lib/bulkCatalog";
 import {
@@ -16,6 +16,23 @@ import {
   type BulkImageReview,
 } from "../lib/bulkProductImagesReview";
 import { commercialWriteTarget, selectAndroidBatch } from "../lib/commercialDefaults";
+import { createSubmitLatch } from "../lib/bulkImageUpload";
+import { installUnloadGuard } from "../lib/unloadGuard";
+import {
+  approvedFingerprint,
+  planSpecificationApply,
+  runSpecificationApply,
+  selectApprovedRows,
+  specApplyBlocker,
+  specApplyConfirmationPhrase,
+  specApplyConfirmationSatisfied,
+  specApplyWriteCount,
+  type CatalogSpecProduct,
+  type SpecApplyProgress,
+  type SpecApplyRunResult,
+  type SpecificationApplyPlan,
+} from "../lib/specificationApply";
+import { loadExistingSpecs, loadSpecificationCatalog, specificationApplyDbDeps } from "../lib/specificationApplyDb";
 import { loadPublishProducts } from "../lib/bulkPublishDb";
 import { buildConflictGroups } from "../lib/specificationSourceConflicts";
 import { approveSafeReviewSpecs, classifyReviewProposal, sourceTextOf, type ReviewBlockCategory, type ReviewVerdict } from "../lib/specificationReviewSafety";
@@ -73,6 +90,15 @@ export function SpecificationMigration() {
   const [notice, setNotice] = useState("");
   const [limit, setLimit] = useState(80);
   const [resolved, setResolved] = useState<Record<string, string>>({});
+  const [applyPreview, setApplyPreview] = useState<{ plan: SpecificationApplyPlan; catalog: CatalogSpecProduct[]; excluded: ReturnType<typeof selectApprovedRows>["excluded"] } | null>(null);
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyError, setApplyError] = useState("");
+  const [applyConfirming, setApplyConfirming] = useState(false);
+  const [applyTyped, setApplyTyped] = useState("");
+  const [applyRunning, setApplyRunning] = useState(false);
+  const [applyProgress, setApplyProgress] = useState<SpecApplyProgress | null>(null);
+  const [applyResult, setApplyResult] = useState<SpecApplyRunResult | null>(null);
+  const applyLatch = useRef(createSubmitLatch());
   const [safeResult, setSafeResult] = useState<{ approved: number; remaining: number; conflicts: number; categories: Record<string, number> } | null>(null);
 
   // Read-only: the 82 batch products and how many specification rows this environment already has for them.
@@ -235,6 +261,59 @@ export function SpecificationMigration() {
         : "No high-confidence specification was waiting for approval (all eligible rows are already approved, rejected or need a decision).",
     );
   }
+  // The ONLY rows the apply may consider: status Approved, from the source currently chosen for the product.
+  const applySelection = useMemo(() => (specReview ? selectApprovedRows(specReview, usable) : null), [specReview, usable]);
+  const currentFingerprint = useMemo(() => approvedFingerprint(applySelection?.rows ?? []), [applySelection]);
+  const applyBlocker = specApplyBlocker({ environment: target.environment, allowed: target.allowed, plan: applyPreview?.plan ?? null, currentFingerprint });
+
+  useEffect(() => {
+    if (!applyRunning) return undefined;
+    return installUnloadGuard(window);
+  }, [applyRunning]);
+
+  /** Read-only: no database write happens here. */
+  async function previewApply() {
+    if (!supabase || !applySelection) return;
+    const client = supabase;
+    setApplyBusy(true);
+    setApplyError("");
+    setApplyResult(null);
+    setApplyPreview(null);
+    try {
+      const { catalog, batchIds } = await loadSpecificationCatalog(client);
+      const existingSpecs = await loadExistingSpecs(client, [...new Set(applySelection.rows.map((row) => row.productId))]);
+      setApplyPreview({ plan: planSpecificationApply(applySelection.rows, catalog, existingSpecs, batchIds), catalog, excluded: applySelection.excluded });
+    } catch (caught) {
+      setApplyError(caught instanceof Error ? caught.message : "Preview failed.");
+    } finally {
+      setApplyBusy(false);
+    }
+  }
+
+  async function applySpecifications() {
+    if (!applyPreview || !supabase || applyBlocker || !specApplyConfirmationSatisfied(target.environment, applyTyped, specApplyWriteCount(applyPreview.plan)) || !applyLatch.current.tryAcquire()) return;
+    const client = supabase;
+    setApplyConfirming(false);
+    setApplyRunning(true);
+    setApplyResult(null);
+    setApplyError("");
+    try {
+      setApplyResult(
+        await runSpecificationApply(applyPreview.plan, {
+          supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
+          buildMode: BUILD_MODE,
+          catalog: applyPreview.catalog,
+          ...specificationApplyDbDeps(client),
+          onProgress: setApplyProgress,
+        }),
+      );
+    } finally {
+      setApplyRunning(false);
+      setApplyProgress(null);
+      applyLatch.current.release();
+    }
+  }
+
   const productTitles = useMemo(() => new Map(products.map((product) => [product.id, product.title])), [products]);
 
   const rows = useMemo(() => {
@@ -511,11 +590,94 @@ export function SpecificationMigration() {
             <button type="button" className="admin-secondary" disabled={exported.rows.length === 0 || exported.errors.length > 0} onClick={() => void exportApproved()}>
               Export approved Specifications workbook ({exported.rows.length} rows)
             </button>
-            <button type="button" className="admin-primary" disabled title="Not enabled: the actual specification import needs a separate Owner approval.">
+            <button type="button" className="admin-secondary" disabled={!supabase || applyBusy || applyRunning || (applySelection?.rows.length ?? 0) === 0} onClick={() => void previewApply()}>
+              {applyBusy ? "Checking…" : `Preview approved specification apply (${applySelection?.rows.length ?? 0})`}
+            </button>
+            <button type="button" className="admin-primary" disabled={Boolean(applyBlocker) || applyRunning} title={applyBlocker ?? undefined} onClick={() => { setApplyTyped(""); setApplyConfirming(true); }}>
               Apply approved specifications
             </button>
-            <small>Review state only. Approving and exporting never writes to the catalog; applying is disabled in this tool.</small>
+            <small>Approving and exporting never write to the catalog. The preview is read-only; Apply writes only product_specifications, only in PRODUCTION, only after you confirm.</small>
           </div>
+          {applyError && <p className="bulk-images-error" role="alert">{applyError}</p>}
+          {applyBlocker && applyPreview && <p className="bulk-images-note" role="status">Apply unavailable: {applyBlocker}</p>}
+          {applyPreview && (
+            <div className="bulk-images-devreport" aria-label="Specification apply preview">
+              <strong>Preview — nothing written{applyPreview.plan.fingerprint !== currentFingerprint ? " · STALE: the review state changed since this preview" : ""}</strong>
+              <div className="bulk-images-cards">
+                {(
+                  [
+                    ["Approved specs ready", applyPreview.plan.totals.approvedRows],
+                    ["Products affected", applyPreview.plan.totals.productsAffected],
+                    ["Create", applyPreview.plan.totals.create],
+                    ["Update", applyPreview.plan.totals.update],
+                    ["Unchanged", applyPreview.plan.totals.unchanged],
+                    ["Blocked", applyPreview.plan.totals.blocked],
+                  ] as const
+                ).map(([label, value]) => (
+                  <article key={label}>
+                    <small>{label}</small>
+                    <strong>{value}</strong>
+                  </article>
+                ))}
+              </div>
+              <p>
+                Excluded from apply: {applyPreview.excluded.review} Review · {applyPreview.excluded.conflict} Conflict · {applyPreview.excluded.rejected} Rejected · {applyPreview.excluded.proposed} Proposed · {applyPreview.excluded.skippedSource} from skipped/unresolved sources. Duplicates {applyPreview.plan.totals.duplicates} · product-mapping failures {applyPreview.plan.totals.mappingFailures} · invalid rows {applyPreview.plan.totals.invalidRows}.
+              </p>
+              {applyPreview.plan.entries.some((entry) => entry.kind === "blocked") && (
+                <ul>
+                  {applyPreview.plan.entries.filter((entry) => entry.kind === "blocked").slice(0, 15).map((entry) => (
+                    <li key={`${entry.productId}|${entry.section}|${entry.name}`}>
+                      Blocked — {entry.productTitle}: {entry.section} / {entry.name} — {entry.blockers.join(" ")}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          {applyRunning && applyProgress && (
+            <p className="bulk-images-note" role="status">
+              Product {Math.min(applyProgress.done + 1, applyProgress.total)} of {applyProgress.total}: {applyProgress.current ?? "finishing"} — please keep this page open.
+            </p>
+          )}
+          {applyResult && (
+            <div className={`bulk-images-devreport ${applyResult.outcome === "verified" ? "verified" : "failed"}`} role={applyResult.outcome === "verified" ? "status" : "alert"} aria-label="Specification apply result">
+              <strong>{applyResult.outcome === "verified" ? "Apply verified" : applyResult.outcome === "blocked" ? "Apply blocked" : "Finished with issues"}</strong>
+              <p>{applyResult.message}</p>
+              {applyResult.products.filter((product) => product.status !== "verified").map((product) => (
+                <p key={product.productId}>
+                  <strong>{product.title}</strong> ({product.status}): {product.message}
+                  {product.rows.filter((row) => row.status === "failed").map((row) => ` ${row.section} / ${row.name}: ${row.message}`).join(" ")}
+                </p>
+              ))}
+            </div>
+          )}
+          {applyConfirming && applyPreview && (
+            <div className="bulk-images-dialog-backdrop">
+              <div className="bulk-images-dialog production" role="dialog" aria-modal="true" aria-labelledby="spec-apply-confirm">
+                <div className="bulk-images-prod-banner">PRODUCTION</div>
+                <h3 id="spec-apply-confirm">Write {specApplyWriteCount(applyPreview.plan)} specification rows?</h3>
+                <dl>
+                  <div><dt>Environment</dt><dd><strong>{target.environment?.toUpperCase()}</strong> <code>{target.projectRef}</code></dd></div>
+                  <div><dt>Products affected</dt><dd>{applyPreview.plan.totals.productsAffected}</dd></div>
+                  <div><dt>Create</dt><dd>{applyPreview.plan.totals.create}</dd></div>
+                  <div><dt>Update</dt><dd>{applyPreview.plan.totals.update}</dd></div>
+                  <div><dt>Unchanged</dt><dd>{applyPreview.plan.totals.unchanged}</dd></div>
+                  <div><dt>Blocked</dt><dd>{applyPreview.plan.totals.blocked}</dd></div>
+                </dl>
+                <p className="bulk-images-error">This writes specifications to the live storefront catalog. Only specification rows change; nothing is deleted.</p>
+                <label className="bulk-images-typed">
+                  Type {specApplyConfirmationPhrase(specApplyWriteCount(applyPreview.plan))} to enable applying
+                  <input type="text" autoComplete="off" spellCheck={false} value={applyTyped} onChange={(event) => setApplyTyped(event.target.value)} />
+                </label>
+                <div className="bulk-images-dialog-actions">
+                  <button type="button" className="admin-secondary" onClick={() => setApplyConfirming(false)}>Cancel</button>
+                  <button type="button" className="admin-primary" disabled={!specApplyConfirmationSatisfied(target.environment, applyTyped, specApplyWriteCount(applyPreview.plan))} onClick={() => void applySpecifications()}>
+                    Confirm and apply
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {exported.errors.length > 0 && <ul className="bulk-images-error">{exported.errors.slice(0, 5).map((error) => <li key={error}>{error}</li>)}</ul>}
           <p className="bulk-images-note">
             If the approved set were imported now: {summary.productsWithApproved} product(s) would receive {summary.approved} specification row(s); {summary.safelyMatchedProducts - summary.productsWithApproved} matched product(s) would still have none; {summary.conflicts} conflict(s) and {summary.unresolvedReview} Review row(s) unresolved; this environment currently stores {existing?.rows ?? "…"} rows for these products.
