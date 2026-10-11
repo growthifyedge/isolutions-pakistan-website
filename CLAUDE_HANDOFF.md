@@ -6,6 +6,28 @@
 
 ---
 
+## 2026-10-11 (newest) — Bulk publish for the Android batch IMPLEMENTED · nothing published
+
+> **No publish (DEV or PROD), no PROD/DEV write, no deploy, no commit, no push** while implementing. The PROD figures below come from a read-only query (`begin transaction read only … rollback`).
+
+**Commercial defaults succeeded in PROD:** 82 products / 262 variants now PTA Approved + Brand New; the read-only publication check reported 82 checked, 82 fully ready, `variant_commercial_facts_unresolved` = 0, Samsung A07 valid with no blockers. Nothing was published by that workflow. PROD media (267 rows) is uploaded and verified.
+
+**What was added (publish workflow)**
+- `src/lib/bulkPublish.ts` (pure): `buildPublishPreview`, `publishConfirmationPhrase` / `publishConfirmationSatisfied`, `runBulkPublish`, `verifyPublish`. `src/lib/bulkPublishDb.ts`: Supabase adapters. `src/admin/AndroidBulkPublish.tsx`: section "Publish ready Android products" on the Bulk Import page, right under "Apply Android commercial defaults" (wired in `AdminApp.tsx`).
+- **Targeting:** the same exact 82-title list (`androidImportBatch.ts`, via `selectAndroidBatch`). Apple products, accessories, unrelated products and duplicate-title products are never targeted; unresolvable ones are skipped and reported.
+- **Existing mechanism reused (no weaker parallel validation):** the editor's "Validate & publish" = RPC `validate_product_for_publication(p_product_id)` → must return `is_valid` → `products.update({ publication_status: "published" })`; the database trigger `products_enforce_publication` re-validates and stamps `published_at`. The bulk adapter calls the identical RPC and sends ONLY `publication_status: "published"` (no flag columns such as is_featured/is_flash_sale).
+- **Flow:** `Preview publication` (read-only: target / draft / already published / fully ready / blocked / skipped, with the exact blocker codes) → `Publish ready products` (disabled until a preview shows ready > 0 and the environment is valid) → confirmation → sequential run. Per product: re-read the product (already published → counted, not touched; not draft → skipped) → re-run the validator (blocked → not written, reported) → snapshot → publish → read back. A product is **Verified** only if publication_status = published, published_at is set, the product's other fields (title, slug, brand, category, defaults, flags…) are identical, and variants (price, compare-at, SKU, PTA, condition, RAM/storage/colour, delivery…), media count and stock ledger are unchanged. Statuses: Pending / Validating / Publishing / Verified / Blocked / Failed / Already published / Skipped. One failure never stops the batch; no false all-success message. Progress: "Product N of M: <title>"; the page is guarded with the existing unload guard while running.
+- **Confirmation:** PRODUCTION shows the red banner, Supabase project, target / ready / already published / blocked / skipped, "This will publish products to the live storefront." and requires the exact phrase **`PUBLISH <ready count>`** (e.g. `PUBLISH 82`; derived from the live ready count). DEV needs only a plain confirmation.
+- **Environment guard:** reuses `commercialWriteTarget` (exact pairing: DEV `acwatgxkcyrdxpcljxjb` ↔ development build, PROD `nlxfwppywxumymbjkvwt` ↔ production build). Unknown / mismatched / DEV-in-PROD / PROD-in-DEV publishes nothing (also re-checked inside the runner).
+
+**PROD read-only preview (2026-10-11):** target products **82** · draft **82** · already published **0** · fully ready **82** · blocked **0** · skipped **0** · batch titles missing 0 · targets with Unknown PTA/Condition 0 · media rows 267. Samsung A07: valid, no blockers.
+
+**Checks:** `npm test` **574 / 574** (+15 in `scripts/bulkPublish.test.mjs`: exact-batch targeting, Apple/unrelated excluded, blocked/already-published handling, changed-since-preview revalidation, real validator reused, failure isolation, read-back verification, exact typed phrase, environment mismatch, only publication state changes, commercial defaults never publish, A07 publishable after defaults, 82-ready fixture, progress + unload guard) · `tsc -b` clean · `npm run lint` 0 errors (1 pre-existing warning) · `build:dev` and `build:prod` OK · `dist/` left as the DEV build. Local DEV UI (mocked data): publish disabled before preview; preview showed ready/blocked/already published with the exact blocker; dialog had no typed field on DEV; only the validator RPC (a read) and selects were called.
+
+**Exact next Owner action:** these changes are uncommitted and not deployed. (1) Commit/push, then open the PRODUCTION admin (PROD hosting deploy, or `npm run build:prod && npm run preview:prod`; each needs its own approval). (2) Bulk Import page → "Publish ready Android products" → `Preview publication`; expect 82 target / 82 draft / 82 ready / 0 blocked. (3) `Publish ready products`, type `PUBLISH 82`, confirm. (4) Check the result: 82 published + verified, 0 blocked, 0 failed. Publishing makes the products live on the storefront; it never re-runs any upload or commercial-default write.
+
+---
+
 ## 2026-10-11 (newest) — Bulk commercial facts for the Android batch: IMPLEMENTED, PROD write NOT run
 
 > **No DB write (DEV or PROD), no publish, no deploy, no commit, no push.** The PROD preview below is a read-only query (`begin transaction read only … rollback`). The PROD update is waiting for the Owner's explicit go-ahead.
