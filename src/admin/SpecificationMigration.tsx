@@ -18,6 +18,7 @@ import {
 import { commercialWriteTarget, selectAndroidBatch } from "../lib/commercialDefaults";
 import { loadPublishProducts } from "../lib/bulkPublishDb";
 import { buildConflictGroups } from "../lib/specificationSourceConflicts";
+import { approveSafeReviewSpecs, classifyReviewProposal, sourceTextOf, type ReviewBlockCategory, type ReviewVerdict } from "../lib/specificationReviewSafety";
 import { extractSpecifications, parseShopifyDescriptions, type ShopifyDescription } from "../lib/productSpecificationExtraction";
 import {
   approveAllHighConfidence,
@@ -72,6 +73,7 @@ export function SpecificationMigration() {
   const [notice, setNotice] = useState("");
   const [limit, setLimit] = useState(80);
   const [resolved, setResolved] = useState<Record<string, string>>({});
+  const [safeResult, setSafeResult] = useState<{ approved: number; remaining: number; conflicts: number; categories: Record<string, number> } | null>(null);
 
   // Read-only: the 82 batch products and how many specification rows this environment already has for them.
   useEffect(() => {
@@ -196,6 +198,29 @@ export function SpecificationMigration() {
   const skippedSources = useMemo(() => (matchReview && states ? matchReview.sets.filter((set) => states.get(set.setId)?.status === "skipped" && Boolean(set.handle)) : []), [matchReview, states]);
   const summary = specReview ? reviewSummary(specReview, products.length, usable.size, skippedSources.length) : null;
   const unresolvedSources = unresolved.length + multiples.length;
+  const sourceTexts = useMemo(() => new Map([...descriptions].map(([handle, description]) => [handle, sourceTextOf(description.bodyHtml)])), [descriptions]);
+  const brandOf = useMemo(() => new Map(products.map((product) => [product.id, product.brand])), [products]);
+  const verdicts = useMemo(() => {
+    const map = new Map<string, ReviewVerdict>();
+    if (!specReview) return map;
+    for (const proposal of specReview.proposals)
+      if (proposal.confidence === "Review" && proposal.status === "proposed" && proposal.alternatives.length === 0)
+        map.set(proposal.id, classifyReviewProposal(proposal, { brand: brandOf.get(proposal.productId) ?? null, sourceText: sourceTexts.get(proposal.handle) ?? "" }));
+    return map;
+  }, [specReview, brandOf, sourceTexts]);
+  const safeReviewCount = [...verdicts.values()].filter((verdict) => verdict.safe).length;
+
+  /** Approves only the Review rows whose evidence is a direct, unambiguous statement about this product. */
+  function approveSafeReview() {
+    if (!specReview) return;
+    const result = approveSafeReviewSpecs(specReview, (proposal) => ({ brand: brandOf.get(proposal.productId) ?? null, sourceText: sourceTexts.get(proposal.handle) ?? "" }));
+    const categories: Record<string, number> = {};
+    for (const entry of result.blocked) categories[entry.category] = (categories[entry.category] ?? 0) + 1;
+    const conflicts = specReview.proposals.filter((proposal) => proposal.status === "conflict").length;
+    setSpecReview(result.review);
+    setSafeResult({ approved: result.approved, remaining: result.blocked.length, conflicts, categories });
+    setNotice(`Safe Review specs approved: ${result.approved} · Review specs still unresolved: ${result.blocked.length} · Conflict specs untouched: ${conflicts}.`);
+  }
 
   /** Bulk approval depends only on the proposals themselves — never on whether other sources are still unresolved. */
   function approveHigh() {
@@ -286,6 +311,11 @@ export function SpecificationMigration() {
           <small>
             {proposal.sourceType}: {proposal.evidence}
           </small>
+          {verdicts.get(proposal.id) && (
+            <small className={`spec-verdict ${verdicts.get(proposal.id)!.safe ? "safe" : "manual"}`} title={verdicts.get(proposal.id)!.safe ? "Direct, unambiguous evidence" : (verdicts.get(proposal.id) as { detail: string }).detail}>
+              {verdicts.get(proposal.id)!.safe ? "Safe to approve" : `Manual: ${(verdicts.get(proposal.id) as { category: ReviewBlockCategory }).category}`}
+            </small>
+          )}
         </td>
         <td><code>{proposal.handle}</code></td>
         <td><span className={`bulk-images-status ${proposal.status === "approved" ? "matched" : proposal.status === "conflict" ? "conflict" : proposal.status === "rejected" ? "invalid" : "review"}`}>{STATUS_LABEL[proposal.status]}</span></td>
@@ -472,6 +502,9 @@ export function SpecificationMigration() {
           )}
 
           <div className="bulk-images-bulk" role="group" aria-label="Bulk approval">
+            <button type="button" className="admin-secondary" disabled={safeReviewCount === 0} title="Approves only Review rows whose evidence states the value directly, without speculation, alternatives, another product or a 4G/5G version mix-up." onClick={approveSafeReview}>
+              Approve safe review specs ({safeReviewCount})
+            </button>
             <button type="button" className="admin-secondary" disabled={specReview.proposals.length === 0} onClick={approveHigh}>
               Approve all high-confidence specs ({summary.highAwaitingApproval} waiting)
             </button>
@@ -487,6 +520,24 @@ export function SpecificationMigration() {
           <p className="bulk-images-note">
             If the approved set were imported now: {summary.productsWithApproved} product(s) would receive {summary.approved} specification row(s); {summary.safelyMatchedProducts - summary.productsWithApproved} matched product(s) would still have none; {summary.conflicts} conflict(s) and {summary.unresolvedReview} Review row(s) unresolved; this environment currently stores {existing?.rows ?? "…"} rows for these products.
           </p>
+
+          {safeResult && (
+            <div className="bulk-images-devreport" role="status" aria-label="Safe review result">
+              <strong>Safe Review specs approved: {safeResult.approved}</strong>
+              <p>
+                Review specs still unresolved: {safeResult.remaining} · Conflict specs untouched: {safeResult.conflicts} · Wrong / speculative / ambiguous rows skipped: {safeResult.remaining}
+              </p>
+              {Object.keys(safeResult.categories).length > 0 && (
+                <ul>
+                  {Object.entries(safeResult.categories).map(([category, count]) => (
+                    <li key={category}>
+                      {category}: {count}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           <div className="bulk-images-tools">
             <div className="bulk-images-filters" role="group" aria-label="Filter proposals">

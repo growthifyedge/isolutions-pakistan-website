@@ -2339,3 +2339,6 @@ p.bulk-images-error { padding-left: 14px; }
 .spec-conflict-source .spec-preview { color: var(--a-muted); }
 .spec-conflict-source button { align-self: flex-start; margin-top: 4px; }
 .spec-recommended { color: #1f5f2e; } .spec-norec { color: #8e351e; } .spec-resolved { margin: 8px 0 0; color: #1f5f2e; font-size: 12.5px; }
+
+.spec-migration .spec-verdict { display: block; margin-top: 3px; font-weight: 600; }
+.spec-migration .spec-verdict.safe { color: #1f5f2e; } .spec-migration .spec-verdict.manual { color: #8e351e; }
