@@ -44,6 +44,7 @@ import { BulkProductImages } from "./BulkProductImages";
 import { BulkImport } from "./BulkImport";
 import { AndroidCommercialDefaults } from "./AndroidCommercialDefaults";
 import { AndroidBulkPublish } from "./AndroidBulkPublish";
+import { SpecificationMigration } from "./SpecificationMigration";
 import { CatalogReadiness } from "./CatalogReadiness";
 import { ContactEnquiries } from "./ContactEnquiries";
 import { BundleManager } from "./BundleManager";
@@ -628,6 +629,7 @@ export function AdminApp() {
         <BulkImport />
         <AndroidCommercialDefaults />
         <AndroidBulkPublish />
+        <SpecificationMigration />
       </AdminLayout>
     );
   else if (path === "/admin/catalog-readiness")

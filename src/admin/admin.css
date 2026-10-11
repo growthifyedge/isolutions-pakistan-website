@@ -2319,3 +2319,13 @@ p.bulk-images-error { padding-left: 14px; }
 .commercial-defaults-action { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 8px 0 14px; }
 .commercial-defaults-confirm { display: grid; gap: 4px; flex-basis: 100%; padding: 12px 14px; border: 1px solid var(--a-line); background: #fafbf8; font-size: 12.5px; }
 .commercial-defaults-confirm > div { display: flex; gap: 8px; margin-top: 6px; }
+
+.spec-migration { margin-top: 24px; }
+.spec-migration .spec-value strong { overflow-wrap: anywhere; }
+.spec-migration .spec-evidence { max-width: 360px; color: var(--a-muted); }
+.spec-migration .spec-owner { color: #8e351e; }
+.spec-migration .spec-conflict { display: flex; flex-direction: column; gap: 4px; }
+.spec-migration .spec-edit { display: flex; gap: 6px; flex-wrap: wrap; }
+.spec-migration .spec-group td { background: #f1f4ee; }
+.spec-migration .spec-row.rejected { opacity: 0.55; }
+.spec-migration .spec-none li { margin: 4px 0; font-size: 12.5px; }
