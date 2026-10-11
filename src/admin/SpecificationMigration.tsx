@@ -15,6 +15,7 @@ import {
 } from "../lib/bulkProductImagesReview";
 import { commercialWriteTarget, selectAndroidBatch } from "../lib/commercialDefaults";
 import { loadPublishProducts } from "../lib/bulkPublishDb";
+import { buildConflictGroups } from "../lib/specificationSourceConflicts";
 import { extractSpecifications, parseShopifyDescriptions, type ShopifyDescription } from "../lib/productSpecificationExtraction";
 import {
   approveAllHighConfidence,
@@ -68,6 +69,7 @@ export function SpecificationMigration() {
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [notice, setNotice] = useState("");
   const [limit, setLimit] = useState(80);
+  const [resolved, setResolved] = useState<Record<string, string>>({});
 
   // Read-only: the 82 batch products and how many specification rows this environment already has for them.
   useEffect(() => {
@@ -162,6 +164,12 @@ export function SpecificationMigration() {
     }
   }
 
+  /** Product-level conflict decision: the chosen source is Confirmed and every competing source becomes Not Used (existing logic). */
+  function chooseConflictSource(productId: string, setId: string, handle: string) {
+    resolveSource((current) => chooseSourceSet(current, setId, products));
+    setResolved((current) => ({ ...current, [productId]: handle }));
+  }
+
   function resolveSource(change: (review: BulkImageReview) => BulkImageReview) {
     if (!matchReview) return;
     const next = change(matchReview);
@@ -176,10 +184,11 @@ export function SpecificationMigration() {
     return matchReview.sets
       .filter((set) => {
         const state = states.get(set.setId);
-        return state && state.targetId && !["matched", "confirmed", "not_used", "skipped", "invalid"].includes(state.status);
+        return state && state.targetId && !["matched", "confirmed", "not_used", "skipped", "invalid", "conflict"].includes(state.status);
       })
       .map((set) => ({ set, state: states.get(set.setId)! }));
   }, [matchReview, states]);
+  const conflictGroups = useMemo(() => (matchReview ? buildConflictGroups(matchReview, products, descriptions) : []), [matchReview, products, descriptions]);
   const multiples = useMemo(() => (matchReview && states ? matchReview.sets.filter((set) => states.get(set.setId)?.status === "multiple") : []), [matchReview, states]);
 
   const summary = specReview ? reviewSummary(specReview, products.length, usable.size) : null;
@@ -332,6 +341,59 @@ export function SpecificationMigration() {
               </article>
             ))}
           </div>
+
+          {(conflictGroups.length > 0 || Object.keys(resolved).length > 0) && (
+            <div className="bulk-images-devreport spec-conflicts" aria-label="Source conflicts">
+              <strong>Source conflicts — {conflictGroups.length} product{conflictGroups.length === 1 ? "" : "s"}</strong>
+              <p>Several Shopify products match one catalog product. Pick the source to extract from; nothing is chosen for you.</p>
+              {conflictGroups.map((group) => (
+                <article key={group.productId} className="spec-conflict-card">
+                  <h4>
+                    {group.productTitle} <small>{group.sources.length} competing sources</small>
+                  </h4>
+                  <div className="spec-conflict-sources">
+                    {group.sources.map((source, index) => (
+                      <div key={source.setId} className={`spec-conflict-source${group.recommendation?.setId === source.setId ? " best" : ""}`}>
+                        <strong>Source {String.fromCharCode(65 + index)}</strong>
+                        <span>{source.shopifyTitle}</span>
+                        <code>{source.handle}</code>
+                        <small>
+                          Specs: {source.high} High / {source.review} Review / {source.conflicts} Conflict · Images: {source.imageCount} · Description: {source.bodyChars} chars
+                          {source.shopifyStatus ? ` · ${source.shopifyStatus}` : ""}
+                        </small>
+                        <small>
+                          Chipset {source.key.chipset ?? "—"} · Display {source.key.displaySize ?? "—"} · Battery {source.key.battery ?? "—"} · Charging {source.key.charging ?? "—"} · OS {source.key.os ?? "—"} · Camera {source.key.camera ?? "—"}
+                        </small>
+                        <small className="spec-preview">{source.preview || "No description text."}</small>
+                        <button type="button" onClick={() => chooseConflictSource(group.productId, source.setId, source.handle)}>
+                          Use this source
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className={group.safe ? "spec-recommended" : "spec-norec"}>
+                    {group.safe && group.recommendation ? (
+                      <>
+                        <strong>Recommended:</strong> <code>{group.recommendation.handle}</code> — {group.recommendation.reason}
+                      </>
+                    ) : (
+                      <>
+                        <strong>No safe recommendation.</strong> {group.recommendation ? `Best-ranked: ${group.recommendation.handle} — ${group.recommendation.reason}` : ""}
+                      </>
+                    )}{" "}
+                    <button type="button" className="admin-secondary" disabled={!group.safe || !group.recommendation} onClick={() => group.recommendation && chooseConflictSource(group.productId, group.recommendation.setId, group.recommendation.handle)}>
+                      Use recommended source
+                    </button>
+                  </p>
+                </article>
+              ))}
+              {Object.entries(resolved).map(([productId, handle]) => (
+                <p key={productId} className="spec-resolved">
+                  ✓ Resolved: {productTitles.get(productId)} → <code>{handle}</code>
+                </p>
+              ))}
+            </div>
+          )}
 
           {(unresolved.length > 0 || multiples.length > 0) && (
             <div className="bulk-images-devreport" aria-label="Source resolution">

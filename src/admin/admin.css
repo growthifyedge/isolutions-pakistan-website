@@ -2329,3 +2329,13 @@ p.bulk-images-error { padding-left: 14px; }
 .spec-migration .spec-group td { background: #f1f4ee; }
 .spec-migration .spec-row.rejected { opacity: 0.55; }
 .spec-migration .spec-none li { margin: 4px 0; font-size: 12.5px; }
+
+.spec-conflicts h4 { margin: 0 0 6px; font-size: 14px; }
+.spec-conflicts h4 small { margin-left: 8px; color: var(--a-muted); font-weight: 400; }
+.spec-conflict-card { margin-top: 12px; padding: 12px; border: 1px solid var(--a-line); background: #fff; }
+.spec-conflict-sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
+.spec-conflict-source { display: flex; flex-direction: column; gap: 3px; padding: 10px; border: 1px solid var(--a-line); font-size: 12px; overflow-wrap: anywhere; }
+.spec-conflict-source.best { border-color: #2d7a3e; background: #f6fbf6; }
+.spec-conflict-source .spec-preview { color: var(--a-muted); }
+.spec-conflict-source button { align-self: flex-start; margin-top: 4px; }
+.spec-recommended { color: #1f5f2e; } .spec-norec { color: #8e351e; } .spec-resolved { margin: 8px 0 0; color: #1f5f2e; font-size: 12.5px; }
