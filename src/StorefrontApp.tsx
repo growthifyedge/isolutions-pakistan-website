@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import {
   fetchHomepageFeaturedProducts,
+  fetchAllPublicCatalog,
   fetchPublicCatalog,
   fetchPublicTaxonomy,
   fetchFrequentlyBoughtTogether,
@@ -366,7 +367,7 @@ function StorefrontCartDrawer({
   useEffect(() => {
     if (!open) return;
     let active = true;
-    fetchPublicCatalog({ limit: 100 })
+    fetchAllPublicCatalog()
       .then((products) => {
         if (!active) return;
         setInventoryByVariant(Object.fromEntries(
@@ -1442,7 +1443,7 @@ function Home({ taxonomy }: { taxonomy: Taxonomy }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   useEffect(() => {
-    fetchPublicCatalog({ limit: 100 })
+    fetchAllPublicCatalog()
       .then(setProducts)
       .catch(() => setError("The published catalog is temporarily unavailable."))
       .finally(() => setLoading(false));
@@ -2421,7 +2422,7 @@ function Shop({ taxonomy }: { taxonomy: Taxonomy }) {
     setLoading(true);
     setError("");
     const timer = setTimeout(() => {
-      fetchPublicCatalog(filters)
+      fetchAllPublicCatalog(filters)
         .then(setProducts)
         .catch(() =>
           setError("The published catalog is temporarily unavailable."),
@@ -2989,7 +2990,7 @@ function CollectionPage({
 
     setLoading(true);
     setError("");
-    fetchPublicCatalog(collection.filters)
+    fetchAllPublicCatalog(collection.filters)
       .then((items) => {
         const collectionItems = collection.deals
           ? items.filter((product) => product.variants.some((variant) => validCompareAt(variant)))

@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import { minimumActiveVariantPrice } from "./money";
-import { nullIfEmpty } from "./catalogFilters";
+import { collectAllCatalogPages, nullIfEmpty } from "./catalogFilters";
 import { HOMEPAGE_FEATURED_LIMIT, selectHomepageFeaturedProducts } from "./homepageFeatured";
 export { formatPkrMinor } from "./money";
 
@@ -92,15 +92,22 @@ export function publicCatalogRpcParameters(filters: CatalogFilters = {}) {
   };
 }
 
-export async function fetchPublicCatalog(filters: CatalogFilters = {}) {
+export async function fetchPublicCatalog(filters: CatalogFilters = {}, offset = 0) {
   if (!supabase) throw new Error("Supabase environment is not configured");
 
   const { data, error } = await supabase.rpc(
     "search_public_catalog",
-    publicCatalogRpcParameters(filters),
+    { ...publicCatalogRpcParameters(filters), p_offset: offset },
   );
   if (error) throw error;
   return (data ?? []) as CatalogProduct[];
+}
+
+/** Every published product matching the filters, with no fixed ceiling. */
+export function fetchAllPublicCatalog(filters: Omit<CatalogFilters, "limit"> = {}) {
+  return collectAllCatalogPages((offset, pageSize) =>
+    fetchPublicCatalog({ ...filters, limit: pageSize }, offset),
+  );
 }
 
 export async function fetchHomepageFeaturedProducts(limit = HOMEPAGE_FEATURED_LIMIT) {

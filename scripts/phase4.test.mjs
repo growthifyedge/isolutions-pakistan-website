@@ -74,7 +74,7 @@ test("Shop preserves a published RPC array and renders every product", () => {
   assert.equal(response.length, 2);
   assert.match(
     storefront,
-    /function Shop[\s\S]*fetchPublicCatalog\(filters\)[\s\S]*\.then\(setProducts\)[\s\S]*products\.map/,
+    /function Shop[\s\S]*fetchAllPublicCatalog\(filters\)[\s\S]*\.then\(setProducts\)[\s\S]*products\.map/,
   );
 });
 test("an empty RPC array remains empty", () => {
