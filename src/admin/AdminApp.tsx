@@ -45,6 +45,7 @@ import { BulkImport } from "./BulkImport";
 import { AndroidCommercialDefaults } from "./AndroidCommercialDefaults";
 import { AndroidBulkPublish } from "./AndroidBulkPublish";
 import { SpecificationMigration } from "./SpecificationMigration";
+import { StockListUpdate } from "./StockListUpdate";
 import { CatalogReadiness } from "./CatalogReadiness";
 import { ContactEnquiries } from "./ContactEnquiries";
 import { BundleManager } from "./BundleManager";
@@ -58,6 +59,7 @@ const nav: ReadonlyArray<readonly [string, string, LucideIcon]> = [
   ["Catalog", "/admin/products", Boxes],
   ["Media", "/admin/media", Image],
   ["Bulk Import", "/admin/bulk-import", ListPlus],
+  ["Stock Update", "/admin/stock-update", PackageCheck],
   ["Readiness", "/admin/catalog-readiness", ClipboardCheck],
   ["Enquiries", "/admin/contact-enquiries", MessageSquareText],
   ["Homepage", "/admin/homepage", Sparkles],
@@ -630,6 +632,12 @@ export function AdminApp() {
         <AndroidCommercialDefaults />
         <AndroidBulkPublish />
         <SpecificationMigration />
+      </AdminLayout>
+    );
+  else if (path === "/admin/stock-update")
+    page = (
+      <AdminLayout section="Stock Update">
+        <StockListUpdate />
       </AdminLayout>
     );
   else if (path === "/admin/catalog-readiness")
