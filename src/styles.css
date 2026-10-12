@@ -1857,18 +1857,18 @@ body:has(.home-page) footer { padding-top:96px; }
 .pdp-purchase-feedback { min-height:18px; margin:10px 2px 0; color:#3D7553; font:600 11px/1.45 Manrope,sans-serif; }
 .pdp-purchase .pdp-brand,
 .pdp-purchase .pdp-description { display:none; }
-.pdp-specifications { padding:112px 0 120px; background:#173226; color:#fff; }
-.pdp-specifications > .container { display:grid; grid-template-columns:.72fr 1.28fr; gap:clamp(55px,8vw,130px); }
+.pdp-specifications { padding:64px 0 72px; background:#173226; color:#fff; }
+.pdp-specifications > .container { display:block; }
+.pdp-section-heading { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 18px; margin-bottom:28px; padding-bottom:18px; border-bottom:1px solid #52675c; }
 .pdp-section-heading .eyebrow { color:#a9b8af; }
-.pdp-section-heading h2 { font:600 clamp(46px,4.4vw,66px)/.98 Manrope,sans-serif; letter-spacing:-.06em; margin:26px 0 0; }
-.pdp-section-heading h2 em { font-family:Georgia,serif; font-weight:400; color:#f2aa85; }
-.pdp-spec-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border-top:1px solid #52675c; }
-.pdp-spec-grid > div { min-height:105px; padding:24px 22px 20px 0; border-bottom:1px solid #52675c; }
-.pdp-spec-grid > div:nth-child(odd) { border-right:1px solid #52675c; }
-.pdp-spec-grid > div:nth-child(even) { padding-left:22px; }
-.pdp-spec-grid small,.pdp-spec-grid strong { display:block; }
-.pdp-spec-grid small { color:#92a399; font-size:8px; letter-spacing:.13em; text-transform:uppercase; }
-.pdp-spec-grid strong { margin-top:12px; font:500 16px/1.4 Manrope,sans-serif; }
+.pdp-section-heading h2 { font:600 clamp(20px,2vw,26px)/1.2 Manrope,sans-serif; letter-spacing:-.02em; margin:0; }
+.pdp-spec-groups { column-count:var(--spec-cols-3,3); column-gap:40px; }
+.pdp-spec-group { break-inside:avoid; margin:0 0 30px; }
+.pdp-spec-group h3 { margin:0 0 4px; padding-bottom:10px; border-bottom:2px solid #f2aa85; font:700 12px/1.2 Manrope,sans-serif; letter-spacing:.14em; text-transform:uppercase; color:#f2aa85; }
+.pdp-spec-group dl { margin:0; }
+.pdp-spec-group dl > div { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr); gap:16px; align-items:baseline; padding:12px 0; border-bottom:1px solid #3d5247; }
+.pdp-spec-group dt { color:#a4b4aa; font:500 13px/1.4 Manrope,sans-serif; overflow-wrap:anywhere; }
+.pdp-spec-group dd { margin:0; font:600 15px/1.4 Manrope,sans-serif; color:#fff; overflow-wrap:anywhere; }
 .pdp-story { display:grid; grid-template-columns:.85fr 1.15fr; gap:clamp(55px,9vw,140px); padding-top:112px; padding-bottom:125px; }
 .pdp-story h2 { font:600 clamp(44px,4vw,60px)/.98 Manrope,sans-serif; letter-spacing:-.06em; margin:24px 0 0; }
 .pdp-story h3 { font:600 22px Manrope,sans-serif; letter-spacing:-.03em; margin:0 0 24px; }
@@ -1877,7 +1877,9 @@ body:has(.home-page) footer { padding-top:96px; }
   .pdp-showcase { grid-template-columns:1fr; gap:42px; }
   .pdp-main-image { height:650px; }
   .pdp-purchase { max-width:720px; }
-  .pdp-specifications > .container { grid-template-columns:1fr; gap:55px; }
+}
+@media (max-width:1199px) {
+  .pdp-spec-groups { column-count:var(--spec-cols-2,2); }
 }
 @media (max-width:600px) {
   .pdp-breadcrumbs { min-height:50px; padding-inline:18px; }
@@ -1914,12 +1916,10 @@ body:has(.home-page) footer { padding-top:96px; }
   .pdp-facts > div { min-height:66px; padding:10px; }
   .pdp-facts strong { font-size:11px; }
   .pdp-confidence { margin-top:16px; }
-  .pdp-specifications { padding:78px 0 84px; }
-  .pdp-specifications > .container { gap:42px; }
-  .pdp-section-heading h2 { font-size:43px; }
-  .pdp-spec-grid { grid-template-columns:1fr; }
-  .pdp-spec-grid > div:nth-child(n) { min-height:82px; padding:20px 0; border-right:0; }
-  .pdp-spec-grid strong { font-size:15px; }
+  .pdp-specifications { padding:44px 0 52px; }
+  .pdp-section-heading { margin-bottom:20px; }
+  .pdp-spec-groups { column-count:1; }
+  .pdp-spec-group dl > div { padding:14px 0; }
   .pdp-story { grid-template-columns:1fr; gap:38px; padding-top:80px; padding-bottom:86px; }
   .pdp-story h2 { font-size:43px; }
   .pdp-story p { font-size:14px; }
@@ -2185,8 +2185,8 @@ footer { background:#101A17; }
 }
 .pdp-specifications { background:#18231F; }
 .pdp-section-heading h2 em { color:#F0643A; }
-.pdp-spec-grid,
-.pdp-spec-grid > div { border-color:#46514C; }
+.pdp-section-heading,
+.pdp-spec-group dl > div { border-color:#46514C; }
 .pdp-story p { color:#66706B; }
 .footer-top p,
 .footer-bottom { color:#87908C; }

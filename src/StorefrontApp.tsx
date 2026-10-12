@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Lottie } from "lottie-react";
 import {
   ArrowRight,
@@ -97,6 +97,7 @@ import {
   type ResolvedCollection,
 } from "./lib/collections";
 import { storefrontContact } from "./lib/storefrontContact";
+import { groupSpecifications } from "./lib/specificationGroups";
 import {
   createStorefrontOrder,
   readStorefrontOrderConfirmation,
@@ -3486,12 +3487,24 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
         {product.specifications.length > 0 && (
           <section className="pdp-specifications">
             <div className="container">
-              <div className="pdp-section-heading"><span className="eyebrow">SPECIFICATIONS</span><h2>The details,<br /><em>at a glance.</em></h2></div>
-              <div className="pdp-spec-grid">
-                {product.specifications.map((spec) => (
-                  <div key={`${spec.group}-${spec.label}`}><small>{spec.label}</small><strong>{spec.value}</strong></div>
-                ))}
-              </div>
+              <div className="pdp-section-heading"><span className="eyebrow">SPECIFICATIONS</span><h2>Everything you need to know.</h2></div>
+              {(() => {
+                const groups = groupSpecifications(product.specifications);
+                return (
+                  <div className="pdp-spec-groups" style={{ "--spec-cols-3": Math.min(groups.length, 3), "--spec-cols-2": Math.min(groups.length, 2) } as CSSProperties}>
+                    {groups.map((group) => (
+                      <section className="pdp-spec-group" key={group.title}>
+                        <h3>{group.title}</h3>
+                        <dl>
+                          {group.rows.map((spec) => (
+                            <div key={`${group.title}-${spec.label}`}><dt>{spec.label}</dt><dd>{spec.value}</dd></div>
+                          ))}
+                        </dl>
+                      </section>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </section>
         )}
