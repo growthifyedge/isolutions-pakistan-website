@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase, supabaseEnvironmentLabel } from "../lib/supabase";
 import { csvRows } from "../lib/bulkCatalog";
 import { loadExcelJs } from "../lib/catalogWorkbook";
@@ -14,12 +14,29 @@ import {
   tableToStockText,
   type DeltaEntry,
   type ParsedStockList,
-  type StockDelta,
+  type CatalogDeltaProduct,
 } from "../lib/stockListDelta";
 import { loadActiveBrands, loadCatalogForDelta } from "../lib/stockListDeltaDb";
+import {
+  applyResolutions,
+  clearDraft,
+  comparisonAuthorizesApply,
+  describeResolution,
+  draftFromState,
+  loadDraft,
+  makeComparisonStamp,
+  resolutionOptions,
+  saveDraft,
+  type ComparisonStamp,
+  type DraftStorage,
+  type Resolution,
+  type ResolutionRecord,
+} from "../lib/stockListDraft";
 
 // Admin "Stock List Update": parse -> compare -> delta preview -> selection -> apply PLAN.
 // This phase performs NO database write; "Apply Selected Changes" is intentionally disabled.
+// The Owner's working draft (list text, decisions, checkbox choices) is autosaved to localStorage and restored on reload.
+// A comparison is NEVER restored: it is recomputed from the live catalog by a fresh read-only Compare.
 
 type TabId = "price_change" | "new_variant" | "new_product" | "missing" | "ambiguous" | "blocked" | "unchanged";
 
@@ -55,27 +72,127 @@ async function readTable(file: File): Promise<string[][]> {
   return lower.endsWith(".csv") ? csvRows(text) : text.split(/\r?\n/).map((line) => [line]);
 }
 
+function browserStorage(): DraftStorage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+const clock = (iso: string | null) => {
+  if (!iso) return "";
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("en-PK", { dateStyle: "medium", timeStyle: "short" });
+};
+
 export function StockListUpdate() {
-  const [text, setText] = useState("");
-  const [fileName, setFileName] = useState("");
+  // Read once, before the first render, so the autosave below can never overwrite a draft that has not been restored yet.
+  const [initial] = useState(() => loadDraft(browserStorage()));
+  const restored = initial.status === "restored" ? initial.draft : null;
+  const [text, setText] = useState(restored?.text ?? "");
+  const [fileName, setFileName] = useState(restored?.fileName ?? "");
+  const [resolutions, setResolutions] = useState<Record<string, ResolutionRecord>>(restored?.resolutions ?? {});
+  const [overrides, setOverrides] = useState<Record<string, boolean>>(restored?.selectionOverrides ?? {});
   const [parsed, setParsed] = useState<ParsedStockList | null>(null);
-  const [delta, setDelta] = useState<StockDelta | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [catalog, setCatalog] = useState<CatalogDeltaProduct[] | null>(null);
+  const [stamp, setStamp] = useState<ComparisonStamp | null>(null);
+  const [lastComparedAt, setLastComparedAt] = useState<string | null>(restored?.lastComparedAt ?? null);
   const [tab, setTab] = useState<TabId>("price_change");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState(initial.status === "reset" ? initial.reason : "");
+  const [wasRestored, setWasRestored] = useState(Boolean(restored));
+  const [savedAt, setSavedAt] = useState<string | null>(restored?.savedAt || null);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
 
+  // Resolutions are applied to the parsed rows, then classified against the in-memory catalog from the last live Compare.
+  const resolved = useMemo(() => (parsed ? applyResolutions(parsed, resolutions) : null), [parsed, resolutions]);
+  const delta = useMemo(() => (resolved && catalog ? buildStockDelta(resolved.parsed, catalog) : null), [resolved, catalog]);
+  const selected = useMemo(() => {
+    const base = delta ? defaultSelection(delta) : new Set<string>();
+    if (!delta || !resolved) return base;
+    for (const entry of delta.entries) {
+      const key = resolved.rowKeys[Number(entry.id.slice(4))];
+      if (key !== undefined && key in overrides) {
+        if (overrides[key] && isSelectable(entry)) base.add(entry.id);
+        else base.delete(entry.id);
+      }
+    }
+    return base;
+  }, [delta, resolved, overrides]);
   const plan = useMemo(() => (delta ? buildApplyPlan(delta, selected) : null), [delta, selected]);
+  // A future Apply must require this to be true. It is false after any reload (the stamp is memory-only) and after any later edit.
+  const applyAuthorized = comparisonAuthorizesApply(stamp, text, resolutions);
+
+  // Autosave (debounced) + a final flush when the page is hidden or the Stock Update screen unmounts.
+  const wasParsed = parsed !== null;
+  const latest = useRef(draftFromState({ text, fileName, wasParsed, lastComparedAt, resolutions, selectionOverrides: overrides }));
+  const currentDraft = draftFromState({ text, fileName, wasParsed, lastComparedAt, resolutions, selectionOverrides: overrides });
+  useEffect(() => {
+    latest.current = currentDraft;
+  });
+  // Nothing is written until this tab has actually changed something, so merely opening (or closing) an untouched
+  // Stock Update screen can never overwrite or delete a draft saved earlier or from another tab.
+  const touched = useRef(false);
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    touched.current = true;
+    const timer = window.setTimeout(() => {
+      const ok = saveDraft(browserStorage(), latest.current);
+      setSaveFailed(!ok);
+      if (ok) setSavedAt(new Date().toISOString());
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [text, fileName, wasParsed, lastComparedAt, resolutions, overrides]);
+  useEffect(() => {
+    const flush = () => {
+      if (touched.current) saveDraft(browserStorage(), latest.current);
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
+
+  // A restored draft that had been parsed is re-parsed (read-only brand lookup) so only Compare remains to be clicked.
+  useEffect(() => {
+    if (!restored?.wasParsed || !supabase || !restored.text.trim()) return;
+    let cancelled = false;
+    loadActiveBrands(supabase)
+      .then((brands) => {
+        if (!cancelled) setParsed(parseStockList(restored.text, brands));
+      })
+      .catch(() => {
+        if (!cancelled) setError("The restored list could not be re-parsed automatically — click Parse Stock List.");
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once for the draft read at mount
+  }, []);
+
+  function changeText(next: string, name?: string) {
+    setText(next);
+    if (name !== undefined) setFileName(name);
+    setParsed(null);
+    setCatalog(null);
+    setStamp(null);
+    setWasRestored(false);
+  }
 
   async function onFile(file: File | undefined) {
     if (!file) return;
     setError("");
     try {
       const table = await readTable(file);
-      setText(file.name.toLowerCase().endsWith(".txt") ? table.map((row) => row.join(" ")).join("\n") : tableToStockText(table));
-      setFileName(file.name);
-      setParsed(null);
-      setDelta(null);
+      changeText(file.name.toLowerCase().endsWith(".txt") ? table.map((row) => row.join(" ")).join("\n") : tableToStockText(table), file.name);
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : "The file could not be read.");
     }
@@ -88,7 +205,8 @@ export function StockListUpdate() {
     try {
       const brands = await loadActiveBrands(supabase);
       setParsed(parseStockList(text, brands));
-      setDelta(null);
+      setCatalog(null);
+      setStamp(null);
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : "Parsing failed.");
     } finally {
@@ -101,11 +219,14 @@ export function StockListUpdate() {
     setBusy(true);
     setError("");
     try {
-      const catalog = await loadCatalogForDelta(supabase);
-      const next = buildStockDelta(parsed, catalog);
-      setDelta(next);
-      setSelected(defaultSelection(next));
-      setTab(next.counts.priceChanges ? "price_change" : next.counts.newVariants ? "new_variant" : next.counts.newProducts ? "new_product" : "unchanged");
+      const fresh = await loadCatalogForDelta(supabase);
+      const next = buildStockDelta(applyResolutions(parsed, resolutions).parsed, fresh);
+      setCatalog(fresh);
+      const now = new Date();
+      setStamp(makeComparisonStamp(text, resolutions, now));
+      setLastComparedAt(now.toISOString());
+      setWasRestored(false);
+      setTab(next.counts.priceChanges ? "price_change" : next.counts.newVariants ? "new_variant" : next.counts.newProducts ? "new_product" : next.counts.ambiguous ? "ambiguous" : "unchanged");
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : "The catalog comparison failed.");
     } finally {
@@ -113,13 +234,40 @@ export function StockListUpdate() {
     }
   }
 
-  function toggle(id: string, on: boolean) {
-    setSelected((current) => {
-      const next = new Set(current);
-      if (on) next.add(id);
-      else next.delete(id);
+  function toggle(rowKey: string | undefined, on: boolean) {
+    if (rowKey === undefined) return;
+    setOverrides((current) => ({ ...current, [rowKey]: on }));
+  }
+
+  function resolve(rowKey: string, entry: DeltaEntry, resolution: Resolution) {
+    const label = [entry.productTitle, entry.label].filter(Boolean).join(" · ");
+    setResolutions((current) => ({ ...current, [rowKey]: { rowKey, resolution, sourceLine: entry.row.sourceLine, label, decidedAt: new Date().toISOString() } }));
+  }
+
+  function undoResolution(rowKey: string) {
+    setResolutions((current) => {
+      const next = { ...current };
+      delete next[rowKey];
       return next;
     });
+  }
+
+  function discardDraft() {
+    const cleared = clearDraft(browserStorage());
+    setText("");
+    setFileName("");
+    setResolutions({});
+    setOverrides({});
+    setParsed(null);
+    setCatalog(null);
+    setStamp(null);
+    setLastComparedAt(null);
+    setSavedAt(null);
+    setError("");
+    setWasRestored(false);
+    setConfirmClear(false);
+    setTab("price_change");
+    setNotice(cleared ? "Draft cleared. Nothing in the catalog was changed." : "Page reset, but the browser would not let the saved draft be removed.");
   }
 
   const counts = delta?.counts;
@@ -137,6 +285,7 @@ export function StockListUpdate() {
       ]
     : [];
 
+  const rowKeyOf = (entry: DeltaEntry) => resolved?.rowKeys[Number(entry.id.slice(4))];
   const entriesFor = (kind: DeltaEntry["kind"]) => delta?.entries.filter((entry) => entry.kind === kind) ?? [];
 
   function entryRows(kind: DeltaEntry["kind"], mode: "price" | "variant" | "product" | "plain") {
@@ -154,6 +303,7 @@ export function StockListUpdate() {
               {mode !== "price" && mode !== "plain" && <th>New price</th>}
               {mode === "plain" && (<><th>Category</th><th>Price</th></>)}
               <th>Notes</th>
+              {kind === "ambiguous" && <th>Resolve</th>}
             </tr>
           </thead>
           <tbody>
@@ -161,7 +311,7 @@ export function StockListUpdate() {
               <tr key={entry.id} className={selected.has(entry.id) ? "included" : undefined}>
                 {isSelectableKind(kind) && (
                   <td>
-                    <input type="checkbox" aria-label={`Apply ${entry.productTitle} ${entry.label}`} checked={selected.has(entry.id)} disabled={!isSelectable(entry)} onChange={(event) => toggle(entry.id, event.target.checked)} />
+                    <input type="checkbox" aria-label={`Apply ${entry.productTitle} ${entry.label}`} checked={selected.has(entry.id)} disabled={!isSelectable(entry)} onChange={(event) => toggle(rowKeyOf(entry), event.target.checked)} />
                   </td>
                 )}
                 <td>
@@ -178,6 +328,14 @@ export function StockListUpdate() {
                   {mode === "product" && rows.findIndex((other) => other.productSlug === entry.productSlug) === rows.indexOf(entry) && entry.requirements.map((need) => (<small className="plain" key={need}>Needs: {need}</small>))}
                   <small className="plain">Line {entry.row.lineNumber}</small>
                 </td>
+                {kind === "ambiguous" && (
+                  <td className="stock-resolve">
+                    {(() => {
+                      const key = rowKeyOf(entry);
+                      return key === undefined ? null : <ResolverActions entry={entry} onResolve={(resolution) => resolve(key, entry, resolution)} />;
+                    })()}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -197,9 +355,20 @@ export function StockListUpdate() {
         <small>Preview only — this tool does not write to the catalog yet</small>
       </div>
 
+      {(wasRestored || notice) && (
+        <div className="stock-draft-status restored" role="status">
+          <strong>{wasRestored ? "Draft restored" : notice}</strong>
+          {wasRestored && (
+            <span>
+              Saved {clock(savedAt) || "earlier"} · your list, decisions and checkbox choices are back. The comparison is not restored — click {parsed ? "" : "Parse Stock List, then "}Compare With Catalog to check against the current catalog.
+            </span>
+          )}
+        </div>
+      )}
+
       <label className="stock-field">
         <span>Stock list</span>
-        <textarea value={text} rows={10} placeholder={"Samsung\n\nA07 4/64 black/green @ 36900\nA57 12/512 lilac/navy/grey @ 204500\n\nMotorola\n\nG77 8/256 black/green @ 91800"} onChange={(event) => { setText(event.target.value); setParsed(null); setDelta(null); }} />
+        <textarea value={text} rows={10} placeholder={"Samsung\n\nA07 4/64 black/green @ 36900\nA57 12/512 lilac/navy/grey @ 204500\n\nMotorola\n\nG77 8/256 black/green @ 91800"} onChange={(event) => changeText(event.target.value)} />
       </label>
       <label className="stock-field">
         <span>Or upload a file (.txt, .csv, .xlsx)</span>
@@ -211,7 +380,19 @@ export function StockListUpdate() {
         <button type="button" className="admin-secondary" disabled={busy || !text.trim()} onClick={() => void runParse()}>{busy && !parsed ? "Working…" : "Parse Stock List"}</button>
         <button type="button" className="admin-secondary" disabled={busy || !parsed || parsed.rows.length === 0} onClick={() => void runCompare()}>{busy && parsed ? "Comparing…" : "Compare With Catalog"}</button>
         <button type="button" className="admin-primary" disabled title="Apply is enabled in a later, separately approved phase">Apply Selected Changes</button>
+        {confirmClear ? (
+          <span className="stock-clear-confirm" role="alertdialog" aria-label="Confirm clear draft">
+            <span>Clear the saved draft and reset this page? Catalog data is not touched.</span>
+            <button type="button" className="admin-secondary danger" onClick={discardDraft}>Yes, clear draft</button>
+            <button type="button" className="admin-secondary" onClick={() => setConfirmClear(false)}>Keep draft</button>
+          </span>
+        ) : (
+          <button type="button" className="admin-secondary" disabled={busy || (!text && !fileName && !Object.keys(resolutions).length && !Object.keys(overrides).length)} onClick={() => setConfirmClear(true)}>Clear Draft</button>
+        )}
       </div>
+      <p className="stock-hint stock-save-state" aria-live="polite">
+        {saveFailed ? "⚠ Autosave failed (browser storage unavailable) — your draft will not survive a refresh." : savedAt ? `Draft autosaved ${clock(savedAt)} · stored only in this browser` : "Draft autosaves in this browser as you work"}
+      </p>
       {error && <p className="bulk-images-error" role="alert">{error}</p>}
 
       {parsed && !delta && (
@@ -219,6 +400,27 @@ export function StockListUpdate() {
           <strong>Parsed — nothing compared yet</strong>
           <p>{parsed.rows.length} variant row(s) · {parsed.summary.headings} heading(s) · {parsed.excluded.length} excluded line(s) · {parsed.rows.filter((row) => row.needsReview).length} row(s) flagged for review</p>
         </div>
+      )}
+
+      {Object.keys(resolutions).length > 0 && (
+        <div className="bulk-images-devreport stock-decisions" aria-label="Owner decisions">
+          <strong>Owner decisions ({Object.keys(resolutions).length}) — saved with the draft</strong>
+          <ul>
+            {Object.values(resolutions).map((record) => (
+              <li key={record.rowKey}>
+                <span>
+                  {record.label || record.sourceLine}: {describeResolution(record.resolution)}
+                  {resolved?.unmatched.includes(record.rowKey) && <small className="plain"> — not applied (no longer matches the current list, or not parsed yet)</small>}
+                </span>
+                <button type="button" className="admin-secondary" onClick={() => undoResolution(record.rowKey)}>Undo</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {delta && !applyAuthorized && (
+        <p className="stock-hint">Your decisions changed since the last comparison. The classification below is refreshed, but click Compare With Catalog again before any future Apply.</p>
       )}
 
       {delta && counts && plan && (
@@ -305,6 +507,27 @@ export function StockListUpdate() {
         </>
       )}
     </section>
+  );
+}
+
+function ResolverActions({ entry, onResolve }: { entry: DeltaEntry; onResolve: (resolution: Resolution) => void }) {
+  const [replacement, setReplacement] = useState("");
+  const options = resolutionOptions(entry.row);
+  return (
+    <div className="stock-resolver">
+      {options.colorIssue && (
+        <>
+          <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "accept_color_as_entered" })}>Use as entered</button>
+          <span className="stock-replace">
+            <input type="text" value={replacement} maxLength={40} placeholder="Correct colour" aria-label={`Replacement colour for ${entry.productTitle} ${entry.label}`} onChange={(event) => setReplacement(event.target.value)} />
+            <button type="button" className="admin-secondary" disabled={!replacement.trim()} onClick={() => onResolve({ type: "replace_color", color: replacement.trim() })}>Replace colour</button>
+          </span>
+        </>
+      )}
+      {options.token && <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "move_token_to_model", token: options.token as string })}>Move {options.token.toUpperCase()} to model name</button>}
+      {options.physicalRam !== null && <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "set_physical_ram", ramGb: options.physicalRam as number })}>Physical RAM: {options.physicalRam} GB</button>}
+      <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "skip_row" })}>Skip</button>
+    </div>
   );
 }
 
