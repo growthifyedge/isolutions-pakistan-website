@@ -341,3 +341,99 @@ test("source: Apply stays disabled, no database write is reachable from the draf
   assert.match(ui, /touched\.current = true;/);
   assert.match(ui, /Draft restored/);
 });
+
+// ---------------------------------------------------------------------------
+// Source-line-level resolutions must keep every sibling colour of that line.
+// ---------------------------------------------------------------------------
+
+const FOCUS = "ZTE\nFocus Pro 8/256 5g black/brown @ 56500";
+const tokenResolution = (parsed) => {
+  const keys = buildRowKeys(parsed.rows);
+  const resolutions = {};
+  parsed.rows.forEach((row, index) => {
+    const token = resolutionOptions(row).token;
+    if (token) resolutions[keys[index]] = record(keys[index], { type: "move_token_to_model", token });
+  });
+  return resolutions;
+};
+const shape = (rows) => rows.map((r) => [r.productTitle, r.ram, r.storage, r.color, r.priceMinor]);
+const fiveGCatalog = (...colors) => [{ id: "p-f", slug: "zte-focus-pro-5g", title: "ZTE Focus Pro 5G", brand: "ZTE", category: "Mobile Phones", publicationStatus: "published", mediaCount: 1, specCount: 1,
+  variants: colors.map(([color, price], i) => ({ id: `f${i}`, sku: `MB10${i}`, ram: "8 GB", storage: "256 GB", color, priceMinor: price * 100, compareAtPriceMinor: null, stock: 10, ptaStatus: "approved", condition: "brand_new", conditionGrade: null, batteryHealth: null, cycleCount: null, isActive: true })) }];
+
+test("Focus Pro 5g black/brown @ 56500: move token keeps BOTH colours, RAM, storage and price", () => {
+  const parsed = parse(FOCUS);
+  const resolved = applyResolutions(parsed, tokenResolution(parsed));
+  assert.deepEqual(shape(resolved.parsed.rows), [
+    ["ZTE Focus Pro 5G", "8 GB", "256 GB", "Black", 5650000],
+    ["ZTE Focus Pro 5G", "8 GB", "256 GB", "Brown", 5650000],
+  ]);
+  assert.ok(resolved.parsed.rows.every((r) => r.model === "Focus Pro 5G" && r.reviewReasons.length === 0));
+  assert.deepEqual(resolved.unmatched, []);
+});
+
+test("a 3-colour source line keeps all 3 child variants, once each", () => {
+  const parsed = parse("ZTE\nFocus Pro 8/256 5g black/brown/blue @ 56500");
+  const resolved = applyResolutions(parsed, tokenResolution(parsed));
+  assert.deepEqual(resolved.parsed.rows.map((r) => r.color), ["Black", "Brown", "Blue"]);
+  assert.equal(new Set(resolved.rowKeys).size, resolved.rowKeys.length);
+  assert.ok(resolved.parsed.rows.every((r) => r.model === "Focus Pro 5G" && r.priceMinor === 5650000));
+});
+
+test("the token may sit first, in the middle, last, upper-case or separated differently: no sibling is ever dropped", () => {
+  for (const colors of ["5g/black/brown", "black/5g/brown", "black/brown 5g", "5G Black/Brown", "5g black / brown", "5g black, brown", "5g black & brown"]) {
+    const parsed = parse(`ZTE\nFocus Pro 8/256 ${colors} @ 56500`);
+    const resolutions = tokenResolution(parsed);
+    assert.ok(Object.keys(resolutions).length >= 1, colors);
+    const rows = applyResolutions(parsed, resolutions).parsed.rows;
+    assert.deepEqual(rows.map((r) => r.color).sort(), ["Black", "Brown"], colors);
+    assert.ok(rows.every((r) => r.productTitle === "ZTE Focus Pro 5G" && r.priceMinor === 5650000), colors);
+  }
+});
+
+test("only the resolved source line is transformed; other lines and their colours are untouched", () => {
+  const parsed = parse("ZTE\nA36 4/64 blue/green @ 20000\nFocus Pro 8/256 5g black/brown @ 56500\nBlade 6/128 red/gold @ 30000");
+  const rows = applyResolutions(parsed, tokenResolution(parsed)).parsed.rows;
+  assert.deepEqual(rows.map((r) => [r.productTitle, r.color]), [
+    ["ZTE A36", "Blue"], ["ZTE A36", "Green"], ["ZTE Focus Pro 5G", "Black"], ["ZTE Focus Pro 5G", "Brown"], ["ZTE Blade", "Red"], ["ZTE Blade", "Gold"],
+  ]);
+});
+
+test("single-colour lines still work (token row is the whole line)", () => {
+  const parsed = parse("ZTE\nFocus Pro 8/256 5g black @ 56500");
+  const rows = applyResolutions(parsed, tokenResolution(parsed)).parsed.rows;
+  assert.deepEqual(shape(rows), [["ZTE Focus Pro 5G", "8 GB", "256 GB", "Black", 5650000]]);
+});
+
+test("the two-colour move-token decision survives save/restore and still yields both variants", () => {
+  const parsed = parse(FOCUS);
+  const resolutions = tokenResolution(parsed);
+  const storage = memoryStorage();
+  saveDraft(storage, draftOf({ text: FOCUS, wasParsed: true, resolutions }));
+  const { draft } = reload(storage);
+  const rows = applyResolutions(parse(draft.text), draft.resolutions).parsed.rows;
+  assert.deepEqual(shape(rows), [
+    ["ZTE Focus Pro 5G", "8 GB", "256 GB", "Black", 5650000],
+    ["ZTE Focus Pro 5G", "8 GB", "256 GB", "Brown", 5650000],
+  ]);
+});
+
+test("after Compare both colours are classified (never dropped), wherever each lands", () => {
+  const parsed = parse(FOCUS);
+  const rows = applyResolutions(parsed, tokenResolution(parsed)).parsed;
+  const landing = (catalog) => buildStockDelta(rows, catalog).entries.map((e) => `${e.row.color}:${e.kind}`);
+  assert.deepEqual(landing([]), ["Black:new_product", "Brown:new_product"]);
+  assert.deepEqual(landing(fiveGCatalog(["Black", 49000], ["Brown", 49000])), ["Black:price_change", "Brown:price_change"]);
+  assert.deepEqual(landing(fiveGCatalog(["Black", 49000], ["Brown", 56500])), ["Black:price_change", "Brown:unchanged"]);
+  assert.deepEqual(landing(fiveGCatalog(["Black", 49000])), ["Black:price_change", "Brown:new_variant"]);
+  for (const catalog of [[], fiveGCatalog(["Black", 49000], ["Brown", 56500])]) {
+    const delta = buildStockDelta(rows, catalog);
+    assert.equal(delta.entries.length, 2);
+    assert.equal(new Set(delta.entries.map((e) => e.id)).size, 2);
+  }
+});
+
+test("the decisions panel lists every row that now comes from the resolved source line", () => {
+  const ui = readFileSync(new URL("../src/admin/StockListUpdate.tsx", import.meta.url), "utf8");
+  assert.match(ui, /function resolutionOutcome/);
+  assert.match(ui, /row\(s\) from this source line/);
+});

@@ -2387,3 +2387,4 @@ p.bulk-images-error { padding-left: 14px; }
   .stock-clear-confirm { width: 100%; box-sizing: border-box; }
 }
 .stock-update .bulk-images-table td small.plain { min-width: 170px; }
+.stock-outcome { display: block; margin-top: 3px; text-transform: none; }

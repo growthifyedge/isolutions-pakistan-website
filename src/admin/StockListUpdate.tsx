@@ -15,6 +15,7 @@ import {
   type DeltaEntry,
   type ParsedStockList,
   type CatalogDeltaProduct,
+  type StockDelta,
 } from "../lib/stockListDelta";
 import { loadActiveBrands, loadCatalogForDelta } from "../lib/stockListDeltaDb";
 import {
@@ -411,6 +412,7 @@ export function StockListUpdate() {
                 <span>
                   {record.label || record.sourceLine}: {describeResolution(record.resolution)}
                   {resolved?.unmatched.includes(record.rowKey) && <small className="plain"> — not applied (no longer matches the current list, or not parsed yet)</small>}
+                  {delta && resolutionOutcome(delta, record)}
                 </span>
                 <button type="button" className="admin-secondary" onClick={() => undoResolution(record.rowKey)}>Undo</button>
               </li>
@@ -507,6 +509,27 @@ export function StockListUpdate() {
         </>
       )}
     </section>
+  );
+}
+
+const KIND_LABEL: Record<DeltaEntry["kind"], string> = {
+  unchanged: "Unchanged",
+  price_change: "Price change",
+  new_variant: "New variant",
+  new_product: "New product",
+  ambiguous: "Ambiguous",
+  blocked: "Blocked",
+};
+
+/** Every row that now comes from the decision's source line (all sibling colours), with the tab each one landed in. */
+function resolutionOutcome(delta: StockDelta, record: ResolutionRecord) {
+  if (record.resolution.type === "skip_row") return null;
+  const rows = delta.entries.filter((entry) => entry.row.sourceLine === record.sourceLine);
+  if (!rows.length) return null;
+  return (
+    <small className="plain stock-outcome">
+      Now {rows.length} row(s) from this source line: {rows.map((entry) => `${entry.productTitle} · ${entry.label} · ${formatMinor(entry.newPriceMinor)} → ${KIND_LABEL[entry.kind]}`).join("  |  ")}
+    </small>
   );
 }
 
