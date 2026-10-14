@@ -32,7 +32,7 @@ type ProductRow = {
   title: string;
   publication_status: string | null;
   brand: { name: string } | null;
-  category: { name: string } | null;
+  category: { name: string; slug: string } | null;
 };
 
 type VariantRow = {
@@ -57,7 +57,7 @@ export async function loadCatalogForDelta(client: SupabaseClient): Promise<Catal
   const products = await selectAll<ProductRow>((from, to) =>
     client
       .from("products")
-      .select("id,slug,title,publication_status,brand:brands(name),category:categories(name)")
+      .select("id,slug,title,publication_status,brand:brands(name),category:categories(name,slug)")
       .eq("data_class", "real")
       .order("id")
       .range(from, to),
@@ -112,6 +112,7 @@ export async function loadCatalogForDelta(client: SupabaseClient): Promise<Catal
     title: product.title,
     brand: product.brand?.name ?? null,
     category: product.category?.name ?? null,
+    categorySlug: product.category?.slug ?? null,
     publicationStatus: product.publication_status,
     mediaCount: mediaCount.get(product.id) ?? 0,
     specCount: specCount.get(product.id) ?? 0,

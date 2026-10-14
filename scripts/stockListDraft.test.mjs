@@ -335,11 +335,11 @@ test("source: Apply stays disabled, no database write is reachable from the draf
   }
   const ui = readFileSync(new URL("../src/admin/StockListUpdate.tsx", import.meta.url), "utf8");
   assert.match(ui, /<button type="button" className="admin-primary" disabled title=/);
-  assert.match(ui, /Clear Draft/);
+  assert.match(ui, /STEP\.clear/);
   // An untouched tab must never overwrite/delete a saved draft (autosave and the pagehide/unmount flush are gated).
   assert.match(ui, /if \(touched\.current\) saveDraft\(/);
   assert.match(ui, /touched\.current = true;/);
-  assert.match(ui, /Draft restored/);
+  assert.match(ui, /WORDING\.listBack/);
 });
 
 // ---------------------------------------------------------------------------
@@ -435,5 +435,5 @@ test("after Compare both colours are classified (never dropped), wherever each l
 test("the decisions panel lists every row that now comes from the resolved source line", () => {
   const ui = readFileSync(new URL("../src/admin/StockListUpdate.tsx", import.meta.url), "utf8");
   assert.match(ui, /function resolutionOutcome/);
-  assert.match(ui, /row\(s\) from this source line/);
+  assert.match(ui, /row\(s\) from this line/);
 });

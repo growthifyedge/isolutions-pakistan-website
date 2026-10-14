@@ -3,16 +3,17 @@ import { supabase, supabaseEnvironmentLabel } from "../lib/supabase";
 import { csvRows } from "../lib/bulkCatalog";
 import { loadExcelJs } from "../lib/catalogWorkbook";
 import {
-  CATEGORY_LABEL,
   buildApplyPlan,
   buildStockDelta,
   defaultSelection,
   formatDiff,
   formatMinor,
+  isHideSelectable,
   isSelectable,
   parseStockList,
   tableToStockText,
   type DeltaEntry,
+  type MissingEntry,
   type ParsedStockList,
   type CatalogDeltaProduct,
   type StockDelta,
@@ -24,6 +25,7 @@ import {
   comparisonAuthorizesApply,
   describeResolution,
   draftFromState,
+  hasDraftContent,
   loadDraft,
   makeComparisonStamp,
   resolutionOptions,
@@ -33,23 +35,14 @@ import {
   type Resolution,
   type ResolutionRecord,
 } from "../lib/stockListDraft";
+import { ACTION, CATEGORY_LABEL, HIDE_LABEL, KIND_LABEL, PAGE_HELP, PAGE_TITLE, SHOW_AGAIN_LABEL, STEP, TOKEN_EXPLANATION, WORDING, explainReason } from "../lib/stockUpdateWording";
 
-// Admin "Stock List Update": parse -> compare -> delta preview -> selection -> apply PLAN.
-// This phase performs NO database write; "Apply Selected Changes" is intentionally disabled.
-// The Owner's working draft (list text, decisions, checkbox choices) is autosaved to localStorage and restored on reload.
-// A comparison is NEVER restored: it is recomputed from the live catalog by a fresh read-only Compare.
+// Admin "Android Stock Update": Paste List -> Check List -> Review Changes -> Update Website.
+// This phase performs NO database write; "Update Website" is intentionally disabled.
+// The Owner's working list (text, fixes, ticks) is autosaved to localStorage and restored on reload.
+// A check is NEVER restored: it is recomputed from the live website data by a fresh read-only Check List.
 
-type TabId = "price_change" | "new_variant" | "new_product" | "missing" | "ambiguous" | "blocked" | "unchanged";
-
-const TABS: Array<{ id: TabId; label: string }> = [
-  { id: "price_change", label: "Price Changes" },
-  { id: "new_variant", label: "New Variants" },
-  { id: "new_product", label: "New Products" },
-  { id: "missing", label: "Missing" },
-  { id: "ambiguous", label: "Ambiguous" },
-  { id: "blocked", label: "Blocked" },
-  { id: "unchanged", label: "Unchanged" },
-];
+type TabId = "price_change" | "new_variant" | "new_product" | "show_again" | "hide" | "ambiguous" | "blocked";
 
 async function readTable(file: File): Promise<string[][]> {
   const lower = file.name.toLowerCase();
@@ -87,8 +80,10 @@ const clock = (iso: string | null) => {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("en-PK", { dateStyle: "medium", timeStyle: "short" });
 };
 
+const hideKey = (entry: MissingEntry) => `hide:${entry.id}`;
+
 export function StockListUpdate() {
-  // Read once, before the first render, so the autosave below can never overwrite a draft that has not been restored yet.
+  // Read once, before the first render, so the autosave below can never overwrite a list that has not been restored yet.
   const [initial] = useState(() => loadDraft(browserStorage()));
   const restored = initial.status === "restored" ? initial.draft : null;
   const [text, setText] = useState(restored?.text ?? "");
@@ -108,7 +103,7 @@ export function StockListUpdate() {
   const [saveFailed, setSaveFailed] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
 
-  // Resolutions are applied to the parsed rows, then classified against the in-memory catalog from the last live Compare.
+  // The Owner's fixes are applied to the parsed rows, then compared against the website data from the last live Check.
   const resolved = useMemo(() => (parsed ? applyResolutions(parsed, resolutions) : null), [parsed, resolutions]);
   const delta = useMemo(() => (resolved && catalog ? buildStockDelta(resolved.parsed, catalog) : null), [resolved, catalog]);
   const selected = useMemo(() => {
@@ -121,13 +116,20 @@ export function StockListUpdate() {
         else base.delete(entry.id);
       }
     }
+    for (const entry of delta.missing) {
+      const key = hideKey(entry);
+      if (key in overrides) {
+        if (overrides[key] && isHideSelectable(entry)) base.add(entry.id);
+        else base.delete(entry.id);
+      }
+    }
     return base;
   }, [delta, resolved, overrides]);
   const plan = useMemo(() => (delta ? buildApplyPlan(delta, selected) : null), [delta, selected]);
-  // A future Apply must require this to be true. It is false after any reload (the stamp is memory-only) and after any later edit.
-  const applyAuthorized = comparisonAuthorizesApply(stamp, text, resolutions);
+  // A future Update Website must require this to be true. It is false after any reload (the stamp is memory-only) and after any later edit.
+  const checkIsCurrent = comparisonAuthorizesApply(stamp, text, resolutions);
 
-  // Autosave (debounced) + a final flush when the page is hidden or the Stock Update screen unmounts.
+  // Autosave (debounced) + a final flush when the page is hidden or the screen unmounts.
   const wasParsed = parsed !== null;
   const latest = useRef(draftFromState({ text, fileName, wasParsed, lastComparedAt, resolutions, selectionOverrides: overrides }));
   const currentDraft = draftFromState({ text, fileName, wasParsed, lastComparedAt, resolutions, selectionOverrides: overrides });
@@ -135,7 +137,7 @@ export function StockListUpdate() {
     latest.current = currentDraft;
   });
   // Nothing is written until this tab has actually changed something, so merely opening (or closing) an untouched
-  // Stock Update screen can never overwrite or delete a draft saved earlier or from another tab.
+  // page can never overwrite or delete a list saved earlier or from another tab.
   const touched = useRef(false);
   const mounted = useRef(false);
   useEffect(() => {
@@ -147,7 +149,7 @@ export function StockListUpdate() {
     const timer = window.setTimeout(() => {
       const ok = saveDraft(browserStorage(), latest.current);
       setSaveFailed(!ok);
-      if (ok) setSavedAt(new Date().toISOString());
+      if (ok) setSavedAt(hasDraftContent(latest.current) ? new Date().toISOString() : null);
     }, 400);
     return () => window.clearTimeout(timer);
   }, [text, fileName, wasParsed, lastComparedAt, resolutions, overrides]);
@@ -160,23 +162,6 @@ export function StockListUpdate() {
       window.removeEventListener("pagehide", flush);
       flush();
     };
-  }, []);
-
-  // A restored draft that had been parsed is re-parsed (read-only brand lookup) so only Compare remains to be clicked.
-  useEffect(() => {
-    if (!restored?.wasParsed || !supabase || !restored.text.trim()) return;
-    let cancelled = false;
-    loadActiveBrands(supabase)
-      .then((brands) => {
-        if (!cancelled) setParsed(parseStockList(restored.text, brands));
-      })
-      .catch(() => {
-        if (!cancelled) setError("The restored list could not be re-parsed automatically — click Parse Stock List.");
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once for the draft read at mount
   }, []);
 
   function changeText(next: string, name?: string) {
@@ -199,45 +184,41 @@ export function StockListUpdate() {
     }
   }
 
-  async function runParse() {
+  /** Check List = read the pasted list + read the current website data (read-only) and compare them, in one step. */
+  async function runCheck() {
     if (!supabase) return setError("Supabase is not configured.");
     setBusy(true);
     setError("");
     try {
       const brands = await loadActiveBrands(supabase);
-      setParsed(parseStockList(text, brands));
-      setCatalog(null);
-      setStamp(null);
-    } catch (problem) {
-      setError(problem instanceof Error ? problem.message : "Parsing failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function runCompare() {
-    if (!supabase || !parsed) return;
-    setBusy(true);
-    setError("");
-    try {
+      const parsedNow = parseStockList(text, brands);
+      if (!parsedNow.rows.length) {
+        setParsed(null);
+        setCatalog(null);
+        setStamp(null);
+        setError("We couldn't read any phone lines from this list, so nothing was checked.");
+        return;
+      }
       const fresh = await loadCatalogForDelta(supabase);
-      const next = buildStockDelta(applyResolutions(parsed, resolutions).parsed, fresh);
+      const next = buildStockDelta(applyResolutions(parsedNow, resolutions).parsed, fresh);
+      setParsed(parsedNow);
       setCatalog(fresh);
       const now = new Date();
       setStamp(makeComparisonStamp(text, resolutions, now));
       setLastComparedAt(now.toISOString());
       setWasRestored(false);
-      setTab(next.counts.priceChanges ? "price_change" : next.counts.newVariants ? "new_variant" : next.counts.newProducts ? "new_product" : next.counts.ambiguous ? "ambiguous" : "unchanged");
+      const { counts } = next;
+      setTab(counts.ambiguous ? "ambiguous" : counts.priceChanges ? "price_change" : counts.newVariants ? "new_variant" : counts.newProducts ? "new_product" : counts.willHide ? "hide" : counts.showAgain ? "show_again" : "price_change");
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : "The catalog comparison failed.");
+      setError(problem instanceof Error ? problem.message : "The check failed.");
     } finally {
       setBusy(false);
     }
   }
 
-  function toggle(rowKey: string | undefined, on: boolean) {
-    if (rowKey === undefined) return;
-    setOverrides((current) => ({ ...current, [rowKey]: on }));
+  function toggle(key: string | undefined, on: boolean) {
+    if (key === undefined) return;
+    setOverrides((current) => ({ ...current, [key]: on }));
   }
 
   function resolve(rowKey: string, entry: DeltaEntry, resolution: Resolution) {
@@ -253,7 +234,7 @@ export function StockListUpdate() {
     });
   }
 
-  function discardDraft() {
+  function discardList() {
     const cleared = clearDraft(browserStorage());
     setText("");
     setFileName("");
@@ -268,68 +249,88 @@ export function StockListUpdate() {
     setWasRestored(false);
     setConfirmClear(false);
     setTab("price_change");
-    setNotice(cleared ? "Draft cleared. Nothing in the catalog was changed." : "Page reset, but the browser would not let the saved draft be removed.");
+    setNotice(cleared ? WORDING.cleared : WORDING.clearFailed);
   }
 
   const counts = delta?.counts;
-  const cards: Array<[string, number | string]> = counts
+  const rowKeyOf = (entry: DeltaEntry) => resolved?.rowKeys[Number(entry.id.slice(4))];
+  const entriesFor = (kind: DeltaEntry["kind"]) => delta?.entries.filter((entry) => entry.kind === kind) ?? [];
+  const showAgainEntries = delta?.entries.filter((entry) => entry.showAgain && entry.kind !== "ambiguous") ?? [];
+
+  const cards: Array<[string, number]> = counts
     ? [
-        ["Parsed rows", counts.parsedRows],
-        ["Matched products", counts.matchedProducts],
-        ["Unchanged", counts.unchanged],
-        ["Price changes", counts.priceChanges],
-        ["New variants", counts.newVariants],
-        ["New products", counts.newProducts],
-        ["Missing from list", counts.missingProducts + counts.missingVariants],
-        ["Ambiguous", counts.ambiguous],
-        ["Blocked", counts.blocked + counts.excluded],
+        [KIND_LABEL.unchanged, counts.unchanged],
+        [KIND_LABEL.price_change, counts.priceChanges],
+        [KIND_LABEL.new_variant, counts.newVariants],
+        [KIND_LABEL.new_product, counts.newProducts],
+        [HIDE_LABEL, counts.willHide],
+        ...(counts.showAgain ? ([[SHOW_AGAIN_LABEL, counts.showAgain]] as Array<[string, number]>) : []),
+        [KIND_LABEL.ambiguous, counts.ambiguous],
+        [KIND_LABEL.blocked, counts.notAndroid],
       ]
     : [];
 
-  const rowKeyOf = (entry: DeltaEntry) => resolved?.rowKeys[Number(entry.id.slice(4))];
-  const entriesFor = (kind: DeltaEntry["kind"]) => delta?.entries.filter((entry) => entry.kind === kind) ?? [];
+  const tabs: Array<{ id: TabId; label: string; total: number }> = delta && counts
+    ? [
+        { id: "price_change", label: KIND_LABEL.price_change, total: counts.priceChanges },
+        { id: "new_variant", label: KIND_LABEL.new_variant, total: counts.newVariants },
+        { id: "new_product", label: KIND_LABEL.new_product, total: counts.newProducts },
+        { id: "hide", label: HIDE_LABEL, total: counts.willHide },
+        ...(counts.showAgain ? [{ id: "show_again" as const, label: SHOW_AGAIN_LABEL, total: counts.showAgain }] : []),
+        { id: "ambiguous", label: KIND_LABEL.ambiguous, total: counts.ambiguous },
+        { id: "blocked", label: KIND_LABEL.blocked, total: counts.notAndroid },
+      ]
+    : [];
 
-  function entryRows(kind: DeltaEntry["kind"], mode: "price" | "variant" | "product" | "plain") {
+  function entryNotes(entry: DeltaEntry, rows: DeltaEntry[], mode: "price" | "variant" | "product" | "attention") {
+    const options = resolutionOptions(entry.row);
+    const explanations = [...new Set(entry.reasons.map((reason) => (options.token && /colour/i.test(reason) ? TOKEN_EXPLANATION(options.token) : explainReason(reason))))];
+    return (
+      <>
+        {explanations.map((note) => (<small className="plain" key={note}>{note}</small>))}
+        {entry.notes.map((note) => (<small className="plain" key={note}>{note}</small>))}
+        {mode === "attention" && entry.provisionalKind && <small className="plain">{WORDING.wouldBe(KIND_LABEL[entry.provisionalKind])}</small>}
+        {mode === "product" && rows.findIndex((other) => other.productSlug === entry.productSlug) === rows.indexOf(entry) && entry.requirements.map((need) => (<small className="plain" key={need}>{need}</small>))}
+        <small className="plain">Line {entry.row.lineNumber}</small>
+      </>
+    );
+  }
+
+  function entryRows(kind: DeltaEntry["kind"], mode: "price" | "variant" | "product" | "attention") {
     const rows = entriesFor(kind);
-    if (!rows.length) return <p className="stock-empty">Nothing in this group.</p>;
+    if (!rows.length) return <p className="stock-empty">{WORDING.nothingHere}</p>;
+    const ticks = mode !== "attention";
     return (
       <div className="bulk-images-table">
         <table>
           <thead>
             <tr>
-              {isSelectableKind(kind) && <th>Apply</th>}
-              <th>Product</th>
+              {ticks && <th>Update</th>}
+              <th>Phone</th>
               <th>RAM / Storage / Color</th>
-              {mode === "price" && (<><th>SKU</th><th>Current</th><th>New</th><th>Diff</th></>)}
-              {mode !== "price" && mode !== "plain" && <th>New price</th>}
-              {mode === "plain" && (<><th>Category</th><th>Price</th></>)}
-              <th>Notes</th>
-              {kind === "ambiguous" && <th>Resolve</th>}
+              {mode === "price" && (<><th>SKU</th><th>Now</th><th>New</th><th>Change</th></>)}
+              {mode !== "price" && <th>Price</th>}
+              <th>{mode === "attention" ? "What's wrong" : "Notes"}</th>
+              {mode === "attention" && <th>What to do</th>}
             </tr>
           </thead>
           <tbody>
             {rows.map((entry) => (
               <tr key={entry.id} className={selected.has(entry.id) ? "included" : undefined}>
-                {isSelectableKind(kind) && (
+                {ticks && (
                   <td>
-                    <input type="checkbox" aria-label={`Apply ${entry.productTitle} ${entry.label}`} checked={selected.has(entry.id)} disabled={!isSelectable(entry)} onChange={(event) => toggle(rowKeyOf(entry), event.target.checked)} />
+                    <input type="checkbox" aria-label={`Update ${entry.productTitle} ${entry.label}`} checked={selected.has(entry.id)} disabled={!isSelectable(entry)} onChange={(event) => toggle(rowKeyOf(entry), event.target.checked)} />
                   </td>
                 )}
                 <td>
                   <strong>{entry.productTitle}</strong>
-                  {entry.mediaCount !== null && <small className="plain">{entry.mediaCount} image(s) · {entry.specCount} spec(s) preserved</small>}
+                  {entry.mediaCount !== null && <small className="plain">{entry.mediaCount} image(s) · {entry.specCount} spec(s) kept</small>}
                 </td>
                 <td>{entry.label}</td>
                 {mode === "price" && (<><td><code>{entry.sku}</code></td><td>{formatMinor(entry.currentPriceMinor)}</td><td>{formatMinor(entry.newPriceMinor)}</td><td>{formatDiff(entry.diffMinor)}</td></>)}
-                {mode !== "price" && mode !== "plain" && <td>{formatMinor(entry.newPriceMinor)}</td>}
-                {mode === "plain" && (<><td>{CATEGORY_LABEL[entry.category]}</td><td>{formatMinor(entry.newPriceMinor)}</td></>)}
-                <td>
-                  {[...entry.reasons, ...entry.notes].map((note) => (<small className="plain" key={note}>{note}</small>))}
-                  {entry.provisionalKind && <small className="plain">Would otherwise be: {entry.provisionalKind.replace("_", " ")}</small>}
-                  {mode === "product" && rows.findIndex((other) => other.productSlug === entry.productSlug) === rows.indexOf(entry) && entry.requirements.map((need) => (<small className="plain" key={need}>Needs: {need}</small>))}
-                  <small className="plain">Line {entry.row.lineNumber}</small>
-                </td>
-                {kind === "ambiguous" && (
+                {mode !== "price" && <td>{formatMinor(entry.newPriceMinor)}</td>}
+                <td>{entryNotes(entry, rows, mode)}</td>
+                {mode === "attention" && (
                   <td className="stock-resolve">
                     {(() => {
                       const key = rowKeyOf(entry);
@@ -345,166 +346,218 @@ export function StockListUpdate() {
     );
   }
 
+  function showAgainRows() {
+    if (!showAgainEntries.length) return <p className="stock-empty">{WORDING.nothingHere}</p>;
+    return (
+      <div className="bulk-images-table">
+        <table>
+          <thead><tr><th>Update</th><th>Phone</th><th>RAM / Storage / Color</th><th>SKU</th><th>Price</th><th>Notes</th></tr></thead>
+          <tbody>
+            {showAgainEntries.map((entry) => (
+              <tr key={entry.id} className={selected.has(entry.id) ? "included" : undefined}>
+                <td><input type="checkbox" aria-label={`Show ${entry.productTitle} ${entry.label} again`} checked={selected.has(entry.id)} disabled={!isSelectable(entry)} onChange={(event) => toggle(rowKeyOf(entry), event.target.checked)} /></td>
+                <td><strong>{entry.productTitle}</strong></td>
+                <td>{entry.label}</td>
+                <td><code>{entry.sku}</code></td>
+                <td>{formatMinor(entry.newPriceMinor)}</td>
+                <td>
+                  {entry.notes.map((note) => (<small className="plain" key={note}>{note}</small>))}
+                  {entry.kind === "price_change" && <small className="plain">Also listed under {KIND_LABEL.price_change}</small>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  function hideRows() {
+    if (!delta) return null;
+    const order: Record<MissingEntry["action"], number> = { hide: 0, held: 1, already_hidden: 2 };
+    const rows = [...delta.missing].sort((a, b) => order[a.action] - order[b.action] || a.productTitle.localeCompare(b.productTitle));
+    if (!rows.length) return <p className="stock-empty">{WORDING.nothingHidden}</p>;
+    return (
+      <div className="bulk-images-table">
+        <table>
+          <thead><tr><th>Update</th><th>Phone</th><th>What</th><th>RAM / Storage / Color</th><th>SKU</th><th>Price</th><th>Why</th></tr></thead>
+          <tbody>
+            {rows.map((entry) => (
+              <tr key={entry.id} className={selected.has(entry.id) ? "included" : entry.action !== "hide" ? "stock-muted" : undefined}>
+                <td><input type="checkbox" aria-label={`Hide ${entry.productTitle} ${entry.label}`} checked={selected.has(entry.id)} disabled={!isHideSelectable(entry)} onChange={(event) => toggle(hideKey(entry), event.target.checked)} /></td>
+                <td>
+                  <strong>{entry.productTitle}</strong>
+                  <small className="plain">{entry.mediaCount} image(s) · {entry.specCount} spec(s) kept</small>
+                </td>
+                <td>{entry.scope === "product" ? "Whole phone" : "One variant"}</td>
+                <td>{entry.label}</td>
+                <td>{entry.sku ? <code>{entry.sku}</code> : "—"}</td>
+                <td>{formatMinor(entry.priceMinor)}</td>
+                <td>
+                  <small className="plain">{entry.action === "held" ? WORDING.heldHide : entry.action === "already_hidden" ? WORDING.alreadyHidden : entry.reason}</small>
+                  {entry.publicationStatus !== "published" && <small className="plain">{WORDING.notPublished}</small>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  function notAndroidRows() {
+    if (!delta || !parsed) return null;
+    const rows = entriesFor("blocked");
+    if (!rows.length && !parsed.excluded.length) return <p className="stock-empty">{WORDING.nothingHere}</p>;
+    return (
+      <>
+        {rows.length > 0 && (
+          <div className="bulk-images-table">
+            <table>
+              <thead><tr><th>Line</th><th>What it is</th><th>Price</th></tr></thead>
+              <tbody>
+                {rows.map((entry) => (
+                  <tr key={entry.id} className="stock-muted">
+                    <td><strong>{entry.productTitle}</strong><small className="plain">Line {entry.row.lineNumber}: {entry.row.sourceLine}</small></td>
+                    <td>{CATEGORY_LABEL[entry.category]}</td>
+                    <td>{formatMinor(entry.newPriceMinor)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {parsed.excluded.length > 0 && (
+          <ul className="stock-excluded">
+            {parsed.excluded.map((line) => (<li key={line.lineNumber}>Line {line.lineNumber}: “{line.line}” — {line.reason}</li>))}
+          </ul>
+        )}
+        <p className="stock-hint">These lines are not Android phones, so this update leaves them alone. iPhones, tablets, feature phones and accessories will have their own update later.</p>
+      </>
+    );
+  }
+
   return (
     <section className="admin-panel stock-update" aria-labelledby="stock-update-title">
-      <span className="admin-kicker">CATALOG · STOCK</span>
-      <h2 id="stock-update-title">Stock List Update</h2>
-      <p>Paste or upload the latest supplier stock list. Existing products, images, specifications and URLs are preserved. Only approved changes are applied.</p>
+      <span className="admin-kicker">CATALOG · ANDROID STOCK</span>
+      <h2 id="stock-update-title">{PAGE_TITLE}</h2>
+      <p>{PAGE_HELP}</p>
       <div className={`bulk-images-env ${supabaseEnvironmentLabel.toLowerCase() === "production" ? "production" : "development"}`} role="status">
-        <span>Environment</span>
+        <span>Website</span>
         <strong>{supabaseEnvironmentLabel.toUpperCase()}</strong>
-        <small>Preview only — this tool does not write to the catalog yet</small>
+        <small>{WORDING.checkingOnly}</small>
       </div>
 
       {(wasRestored || notice) && (
         <div className="stock-draft-status restored" role="status">
-          <strong>{wasRestored ? "Draft restored" : notice}</strong>
-          {wasRestored && (
-            <span>
-              Saved {clock(savedAt) || "earlier"} · your list, decisions and checkbox choices are back. The comparison is not restored — click {parsed ? "" : "Parse Stock List, then "}Compare With Catalog to check against the current catalog.
+          <strong>{wasRestored ? WORDING.listBack : notice}</strong>
+          {wasRestored && <span>{WORDING.listBackDetail(clock(savedAt))}</span>}
+        </div>
+      )}
+
+      <div className="stock-step" aria-labelledby="stock-step-1">
+        <h3 id="stock-step-1"><span className="stock-step-number">1</span> {STEP.paste}</h3>
+        <label className="stock-field">
+          <span>Latest Android stock list</span>
+          <textarea value={text} rows={10} placeholder={"Samsung\n\nA07 4/64 black/green @ 36900\nA57 12/512 lilac/navy/grey @ 204500\n\nMotorola\n\nG77 8/256 black/green @ 91800"} onChange={(event) => changeText(event.target.value)} />
+        </label>
+        <label className="stock-field">
+          <span>Or upload a file (.txt, .csv, .xlsx)</span>
+          <input type="file" accept=".txt,.csv,.xlsx" onChange={(event) => void onFile(event.target.files?.[0])} />
+          {fileName && <small>Loaded {fileName}</small>}
+        </label>
+
+        <div className="bulk-images-bulk">
+          <button type="button" className="admin-primary" disabled={busy || !text.trim()} onClick={() => void runCheck()}>{busy ? "Checking…" : STEP.check}</button>
+          {confirmClear ? (
+            <span className="stock-clear-confirm" role="alertdialog" aria-label="Confirm clear list">
+              <span>{WORDING.clearConfirm}</span>
+              <button type="button" className="admin-secondary danger" onClick={discardList}>{WORDING.clearYes}</button>
+              <button type="button" className="admin-secondary" onClick={() => setConfirmClear(false)}>{WORDING.clearNo}</button>
             </span>
+          ) : (
+            <button type="button" className="admin-secondary" disabled={busy || (!text && !fileName && !Object.keys(resolutions).length && !Object.keys(overrides).length)} onClick={() => setConfirmClear(true)}>{STEP.clear}</button>
           )}
         </div>
-      )}
-
-      <label className="stock-field">
-        <span>Stock list</span>
-        <textarea value={text} rows={10} placeholder={"Samsung\n\nA07 4/64 black/green @ 36900\nA57 12/512 lilac/navy/grey @ 204500\n\nMotorola\n\nG77 8/256 black/green @ 91800"} onChange={(event) => changeText(event.target.value)} />
-      </label>
-      <label className="stock-field">
-        <span>Or upload a file (.txt, .csv, .xlsx)</span>
-        <input type="file" accept=".txt,.csv,.xlsx" onChange={(event) => void onFile(event.target.files?.[0])} />
-        {fileName && <small>Loaded {fileName}</small>}
-      </label>
-
-      <div className="bulk-images-bulk">
-        <button type="button" className="admin-secondary" disabled={busy || !text.trim()} onClick={() => void runParse()}>{busy && !parsed ? "Working…" : "Parse Stock List"}</button>
-        <button type="button" className="admin-secondary" disabled={busy || !parsed || parsed.rows.length === 0} onClick={() => void runCompare()}>{busy && parsed ? "Comparing…" : "Compare With Catalog"}</button>
-        <button type="button" className="admin-primary" disabled title="Apply is enabled in a later, separately approved phase">Apply Selected Changes</button>
-        {confirmClear ? (
-          <span className="stock-clear-confirm" role="alertdialog" aria-label="Confirm clear draft">
-            <span>Clear the saved draft and reset this page? Catalog data is not touched.</span>
-            <button type="button" className="admin-secondary danger" onClick={discardDraft}>Yes, clear draft</button>
-            <button type="button" className="admin-secondary" onClick={() => setConfirmClear(false)}>Keep draft</button>
-          </span>
-        ) : (
-          <button type="button" className="admin-secondary" disabled={busy || (!text && !fileName && !Object.keys(resolutions).length && !Object.keys(overrides).length)} onClick={() => setConfirmClear(true)}>Clear Draft</button>
-        )}
+        <p className="stock-hint stock-save-state" aria-live="polite">
+          {saveFailed ? WORDING.autosaveFailed : savedAt ? WORDING.autosaved(clock(savedAt)) : WORDING.autosave}
+        </p>
+        {error && <p className="bulk-images-error" role="alert">{error}</p>}
       </div>
-      <p className="stock-hint stock-save-state" aria-live="polite">
-        {saveFailed ? "⚠ Autosave failed (browser storage unavailable) — your draft will not survive a refresh." : savedAt ? `Draft autosaved ${clock(savedAt)} · stored only in this browser` : "Draft autosaves in this browser as you work"}
-      </p>
-      {error && <p className="bulk-images-error" role="alert">{error}</p>}
 
-      {parsed && !delta && (
-        <div className="bulk-images-devreport" aria-label="Parse result">
-          <strong>Parsed — nothing compared yet</strong>
-          <p>{parsed.rows.length} variant row(s) · {parsed.summary.headings} heading(s) · {parsed.excluded.length} excluded line(s) · {parsed.rows.filter((row) => row.needsReview).length} row(s) flagged for review</p>
-        </div>
-      )}
-
-      {Object.keys(resolutions).length > 0 && (
-        <div className="bulk-images-devreport stock-decisions" aria-label="Owner decisions">
-          <strong>Owner decisions ({Object.keys(resolutions).length}) — saved with the draft</strong>
-          <ul>
-            {Object.values(resolutions).map((record) => (
-              <li key={record.rowKey}>
-                <span>
-                  {record.label || record.sourceLine}: {describeResolution(record.resolution)}
-                  {resolved?.unmatched.includes(record.rowKey) && <small className="plain"> — not applied (no longer matches the current list, or not parsed yet)</small>}
-                  {delta && resolutionOutcome(delta, record)}
-                </span>
-                <button type="button" className="admin-secondary" onClick={() => undoResolution(record.rowKey)}>Undo</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {delta && !applyAuthorized && (
-        <p className="stock-hint">Your decisions changed since the last comparison. The classification below is refreshed, but click Compare With Catalog again before any future Apply.</p>
-      )}
-
-      {delta && counts && plan && (
+      {delta && counts && plan && parsed && (
         <>
-          <div className="stock-cards" aria-label="Delta summary">
-            {cards.map(([label, value]) => (
-              <div className="stock-card" key={label}>
-                <strong>{value}</strong>
-                <span>{label}</span>
-              </div>
-            ))}
-          </div>
-          <p className="stock-hint">
-            Matched variants {counts.matchedVariants} · New products {counts.newProducts} ({counts.newProductVariants} variants) · Parsed models {counts.parsedProducts}. Missing items are review-only and are never hidden, deleted or unpublished.
-          </p>
-
-          <div className="stock-tabs" role="tablist">
-            {TABS.map((item) => {
-              const total = item.id === "missing" ? delta.missing.length : item.id === "blocked" ? entriesFor("blocked").length + delta.excluded.length : entriesFor(item.id).length;
-              return (
-                <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>
-                  {item.label} <span>{total}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {tab === "price_change" && entryRows("price_change", "price")}
-          {tab === "new_variant" && entryRows("new_variant", "variant")}
-          {tab === "new_product" && entryRows("new_product", "product")}
-          {tab === "ambiguous" && entryRows("ambiguous", "variant")}
-          {tab === "unchanged" && entryRows("unchanged", "price")}
-          {tab === "blocked" && (
-            <>
-              {entryRows("blocked", "plain")}
-              {delta.excluded.length > 0 && (
-                <ul className="stock-excluded">
-                  {delta.excluded.map((line) => (<li key={line.lineNumber}>Line {line.lineNumber}: “{line.line}” — {line.reason}</li>))}
-                </ul>
-              )}
-            </>
-          )}
-          {tab === "missing" &&
-            (delta.missing.length ? (
-              <div className="bulk-images-table">
-                <table>
-                  <thead><tr><th>Product</th><th>Scope</th><th>Variant</th><th>SKU</th><th>Price</th><th>Stock</th><th>State</th></tr></thead>
-                  <tbody>
-                    {delta.missing.map((entry) => (
-                      <tr key={entry.id}>
-                        <td><strong>{entry.productTitle}</strong></td>
-                        <td>{entry.scope === "product" ? "Whole product" : "Variant"}</td>
-                        <td>{entry.label}</td>
-                        <td>{entry.sku ? <code>{entry.sku}</code> : "—"}</td>
-                        <td>{formatMinor(entry.priceMinor)}</td>
-                        <td>{entry.stock ?? "—"}</td>
-                        <td>{entry.publicationStatus ?? "—"}{entry.isActive === false ? " · hidden" : ""}<small className="plain">Review only — not selectable</small></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="stock-empty">Every existing product and variant is in the new list.</p>
-            ))}
-
-          <div className="bulk-images-devreport stock-plan" aria-label="Apply plan">
-            <strong>Apply plan — what WOULD happen (nothing is written)</strong>
-            <p>
-              {plan.counts.priceUpdates} price update(s) · {plan.counts.newVariants} new variant(s) · {plan.counts.newProducts} new product(s) with {plan.counts.newProductVariants} variant(s) · {plan.missingReviewOnly} missing item(s) review-only, no action
+          <div className="stock-step" aria-labelledby="stock-step-2">
+            <h3 id="stock-step-2"><span className="stock-step-number">2</span> {STEP.review}</h3>
+            <p className="stock-hint">
+              Checked {clock(lastComparedAt) || "just now"} against the {supabaseEnvironmentLabel.toLowerCase()} website · {counts.parsedRows} line(s) read · {counts.matchedProducts} phone(s) matched.
             </p>
-            <ul>
-              {plan.actions.slice(0, 25).map((action, index) => (
-                <li key={index}>
-                  {action.op === "update_price" && `Update price only: ${action.productTitle} · ${action.label} (${action.sku}) ${formatMinor(action.fromMinor)} → ${formatMinor(action.toMinor)}`}
-                  {action.op === "create_variant" && `Add variant: ${action.productTitle} · ${[action.ram, action.storage, action.color].filter(Boolean).join(" / ")} at ${formatMinor(action.priceMinor)} (${action.sku})`}
-                  {action.op === "create_product" && `Create draft product: ${action.productTitle} with ${action.variants.length} variant(s) — needs an image and publication validation`}
-                </li>
+            {!checkIsCurrent && <p className="stock-hint stock-warning">{WORDING.changedSinceCheck}</p>}
+
+            <div className="stock-cards" aria-label="Summary">
+              {cards.map(([label, value]) => (
+                <div className="stock-card" key={label}>
+                  <strong>{value}</strong>
+                  <span>{label}</span>
+                </div>
               ))}
-              {plan.actions.length > 25 && <li>…and {plan.actions.length - 25} more</li>}
-            </ul>
-            <p className="stock-hint">Preserved for every existing product: {plan.preserved.join("; ")}.</p>
+            </div>
+
+            <div className="stock-tabs" role="tablist">
+              {tabs.map((item) => (
+                <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>
+                  {item.label} <span>{item.total}</span>
+                </button>
+              ))}
+            </div>
+
+            {tab === "price_change" && entryRows("price_change", "price")}
+            {tab === "new_variant" && entryRows("new_variant", "variant")}
+            {tab === "new_product" && entryRows("new_product", "product")}
+            {tab === "hide" && (
+              <>
+                <p className="stock-hint">Android phones on the website that are not in this list. They are hidden, not deleted, and come back when they are in a later list.</p>
+                {hideRows()}
+              </>
+            )}
+            {tab === "show_again" && showAgainRows()}
+            {tab === "ambiguous" && (
+              <>
+                <p className="stock-hint">Use the buttons to fix a row, or correct the line in your list above and click {STEP.check} again.</p>
+                {entryRows("ambiguous", "attention")}
+              </>
+            )}
+            {tab === "blocked" && notAndroidRows()}
+
+            {Object.keys(resolutions).length > 0 && (
+              <div className="bulk-images-devreport stock-decisions" aria-label="Your fixes">
+                <strong>Your fixes ({Object.keys(resolutions).length}) — saved with your list</strong>
+                <ul>
+                  {Object.values(resolutions).map((record) => (
+                    <li key={record.rowKey}>
+                      <span>
+                        {record.label || record.sourceLine}: {describeResolution(record.resolution)}
+                        {resolved?.unmatched.includes(record.rowKey) && <small className="plain"> — not used (this line is no longer in the list)</small>}
+                        {resolutionOutcome(delta, record)}
+                      </span>
+                      <button type="button" className="admin-secondary" onClick={() => undoResolution(record.rowKey)}>{ACTION.undo}</button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          <div className="stock-step" aria-labelledby="stock-step-3">
+            <h3 id="stock-step-3"><span className="stock-step-number">3</span> {STEP.update}</h3>
+            <p>
+              Ticked changes: {plan.counts.priceUpdates} price update(s) · {plan.counts.newVariants} new variant(s) · {plan.counts.newProducts} new phone(s) with {plan.counts.newProductVariants} variant(s) · {plan.counts.hideProducts} phone(s) and {plan.counts.hideVariants} variant(s) hidden · {plan.counts.showAgain} shown again.
+            </p>
+            <p className="stock-hint">{WORDING.nothingDeleted}</p>
+            <div className="bulk-images-bulk">
+              <button type="button" className="admin-primary" disabled title={WORDING.updateDisabled}>{STEP.update}</button>
+            </div>
+            <p className="stock-hint">{WORDING.updateDisabled}</p>
           </div>
         </>
       )}
@@ -512,23 +565,14 @@ export function StockListUpdate() {
   );
 }
 
-const KIND_LABEL: Record<DeltaEntry["kind"], string> = {
-  unchanged: "Unchanged",
-  price_change: "Price change",
-  new_variant: "New variant",
-  new_product: "New product",
-  ambiguous: "Ambiguous",
-  blocked: "Blocked",
-};
-
-/** Every row that now comes from the decision's source line (all sibling colours), with the tab each one landed in. */
+/** Every row that now comes from the fixed line (all sibling colours), with the group each one landed in. */
 function resolutionOutcome(delta: StockDelta, record: ResolutionRecord) {
   if (record.resolution.type === "skip_row") return null;
   const rows = delta.entries.filter((entry) => entry.row.sourceLine === record.sourceLine);
   if (!rows.length) return null;
   return (
     <small className="plain stock-outcome">
-      Now {rows.length} row(s) from this source line: {rows.map((entry) => `${entry.productTitle} · ${entry.label} · ${formatMinor(entry.newPriceMinor)} → ${KIND_LABEL[entry.kind]}`).join("  |  ")}
+      Now {rows.length} row(s) from this line: {rows.map((entry) => `${entry.productTitle} · ${entry.label} · ${formatMinor(entry.newPriceMinor)} → ${KIND_LABEL[entry.kind]}`).join("  |  ")}
     </small>
   );
 }
@@ -538,20 +582,16 @@ function ResolverActions({ entry, onResolve }: { entry: DeltaEntry; onResolve: (
   const options = resolutionOptions(entry.row);
   return (
     <div className="stock-resolver">
+      {options.token && <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "move_token_to_model", token: options.token as string })}>{ACTION.addToken(options.token)}</button>}
+      {options.colorIssue && !options.token && <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "accept_color_as_entered" })}>{ACTION.keepColor}</button>}
       {options.colorIssue && (
-        <>
-          <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "accept_color_as_entered" })}>Use as entered</button>
-          <span className="stock-replace">
-            <input type="text" value={replacement} maxLength={40} placeholder="Correct colour" aria-label={`Replacement colour for ${entry.productTitle} ${entry.label}`} onChange={(event) => setReplacement(event.target.value)} />
-            <button type="button" className="admin-secondary" disabled={!replacement.trim()} onClick={() => onResolve({ type: "replace_color", color: replacement.trim() })}>Replace colour</button>
-          </span>
-        </>
+        <span className="stock-replace">
+          <input type="text" value={replacement} maxLength={40} placeholder="Correct color" aria-label={`Correct color for ${entry.productTitle} ${entry.label}`} onChange={(event) => setReplacement(event.target.value)} />
+          <button type="button" className="admin-secondary" disabled={!replacement.trim()} onClick={() => onResolve({ type: "replace_color", color: replacement.trim() })}>{ACTION.changeColor}</button>
+        </span>
       )}
-      {options.token && <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "move_token_to_model", token: options.token as string })}>Move {options.token.toUpperCase()} to model name</button>}
-      {options.physicalRam !== null && <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "set_physical_ram", ramGb: options.physicalRam as number })}>Physical RAM: {options.physicalRam} GB</button>}
-      <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "skip_row" })}>Skip</button>
+      {options.physicalRam !== null && <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "set_physical_ram", ramGb: options.physicalRam as number })}>{ACTION.ramOption(options.physicalRam)}</button>}
+      <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "skip_row" })}>{ACTION.skip}</button>
     </div>
   );
 }
-
-const isSelectableKind = (kind: DeltaEntry["kind"]) => kind === "price_change" || kind === "new_variant" || kind === "new_product";

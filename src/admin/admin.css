@@ -2388,3 +2388,16 @@ p.bulk-images-error { padding-left: 14px; }
 }
 .stock-update .bulk-images-table td small.plain { min-width: 170px; }
 .stock-outcome { display: block; margin-top: 3px; text-transform: none; }
+
+/* Android Stock Update — simple 3-step layout */
+.stock-step { margin: 18px 0 0; padding: 16px 18px; border: 1px solid var(--a-line); background: #fafbfa; }
+.stock-step h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; font-size: 16px; }
+.stock-step-number { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: #1f2a24; color: #fff; font-size: 13px; font-weight: 700; }
+.stock-step .stock-field { margin-top: 8px; }
+.stock-step .stock-cards { margin-top: 12px; }
+.stock-muted td { color: var(--a-muted); }
+.stock-muted td strong { color: var(--a-muted); }
+.stock-warning { padding: 8px 12px; border: 1px solid #e3c9a1; background: #fdf7ec; color: #6b4a12; }
+@media (max-width: 720px) {
+  .stock-step { padding: 12px; }
+}
