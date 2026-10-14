@@ -50,6 +50,8 @@ type VariantRow = {
   battery_health_percent: number | null;
   battery_cycle_count: number | null;
   is_active: boolean;
+  warranty_override: string | null;
+  delivery_scope: string | null;
 };
 
 /** Every real product with its variants, media count, specification count and current stock. */
@@ -65,7 +67,7 @@ export async function loadCatalogForDelta(client: SupabaseClient): Promise<Catal
   const variants = await selectAll<VariantRow>((from, to) =>
     client
       .from("product_variants")
-      .select("id,product_id,sku,ram_display,storage_display,color_finish,price_minor,compare_at_price_minor,pta_status,condition,condition_grade,battery_health_percent,battery_cycle_count,is_active")
+      .select("id,product_id,sku,ram_display,storage_display,color_finish,price_minor,compare_at_price_minor,pta_status,condition,condition_grade,battery_health_percent,battery_cycle_count,is_active,warranty_override,delivery_scope")
       .order("id")
       .range(from, to),
   );
@@ -102,6 +104,8 @@ export async function loadCatalogForDelta(client: SupabaseClient): Promise<Catal
       batteryHealth: row.battery_health_percent,
       cycleCount: row.battery_cycle_count,
       isActive: row.is_active,
+      warrantyOverride: row.warranty_override,
+      deliveryScope: row.delivery_scope,
     };
     variantsByProduct.set(row.product_id, [...(variantsByProduct.get(row.product_id) ?? []), variant]);
   }

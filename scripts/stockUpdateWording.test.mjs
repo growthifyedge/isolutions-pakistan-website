@@ -48,7 +48,7 @@ test("attention explanations and actions are plain sentences", () => {
   assert.equal(wording.ACTION.ramOption(3), "Use 3GB RAM");
   assert.equal(wording.ACTION.ramOption(4), "Use 4GB RAM");
   assert.equal(wording.ACTION.addToken("5g"), "Add 5G to phone name");
-  assert.equal(wording.ACTION.skip, "Skip");
+  assert.equal("skip" in wording.ACTION, false, "there is no Skip action");
 });
 
 test("no technical word appears in any Owner-facing string (wording module, fix descriptions, guarantees, engine notes)", () => {
@@ -59,7 +59,7 @@ test("no technical word appears in any Owner-facing string (wording module, fix 
   check(wording.WORDING.wouldBe("Price Changed"), "wouldBe");
   check(wording.ACTION.ramOption(3), "ramOption");
   check(wording.ACTION.addToken("5g"), "addToken");
-  for (const resolution of [{ type: "accept_color_as_entered" }, { type: "replace_color", color: "Blue" }, { type: "set_physical_ram", ramGb: 3 }, { type: "move_token_to_model", token: "5g" }, { type: "skip_row" }]) {
+  for (const resolution of [{ type: "accept_color_as_entered" }, { type: "replace_color", color: "Blue" }, { type: "set_physical_ram", ramGb: 3 }, { type: "move_token_to_model", token: "5g" }]) {
     check(describeResolution(resolution), resolution.type);
   }
   for (const line of PRESERVED_GUARANTEES) check(line, "preserved");
@@ -96,4 +96,10 @@ test("the page source shows no technical label where the Owner reads it (JSX tex
   }
   // The old two-click flow and its technical buttons are gone.
   for (const gone of ["Parse Stock List", "Compare With Catalog", "Apply Selected Changes", "Owner decisions", "Delta summary", "Apply plan"]) assert.ok(!ui.includes(gone), gone);
+});
+
+test("price, multiple-price and duplicate-line reasons have their own plain sentence", () => {
+  assert.equal(wording.explainReason("Price appears unusually high — verify."), "Please check the price — it looks unusual");
+  assert.match(wording.explainReason("Multiple/ambiguous prices detected; review price-to-color mapping."), /more than one price/);
+  assert.equal(wording.explainReason("Duplicate variant (same as line 54)"), "This variant appears more than once in the list");
 });

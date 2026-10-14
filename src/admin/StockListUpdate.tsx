@@ -5,11 +5,8 @@ import { loadExcelJs } from "../lib/catalogWorkbook";
 import {
   buildApplyPlan,
   buildStockDelta,
-  defaultSelection,
   formatDiff,
   formatMinor,
-  isHideSelectable,
-  isSelectable,
   parseStockList,
   tableToStockText,
   type DeltaEntry,
@@ -35,12 +32,25 @@ import {
   type Resolution,
   type ResolutionRecord,
 } from "../lib/stockListDraft";
+import { commercialWriteTarget } from "../lib/commercialDefaults";
+import { buildWritePlan, confirmationPhrase, runStockUpdate, updateWebsiteBlocker, type StockUpdateProgress, type StockUpdateResult } from "../lib/stockUpdateApply";
+import { installUnloadGuard } from "../lib/unloadGuard";
+import { stockUpdateDbDeps } from "../lib/stockUpdateApplyDb";
 import { ACTION, CATEGORY_LABEL, HIDE_LABEL, KIND_LABEL, PAGE_HELP, PAGE_TITLE, SHOW_AGAIN_LABEL, STEP, TOKEN_EXPLANATION, WORDING, explainReason } from "../lib/stockUpdateWording";
 
 // Admin "Android Stock Update": Paste List -> Check List -> Review Changes -> Update Website.
-// This phase performs NO database write; "Update Website" is intentionally disabled.
+// Update Website writes ONLY through stockUpdateApply.runStockUpdate, and only after: matching build/project pair,
+// a fresh Check List of exactly this text + fixes, zero Needs Attention rows, and the typed phrase "UPDATE <n> CHANGES".
+// runStockUpdate then re-reads the website and writes nothing if the plan changed since the check.
 // The Owner's working list (text, fixes, ticks) is autosaved to localStorage and restored on reload.
 // A check is NEVER restored: it is recomputed from the live website data by a fresh read-only Check List.
+
+const BUILD_MODE: string = import.meta.env.MODE;
+const SUPABASE_URL: string | undefined = import.meta.env.VITE_SUPABASE_URL;
+const WRITE_TARGET = commercialWriteTarget(SUPABASE_URL, BUILD_MODE);
+
+/** Environment problems are shown in plain words; the other gate reasons are already plain. */
+const plainReason = (reason: string) => (/^Blocked\b/.test(reason) || !WRITE_TARGET.allowed ? WORDING.wrongWebsite : reason);
 
 type TabId = "price_change" | "new_variant" | "new_product" | "show_again" | "hide" | "ambiguous" | "blocked";
 
@@ -102,32 +112,30 @@ export function StockListUpdate() {
   const [savedAt, setSavedAt] = useState<string | null>(restored?.savedAt || null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [activeBrands, setActiveBrands] = useState<string[] | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [writing, setWriting] = useState(false);
+  const [result, setResult] = useState<StockUpdateResult | null>(null);
+  const [progress, setProgress] = useState<StockUpdateProgress | null>(null);
+  // Synchronous guard: a second click (or a double click before React re-renders) can never start a second run.
+  const running = useRef(false);
 
   // The Owner's fixes are applied to the parsed rows, then compared against the website data from the last live Check.
   const resolved = useMemo(() => (parsed ? applyResolutions(parsed, resolutions) : null), [parsed, resolutions]);
   const delta = useMemo(() => (resolved && catalog ? buildStockDelta(resolved.parsed, catalog) : null), [resolved, catalog]);
-  const selected = useMemo(() => {
-    const base = delta ? defaultSelection(delta) : new Set<string>();
-    if (!delta || !resolved) return base;
-    for (const entry of delta.entries) {
-      const key = resolved.rowKeys[Number(entry.id.slice(4))];
-      if (key !== undefined && key in overrides) {
-        if (overrides[key] && isSelectable(entry)) base.add(entry.id);
-        else base.delete(entry.id);
-      }
-    }
-    for (const entry of delta.missing) {
-      const key = hideKey(entry);
-      if (key in overrides) {
-        if (overrides[key] && isHideSelectable(entry)) base.add(entry.id);
-        else base.delete(entry.id);
-      }
-    }
-    return base;
-  }, [delta, resolved, overrides]);
-  const plan = useMemo(() => (delta ? buildApplyPlan(delta, selected) : null), [delta, selected]);
+  // Ticks are REVIEW MARKS only (saved with the list). They never change what is updated: the latest list is the final truth.
+  const isReviewed = (key: string | undefined) => key !== undefined && overrides[key] === true;
+  const plan = useMemo(() => (delta ? buildApplyPlan(delta) : null), [delta]);
+  // The exact writes Update Website would make (same truth as `plan`, plus inherited facts and the brand check).
+  const writePlan = useMemo(() => (delta && catalog && activeBrands ? buildWritePlan(delta, catalog, activeBrands) : null), [delta, catalog, activeBrands]);
   // A future Update Website must require this to be true. It is false after any reload (the stamp is memory-only) and after any later edit.
   const checkIsCurrent = comparisonAuthorizesApply(stamp, text, resolutions);
+  const gate = { supabaseUrl: SUPABASE_URL, buildMode: BUILD_MODE, checkIsCurrent, plan: writePlan };
+  // Everything except the typed phrase: decides whether the Update Website button can open the confirmation.
+  const openBlocker = updateWebsiteBlocker({ ...gate, confirmation: writePlan ? confirmationPhrase(writePlan) : "" });
+  // Everything including the typed phrase: decides whether the final "Yes" button can run.
+  const finalBlocker = updateWebsiteBlocker({ ...gate, confirmation: confirmText });
 
   // Autosave (debounced) + a final flush when the page is hidden or the screen unmounts.
   const wasParsed = parsed !== null;
@@ -191,6 +199,10 @@ export function StockListUpdate() {
     setError("");
     try {
       const brands = await loadActiveBrands(supabase);
+      setConfirming(false);
+      setConfirmText("");
+      setResult(null);
+      setActiveBrands(brands.map((brand) => brand.name));
       const parsedNow = parseStockList(text, brands);
       if (!parsedNow.rows.length) {
         setParsed(null);
@@ -213,6 +225,56 @@ export function StockListUpdate() {
       setError(problem instanceof Error ? problem.message : "The check failed.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  // While the update runs, the browser asks before the tab is closed or refreshed (that would stop the remaining changes).
+  useEffect(() => (writing ? installUnloadGuard(window) : undefined), [writing]);
+
+  /** The ONLY write path. Re-checks the gate, then runStockUpdate re-reads the website and writes nothing if anything changed. */
+  async function runUpdate() {
+    if (running.current) return;
+    if (!supabase || !writePlan || !activeBrands || !resolved) return;
+    const blocker = updateWebsiteBlocker({ ...gate, confirmation: confirmText });
+    if (blocker) return setError(plainReason(blocker));
+    running.current = true;
+    const client = supabase;
+    const fixedRows = resolved.parsed;
+    const brands = activeBrands;
+    setWriting(true);
+    setError("");
+    setResult(null);
+    setProgress({ phase: "checking", kind: null, done: 0, total: writePlan.steps.length, failed: 0, checked: 0, toCheck: 0, lastFailure: null });
+    try {
+      const outcome = await runStockUpdate(
+        {
+          supabaseUrl: SUPABASE_URL,
+          buildMode: BUILD_MODE,
+          readCatalog: () => loadCatalogForDelta(client),
+          replan: (fresh) => buildWritePlan(buildStockDelta(fixedRows, fresh), fresh, brands),
+          ...stockUpdateDbDeps(client),
+        },
+        writePlan,
+        setProgress,
+      );
+      setResult(outcome);
+      setProgress(null);
+      setConfirming(false);
+      setConfirmText("");
+      // After any attempt the old check is out of date: a fresh Check List is required before anything else.
+      setCatalog(null);
+      setStamp(null);
+    } catch (problem) {
+      // Keep the last real progress on screen so the exact stopping point is visible; the old check is no longer valid.
+      setProgress((last) => (last ? { ...last, phase: "finished" } : last));
+      setCatalog(null);
+      setStamp(null);
+      setConfirming(false);
+      setConfirmText("");
+      setError(problem instanceof Error ? problem.message : "The update could not finish. Click Check List to see the current website.");
+    } finally {
+      running.current = false;
+      setWriting(false);
     }
   }
 
@@ -305,7 +367,7 @@ export function StockListUpdate() {
         <table>
           <thead>
             <tr>
-              {ticks && <th>Update</th>}
+              {ticks && <th>Reviewed</th>}
               <th>Phone</th>
               <th>RAM / Storage / Color</th>
               {mode === "price" && (<><th>SKU</th><th>Now</th><th>New</th><th>Change</th></>)}
@@ -316,10 +378,10 @@ export function StockListUpdate() {
           </thead>
           <tbody>
             {rows.map((entry) => (
-              <tr key={entry.id} className={selected.has(entry.id) ? "included" : undefined}>
+              <tr key={entry.id} className={isReviewed(rowKeyOf(entry)) ? "included" : undefined}>
                 {ticks && (
                   <td>
-                    <input type="checkbox" aria-label={`Update ${entry.productTitle} ${entry.label}`} checked={selected.has(entry.id)} disabled={!isSelectable(entry)} onChange={(event) => toggle(rowKeyOf(entry), event.target.checked)} />
+                    <input type="checkbox" aria-label={`Mark ${entry.productTitle} ${entry.label} as reviewed`} checked={isReviewed(rowKeyOf(entry))} onChange={(event) => toggle(rowKeyOf(entry), event.target.checked)} />
                   </td>
                 )}
                 <td>
@@ -351,11 +413,11 @@ export function StockListUpdate() {
     return (
       <div className="bulk-images-table">
         <table>
-          <thead><tr><th>Update</th><th>Phone</th><th>RAM / Storage / Color</th><th>SKU</th><th>Price</th><th>Notes</th></tr></thead>
+          <thead><tr><th>Reviewed</th><th>Phone</th><th>RAM / Storage / Color</th><th>SKU</th><th>Price</th><th>Notes</th></tr></thead>
           <tbody>
             {showAgainEntries.map((entry) => (
-              <tr key={entry.id} className={selected.has(entry.id) ? "included" : undefined}>
-                <td><input type="checkbox" aria-label={`Show ${entry.productTitle} ${entry.label} again`} checked={selected.has(entry.id)} disabled={!isSelectable(entry)} onChange={(event) => toggle(rowKeyOf(entry), event.target.checked)} /></td>
+              <tr key={entry.id} className={isReviewed(rowKeyOf(entry)) ? "included" : undefined}>
+                <td><input type="checkbox" aria-label={`Mark ${entry.productTitle} ${entry.label} as reviewed`} checked={isReviewed(rowKeyOf(entry))} onChange={(event) => toggle(rowKeyOf(entry), event.target.checked)} /></td>
                 <td><strong>{entry.productTitle}</strong></td>
                 <td>{entry.label}</td>
                 <td><code>{entry.sku}</code></td>
@@ -380,11 +442,11 @@ export function StockListUpdate() {
     return (
       <div className="bulk-images-table">
         <table>
-          <thead><tr><th>Update</th><th>Phone</th><th>What</th><th>RAM / Storage / Color</th><th>SKU</th><th>Price</th><th>Why</th></tr></thead>
+          <thead><tr><th>Reviewed</th><th>Phone</th><th>What</th><th>RAM / Storage / Color</th><th>SKU</th><th>Price</th><th>Why</th></tr></thead>
           <tbody>
             {rows.map((entry) => (
-              <tr key={entry.id} className={selected.has(entry.id) ? "included" : entry.action !== "hide" ? "stock-muted" : undefined}>
-                <td><input type="checkbox" aria-label={`Hide ${entry.productTitle} ${entry.label}`} checked={selected.has(entry.id)} disabled={!isHideSelectable(entry)} onChange={(event) => toggle(hideKey(entry), event.target.checked)} /></td>
+              <tr key={entry.id} className={entry.action !== "hide" ? "stock-muted" : isReviewed(hideKey(entry)) ? "included" : undefined}>
+                <td><input type="checkbox" aria-label={`Mark ${entry.productTitle} ${entry.label} as reviewed`} checked={isReviewed(hideKey(entry))} onChange={(event) => toggle(hideKey(entry), event.target.checked)} /></td>
                 <td>
                   <strong>{entry.productTitle}</strong>
                   <small className="plain">{entry.mediaCount} image(s) · {entry.specCount} spec(s) kept</small>
@@ -485,6 +547,9 @@ export function StockListUpdate() {
         {error && <p className="bulk-images-error" role="alert">{error}</p>}
       </div>
 
+      {!writing && progress && progress.phase === "finished" && <UpdateProgress progress={progress} stopped />}
+      {result && <UpdateResult result={result} />}
+
       {delta && counts && plan && parsed && (
         <>
           <div className="stock-step" aria-labelledby="stock-step-2">
@@ -523,7 +588,7 @@ export function StockListUpdate() {
             {tab === "show_again" && showAgainRows()}
             {tab === "ambiguous" && (
               <>
-                <p className="stock-hint">Use the buttons to fix a row, or correct the line in your list above and click {STEP.check} again.</p>
+                <p className="stock-hint">{WORDING.attentionHelp}</p>
                 {entryRows("ambiguous", "attention")}
               </>
             )}
@@ -551,13 +616,36 @@ export function StockListUpdate() {
           <div className="stock-step" aria-labelledby="stock-step-3">
             <h3 id="stock-step-3"><span className="stock-step-number">3</span> {STEP.update}</h3>
             <p>
-              Ticked changes: {plan.counts.priceUpdates} price update(s) · {plan.counts.newVariants} new variant(s) · {plan.counts.newProducts} new phone(s) with {plan.counts.newProductVariants} variant(s) · {plan.counts.hideProducts} phone(s) and {plan.counts.hideVariants} variant(s) hidden · {plan.counts.showAgain} shown again.
+              Changes from this list: {plan.counts.priceUpdates} price update(s) · {plan.counts.stockUpdates} stock set to 30 · {plan.counts.newVariants} new variant(s) · {plan.counts.newProducts} new phone(s) with {plan.counts.newProductVariants} variant(s) · {plan.counts.hideProducts} phone(s) and {plan.counts.hideVariants} variant(s) hidden · {plan.counts.showAgain} shown again.
             </p>
+            <p className="stock-hint">{WORDING.listIsTruth}</p>
             <p className="stock-hint">{WORDING.nothingDeleted}</p>
+            {writePlan && (
+              <p className="stock-hint">
+                Writes: {writePlan.counts.priceUpdates} price · {writePlan.counts.stockUpdates} stock set to 30 · {writePlan.counts.newVariants} new variant(s) · {writePlan.counts.newPhones} new phone(s) · {writePlan.counts.hiddenVariants} variant(s) hidden · {writePlan.counts.shownVariants} shown again — {writePlan.steps.length} change(s) in total.
+              </p>
+            )}
+            <p className={`stock-hint${openBlocker ? " stock-warning" : ""}`} aria-live="polite">{openBlocker ? plainReason(openBlocker) : WORDING.updateReady}</p>
             <div className="bulk-images-bulk">
-              <button type="button" className="admin-primary" disabled title={WORDING.updateDisabled}>{STEP.update}</button>
+              <button type="button" className="admin-primary" disabled={Boolean(openBlocker) || writing || confirming} onClick={() => { setConfirming(true); setConfirmText(""); }}>{STEP.update}</button>
             </div>
-            <p className="stock-hint">{WORDING.updateDisabled}</p>
+            {confirming && !openBlocker && writePlan && (
+              <div className="stock-confirm" role="alertdialog" aria-labelledby="stock-confirm-title">
+                <strong id="stock-confirm-title">{WORDING.confirmTitle(supabaseEnvironmentLabel.toUpperCase())}</strong>
+                <p>{WORDING.confirmBody(writePlan.steps.length, supabaseEnvironmentLabel.toUpperCase())}</p>
+                {writing && progress && <UpdateProgress progress={progress} />}
+                {!writing && (
+                  <label className="stock-field">
+                    <span>{WORDING.confirmType(confirmationPhrase(writePlan))}</span>
+                    <input type="text" value={confirmText} autoComplete="off" spellCheck={false} aria-label="Confirmation phrase" onChange={(event) => setConfirmText(event.target.value)} />
+                  </label>
+                )}
+                <div className="bulk-images-bulk">
+                  <button type="button" className="admin-primary" disabled={Boolean(finalBlocker) || writing} onClick={() => void runUpdate()}>{writing ? WORDING.updating : WORDING.confirmYes}</button>
+                  <button type="button" className="admin-secondary" disabled={writing} onClick={() => { setConfirming(false); setConfirmText(""); }}>{WORDING.confirmCancel}</button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -565,9 +653,52 @@ export function StockListUpdate() {
   );
 }
 
+function progressLabel(progress: StockUpdateProgress) {
+  if (progress.phase === "checking") return WORDING.progressChecking;
+  if (progress.phase === "saving") return WORDING.progressSaving;
+  if (progress.phase === "verifying") return WORDING.progressVerifying;
+  if (progress.phase === "writing" && progress.kind) return WORDING.progressStep[progress.kind] ?? WORDING.updating;
+  return WORDING.progressFinished;
+}
+
+/** Live counter + bar from the runner's real completed steps (no timer). */
+function UpdateProgress({ progress, stopped = false }: { progress: StockUpdateProgress; stopped?: boolean }) {
+  const percent = progress.total ? Math.floor((progress.done / progress.total) * 100) : 0;
+  const label = progressLabel(progress);
+  const sub = progress.phase === "saving" || progress.phase === "verifying" ? WORDING.progressPhones(progress.checked, progress.toCheck) : null;
+  return (
+    <div className={`stock-progress${stopped ? " stopped" : ""}`} role="status" aria-live="polite" aria-label="Update progress">
+      <strong>{stopped ? WORDING.progressStopped(progress.done, progress.total, label) : label}</strong>
+      <div className="stock-progress-bar" role="progressbar" aria-label="Changes completed" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done}>
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <span className="stock-progress-count">{WORDING.progressCount(progress.done, progress.total, percent)}{sub ? ` · ${sub}` : ""}</span>
+      {progress.failed > 0 && <span className="stock-progress-failed">{WORDING.progressFailed(progress.failed)}</span>}
+      {progress.lastFailure && <small className="plain">{WORDING.resultFailedStep(progress.lastFailure.productTitle, WORDING.progressStep[progress.lastFailure.kind] ?? "", progress.lastFailure.message)}</small>}
+      {!stopped && <small className="plain">{WORDING.progressKeepOpen}</small>}
+    </div>
+  );
+}
+
+function UpdateResult({ result }: { result: StockUpdateResult }) {
+  const failedSteps = result.results.filter((item) => !item.ok);
+  const failedChecks = result.checks.filter((check) => !check.ok);
+  const title = result.outcome === "verified" ? WORDING.updateDone : result.outcome === "blocked" ? WORDING.updateStopped : WORDING.updateProblem;
+  return (
+    <div className={`stock-draft-status ${result.outcome === "verified" ? "restored" : "stock-warning"}`} role="status" aria-label="Update result">
+      <strong>{title}</strong>
+      <span>{plainReason(result.message)}</span>
+      {result.results.length > 0 && <span>{WORDING.resultCompleted(result.results.length - failedSteps.length, result.results.length)}</span>}
+      {result.createdPhones.length > 0 && <span>New phones (draft, add images before publishing): {result.createdPhones.map((phone) => phone.title).join(", ")}</span>}
+      {failedSteps.slice(0, 20).map((item, index) => (<small className="plain" key={`s${index}`}>{WORDING.resultFailedStep(item.step.productTitle, WORDING.progressStep[item.step.kind] ?? "", item.message)}</small>))}
+      {failedChecks.slice(0, 20).map((check, index) => (<small className="plain" key={`c${index}`}>{check.name}: {check.detail}</small>))}
+      <span>{WORDING.afterUpdate}</span>
+    </div>
+  );
+}
+
 /** Every row that now comes from the fixed line (all sibling colours), with the group each one landed in. */
 function resolutionOutcome(delta: StockDelta, record: ResolutionRecord) {
-  if (record.resolution.type === "skip_row") return null;
   const rows = delta.entries.filter((entry) => entry.row.sourceLine === record.sourceLine);
   if (!rows.length) return null;
   return (
@@ -591,7 +722,6 @@ function ResolverActions({ entry, onResolve }: { entry: DeltaEntry; onResolve: (
         </span>
       )}
       {options.physicalRam !== null && <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "set_physical_ram", ramGb: options.physicalRam as number })}>{ACTION.ramOption(options.physicalRam)}</button>}
-      <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "skip_row" })}>{ACTION.skip}</button>
     </div>
   );
 }

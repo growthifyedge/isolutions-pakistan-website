@@ -1,5 +1,4 @@
 import {
-  DEFAULT_IMPORT_STOCK,
   normalizeStockLines,
   type BrandReference,
   type CatalogSheetRow,
@@ -38,6 +37,9 @@ export type CatalogDeltaVariant = {
   cycleCount: number | null;
   /** product_variants.is_active — false means "hidden from the store" (the existing admin mechanism). */
   isActive: boolean;
+  /** Read only so a new variant can inherit them from its siblings (never written back to existing rows). */
+  warrantyOverride?: string | null;
+  deliveryScope?: string | null;
 };
 
 export type CatalogDeltaProduct = {
@@ -52,6 +54,9 @@ export type CatalogDeltaProduct = {
   specCount: number;
   variants: CatalogDeltaVariant[];
 };
+
+/** Owner rule (2026-10-15): every Android item in the latest list is visible with stock 30 (existing, returning, new variant or new phone). */
+export const STOCK_UPDATE_TARGET = 30;
 
 const FEATURE_PHONE_BRANDS = new Set(["nokia", "hmd"]);
 const IPHONE = /\biphone\b/i;
@@ -181,8 +186,8 @@ export type DeltaEntry = {
   showAgain: boolean;
   reasons: string[];
   notes: string[];
-  selectable: boolean;
-  defaultSelected: boolean;
+  /** The list is the truth: this row WILL be written (price / new variant / new phone / shown again). Not an Owner choice. */
+  willUpdate: boolean;
   /** New phones only: what is still needed before the phone can go live. */
   requirements: string[];
 };
@@ -208,8 +213,6 @@ export type MissingEntry = {
   publicationStatus: string | null;
   action: MissingAction;
   reason: string;
-  selectable: boolean;
-  defaultSelected: boolean;
   mediaCount: number;
   specCount: number;
 };
@@ -289,7 +292,7 @@ function newProductRequirements(row: CatalogSheetRow, complete: boolean) {
     "SKU: given automatically (MB###)",
     "Image: add one before the phone can go live",
     "PTA status and condition: set from the usual defaults (not in the list)",
-    `Stock: starts at ${DEFAULT_IMPORT_STOCK} (not in the list)`,
+    `Stock: set to ${STOCK_UPDATE_TARGET}`,
     "Specifications: optional, can be added later",
     "Goes live only after it has an image and is published",
   ];
@@ -341,8 +344,7 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
       showAgain: false,
       reasons: [],
       notes: [],
-      selectable: false,
-      defaultSelected: false,
+      willUpdate: false,
       requirements: [],
     };
 
@@ -353,6 +355,8 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
     }
     // An Android line we cannot read fully needs the Owner's attention (it can be skipped).
     if (row.priceMinor === null || !title) {
+      // The phone is still in the list: hold it (never hide it) until the Owner fixes or skips this row.
+      if (title) for (const product of [...(byKey.get(identityKey(title)) ?? []), ...(row.slug ? bySlug.get(row.slug) ?? [] : [])]) attentionProducts.add(product.id);
       entries.push({ ...base, kind: "ambiguous", reasons: [...row.reviewReasons, "Price or model missing — cannot compare"] });
       return;
     }
@@ -379,6 +383,8 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
     if (candidates.length === 0) {
       const complete = Boolean(row.ram && row.storage && row.color && row.priceMinor !== null);
       if (similar.length) notes.push(`Different from the existing: ${similar.map((product) => product.title).join(", ")}`);
+      // A new phone must be complete: it cannot be left out, so a missing RAM / storage / color needs attention.
+      if (!complete) reasons.push("New phone is missing RAM / storage / color — add them to the line");
       const held = reasons.length > 0;
       entries.push({
         ...base,
@@ -386,8 +392,7 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
         provisionalKind: held ? "new_product" : null,
         reasons,
         notes,
-        selectable: !held,
-        defaultSelected: !held && complete,
+        willUpdate: !held,
         requirements: newProductRequirements(row, complete),
       });
       return;
@@ -419,10 +424,9 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
         provisionalKind: held ? "new_variant" : null,
         reasons,
         notes,
-        stock: DEFAULT_IMPORT_STOCK,
-        selectable: !held,
-        defaultSelected: !held,
-        requirements: ["SKU: given automatically (MB###)", `Stock: starts at ${DEFAULT_IMPORT_STOCK} (not in the list)`, "PTA / condition / warranty: same as the existing phone"],
+        stock: STOCK_UPDATE_TARGET,
+        willUpdate: !held,
+        requirements: ["SKU: given automatically (MB###)", `Stock: set to ${STOCK_UPDATE_TARGET}`, "PTA / condition / warranty: same as the existing phone"],
       });
       return;
     }
@@ -453,8 +457,7 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
       showAgain,
       reasons,
       notes,
-      selectable: !held && (kind === "price_change" || showAgain),
-      defaultSelected: !held && (kind === "price_change" || showAgain),
+      willUpdate: !held && (kind === "price_change" || showAgain),
     });
   });
 
@@ -464,8 +467,7 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
       entry.provisionalKind = entry.kind as DeltaEntry["provisionalKind"];
       entry.kind = "ambiguous";
       entry.reasons.push("The same existing variant is listed more than once");
-      entry.selectable = false;
-      entry.defaultSelected = false;
+      entry.willUpdate = false;
       if (entry.productId) attentionProducts.add(entry.productId);
     }
   }
@@ -473,10 +475,10 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
   // Android phones / variants absent from the latest list: hidden (is_active = false), never deleted.
   // A phone with an unresolved row keeps everything visible until the Owner fixes that row.
   const missing: MissingEntry[] = [];
-  const decide = (productId: string, visible: boolean): Pick<MissingEntry, "action" | "reason" | "selectable" | "defaultSelected"> => {
-    if (attentionProducts.has(productId)) return { action: "held", reason: "Fix the rows that need attention for this phone first", selectable: false, defaultSelected: false };
-    if (!visible) return { action: "already_hidden", reason: "Already hidden — stays hidden", selectable: false, defaultSelected: false };
-    return { action: "hide", reason: "Not in the latest list — will be hidden from the website (not deleted)", selectable: true, defaultSelected: true };
+  const decide = (productId: string, visible: boolean): Pick<MissingEntry, "action" | "reason"> => {
+    if (attentionProducts.has(productId)) return { action: "held", reason: "Fix the rows that need attention for this phone first" };
+    if (!visible) return { action: "already_hidden", reason: "Already hidden — stays hidden" };
+    return { action: "hide", reason: "Not in the latest list — will be hidden from the website (not deleted)" };
   };
   for (const product of catalog) {
     const shared = { productId: product.id, productTitle: product.title, productSlug: product.slug, publicationStatus: product.publicationStatus, mediaCount: product.mediaCount, specCount: product.specCount };
@@ -548,18 +550,11 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
 // Selection + update plan (a PLAN only: nothing is written)
 // ---------------------------------------------------------------------------
 
-export const isSelectable = (entry: DeltaEntry) =>
-  entry.selectable && (["price_change", "new_variant", "new_product"].includes(entry.kind) || (entry.showAgain && entry.kind === "unchanged"));
+// The latest list is the final truth. There is no Owner selection: ticks on the page only mark rows as reviewed.
+// Every listed Android item is updated (price / new variant / new phone / shown again / stock 30) and every absent,
+// visible Android item is hidden. The only way to stop a write is a Needs Attention row, which blocks the whole update.
 
-export const isHideSelectable = (entry: MissingEntry) => entry.selectable && entry.action === "hide";
-
-/** Safe price changes, safe new variants, returning variants and hides of visible items; new phones only when complete. Never attention / non-Android / held. */
-export function defaultSelection(delta: StockDelta): Set<string> {
-  return new Set([
-    ...delta.entries.filter((entry) => isSelectable(entry) && entry.defaultSelected).map((entry) => entry.id),
-    ...delta.missing.filter((entry) => isHideSelectable(entry) && entry.defaultSelected).map((entry) => entry.id),
-  ]);
-}
+export const willHide = (entry: MissingEntry) => entry.action === "hide";
 
 export type PlannedVariant = { entryId: string; ram: string | null; storage: string | null; color: string | null; priceMinor: number; stock: number };
 
@@ -567,17 +562,17 @@ export type ApplyAction =
   | { op: "update_price"; entryId: string; productId: string; productTitle: string; variantId: string; sku: string; label: string; fromMinor: number; toMinor: number; diffMinor: number; writes: string[] }
   | { op: "create_variant"; entryId: string; productId: string; productTitle: string; ram: string | null; storage: string | null; color: string | null; priceMinor: number; stock: number; sku: string; inherits: string[]; writes: string[] }
   | { op: "create_product"; productTitle: string; slug: string; brand: string | null; category: string; status: string; variants: PlannedVariant[]; requirements: string[]; writes: string[] }
+  | { op: "set_stock"; entryId: string; productId: string; productTitle: string; variantId: string; sku: string; label: string; fromStock: number; toStock: number; writes: string[] }
   | { op: "show_variant"; entryId: string; productId: string; productTitle: string; variantId: string; sku: string; label: string; writes: string[] }
   | { op: "hide_variant"; entryId: string; productId: string; productTitle: string; variantId: string; sku: string; label: string; writes: string[] }
   | { op: "hide_product"; entryId: string; productId: string; productTitle: string; variantIds: string[]; writes: string[] };
 
 /** Every operation the plan can contain. There is no delete, no media, no specification and no publication operation. */
-export const PLAN_OPERATIONS = ["update_price", "create_variant", "create_product", "show_variant", "hide_variant", "hide_product"] as const;
+export const PLAN_OPERATIONS = ["update_price", "set_stock", "create_variant", "create_product", "show_variant", "hide_variant", "hide_product"] as const;
 
 export type ApplyPlan = {
   actions: ApplyAction[];
-  counts: { priceUpdates: number; newVariants: number; newProducts: number; newProductVariants: number; showAgain: number; hideVariants: number; hideProducts: number };
-  ignoredSelections: { entryId: string; reason: string }[];
+  counts: { priceUpdates: number; stockUpdates: number; newVariants: number; newProducts: number; newProductVariants: number; showAgain: number; hideVariants: number; hideProducts: number };
   /** Existing website data that the plan never touches. */
   preserved: string[];
   writesPerformed: false;
@@ -590,31 +585,35 @@ export const PRESERVED_GUARANTEES = [
   "Specification rows of every existing phone (none are reset, replaced or removed)",
   "PTA status and Condition of existing variants and phones",
   "Publication state of every existing phone (hiding switches variants off; it never unpublishes, archives or deletes)",
-  "Existing stock quantities (a price update or hide never changes stock)",
+  "Stock: every Android item in the list is set to 30; a hidden item's stock is left as it is",
   "Nothing is ever deleted: hidden phones and variants keep their records and come back when they are in a later list",
 ];
 
 const HIDE_WRITE = "product_variants.is_active = false (hidden from the store, not deleted)";
 const SHOW_WRITE = "product_variants.is_active = true (shown again)";
 
-export function buildApplyPlan(delta: StockDelta, selected: ReadonlySet<string>): ApplyPlan {
+/**
+ * An existing variant that is in the latest list and will be visible after the update gets stock 30.
+ * Same, Price Changed and Back On Website rows always. Rows that need attention, non-Android rows and hidden rows never get a stock change.
+ */
+export function needsStockTarget(entry: DeltaEntry): boolean {
+  if ((entry.kind !== "unchanged" && entry.kind !== "price_change") || !entry.variantId || !entry.productId) return false;
+  return (entry.stock ?? 0) !== STOCK_UPDATE_TARGET;
+}
+
+export function buildApplyPlan(delta: StockDelta): ApplyPlan {
   const actions: ApplyAction[] = [];
-  const ignored: ApplyPlan["ignoredSelections"] = [];
   const newProducts = new Map<string, Extract<ApplyAction, { op: "create_product" }>>();
   for (const entry of delta.entries) {
-    if (!selected.has(entry.id)) continue;
-    if (!isSelectable(entry)) {
-      ignored.push({ entryId: entry.id, reason: `${entry.kind} rows cannot be applied` });
-      continue;
-    }
+    if (!entry.willUpdate) continue;
     if (entry.kind === "price_change" && entry.productId && entry.variantId && entry.currentPriceMinor !== null && entry.newPriceMinor !== null) {
       actions.push({ op: "update_price", entryId: entry.id, productId: entry.productId, productTitle: entry.productTitle, variantId: entry.variantId, sku: entry.sku ?? "", label: entry.label, fromMinor: entry.currentPriceMinor, toMinor: entry.newPriceMinor, diffMinor: entry.newPriceMinor - entry.currentPriceMinor, writes: ["product_variants.price_minor (price only)"] });
     } else if (entry.kind === "new_variant" && entry.productId && entry.newPriceMinor !== null) {
-      actions.push({ op: "create_variant", entryId: entry.id, productId: entry.productId, productTitle: entry.productTitle, ram: entry.row.ram, storage: entry.row.storage, color: entry.row.color, priceMinor: entry.newPriceMinor, stock: DEFAULT_IMPORT_STOCK, sku: "given automatically (MB###)", inherits: ["PTA status", "Condition", "Warranty", "Delivery scope"], writes: ["product_variants (new row)", "inventory_movements (opening stock)"] });
+      actions.push({ op: "create_variant", entryId: entry.id, productId: entry.productId, productTitle: entry.productTitle, ram: entry.row.ram, storage: entry.row.storage, color: entry.row.color, priceMinor: entry.newPriceMinor, stock: STOCK_UPDATE_TARGET, sku: "given automatically (MB###)", inherits: ["PTA status", "Condition", "Warranty", "Delivery scope"], writes: ["product_variants (new row)", "inventory_movements (opening stock)"] });
     } else if (entry.kind === "new_product" && entry.newPriceMinor !== null) {
       const key = entry.productSlug || identityKey(entry.productTitle);
       const existing = newProducts.get(key) ?? { op: "create_product" as const, productTitle: entry.productTitle, slug: entry.productSlug, brand: entry.row.brand, category: "Mobile Phones", status: "Draft — hidden until it has an image and is published", variants: [], requirements: entry.requirements, writes: ["products (new row, draft)", "product_variants (new rows)", "inventory_movements (opening stock)"] };
-      existing.variants.push({ entryId: entry.id, ram: entry.row.ram, storage: entry.row.storage, color: entry.row.color, priceMinor: entry.newPriceMinor, stock: DEFAULT_IMPORT_STOCK });
+      existing.variants.push({ entryId: entry.id, ram: entry.row.ram, storage: entry.row.storage, color: entry.row.color, priceMinor: entry.newPriceMinor, stock: STOCK_UPDATE_TARGET });
       newProducts.set(key, existing);
     }
     if (entry.showAgain && entry.productId && entry.variantId) {
@@ -622,12 +621,12 @@ export function buildApplyPlan(delta: StockDelta, selected: ReadonlySet<string>)
     }
   }
   actions.push(...newProducts.values());
+  for (const entry of delta.entries) {
+    if (!needsStockTarget(entry)) continue;
+    actions.push({ op: "set_stock", entryId: entry.id, productId: entry.productId as string, productTitle: entry.productTitle, variantId: entry.variantId as string, sku: entry.sku ?? "", label: entry.label, fromStock: entry.stock ?? 0, toStock: STOCK_UPDATE_TARGET, writes: [`inventory_movements (one correction row: ${STOCK_UPDATE_TARGET} minus the stock at that moment)`] });
+  }
   for (const entry of delta.missing) {
-    if (!selected.has(entry.id)) continue;
-    if (!isHideSelectable(entry)) {
-      ignored.push({ entryId: entry.id, reason: entry.action === "held" ? "held until the phone's attention rows are fixed" : "already hidden" });
-      continue;
-    }
+    if (!willHide(entry)) continue;
     if (entry.scope === "variant" && entry.variantId) {
       actions.push({ op: "hide_variant", entryId: entry.id, productId: entry.productId, productTitle: entry.productTitle, variantId: entry.variantId, sku: entry.sku ?? "", label: entry.label, writes: [HIDE_WRITE] });
     } else if (entry.scope === "product" && entry.variantIds.length) {
@@ -639,6 +638,7 @@ export function buildApplyPlan(delta: StockDelta, selected: ReadonlySet<string>)
     actions,
     counts: {
       priceUpdates: tally("update_price"),
+      stockUpdates: tally("set_stock"),
       newVariants: tally("create_variant"),
       newProducts: newProducts.size,
       newProductVariants: [...newProducts.values()].reduce((sum, product) => sum + product.variants.length, 0),
@@ -646,7 +646,6 @@ export function buildApplyPlan(delta: StockDelta, selected: ReadonlySet<string>)
       hideVariants: tally("hide_variant"),
       hideProducts: tally("hide_product"),
     },
-    ignoredSelections: ignored,
     preserved: PRESERVED_GUARANTEES,
     writesPerformed: false,
   };

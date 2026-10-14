@@ -87,17 +87,18 @@ test("checkbox selections survive reload and are keyed by content, not by positi
   assert.ok(keys.every((key) => shifted.includes(key)));
 });
 
-test("skip decisions survive reload and keep the row out of the delta", () => {
+test("there is no Skip: a skip decision saved by an older version is dropped on load and the row stays in the list", () => {
   const parsed = parse();
   const { key } = rowWhere(parsed, (row) => row.color === "Wood");
   const storage = memoryStorage();
-  saveDraft(storage, draftOf({ resolutions: { [key]: record(key, { type: "skip_row" }) } }));
-  const { draft } = reload(storage);
-  assert.deepEqual(draft.resolutions[key].resolution, { type: "skip_row" });
+  saveDraft(storage, draftOf({ resolutions: { [key]: record(key, { type: "accept_color_as_entered" }) } }));
+  const stored = JSON.parse(storage.raw());
+  stored.resolutions[key].resolution = { type: "skip_row" }; // what an older saved draft could contain
+  const { draft } = loadDraft(memoryStorage({ [DRAFT_STORAGE_KEY]: JSON.stringify(stored) }));
+  assert.deepEqual(draft.resolutions, {});
   const resolved = applyResolutions(parse(draft.text), draft.resolutions);
-  assert.equal(resolved.parsed.rows.some((row) => row.color === "Wood"), false);
-  assert.ok(resolved.skipped.some((line) => /Skipped by Owner/.test(line.reason)));
-  assert.equal(resolved.rowKeys.length, resolved.parsed.rows.length);
+  assert.ok(resolved.parsed.rows.some((row) => row.color === "Wood"), "the listed phone is not removed");
+  assert.deepEqual(resolved.skipped, []);
 });
 
 test("accepted unusual colour persists and clears only the colour warning", () => {
@@ -162,25 +163,24 @@ test("model-token resolution persists: Focus Pro + 5g -> model 'Focus Pro 5G', c
   assert.equal(resolved.rowKeys.length, resolved.parsed.rows.length);
 });
 
-test("skip-row resolution persists for any ambiguous row", () => {
+test("a skip decision can never remove a listed row, even if it reaches applyResolutions directly", () => {
   const parsed = parse();
   const { key } = rowWhere(parsed, (r) => r.ram === "4+8 GB");
-  const storage = memoryStorage();
-  saveDraft(storage, draftOf({ resolutions: { [key]: record(key, { type: "skip_row" }) } }));
-  const resolved = applyResolutions(parse(), reload(storage).draft.resolutions);
-  assert.equal(resolved.parsed.rows.some((r) => r.model === "A36"), false);
+  const resolved = applyResolutions(parsed, { [key]: record(key, { type: "skip_row" }) });
+  assert.ok(resolved.parsed.rows.some((r) => r.model === "A36"));
+  assert.deepEqual(resolved.unmatched, [key], "reported as not applied, never forced");
+  assert.equal(resolved.parsed.rows.length, parsed.rows.length);
 });
 
-test("resolved rows leave Ambiguous and are re-classified by the delta engine", () => {
-  const parsed = parse("Samsung\nA07 4/64 black/5g @ 37000");
+test("resolved rows leave Needs Attention and are re-classified by the delta engine", () => {
+  const parsed = parse("Samsung\nA07 4/64 wood @ 37000");
   const before = buildStockDelta(parsed, catalog());
   assert.ok(before.entries.some((entry) => entry.kind === "ambiguous"));
-  const { key } = rowWhere(parsed, (r) => r.color === "5g");
-  const resolved = applyResolutions(parsed, { [key]: record(key, { type: "skip_row" }) });
+  const { key } = rowWhere(parsed, (r) => r.color === "Wood");
+  const resolved = applyResolutions(parsed, { [key]: record(key, { type: "accept_color_as_entered" }) });
   const after = buildStockDelta(resolved.parsed, catalog());
   assert.equal(after.counts.ambiguous, 0);
-  assert.equal(after.counts.priceChanges, 1);
-  assert.equal(after.counts.excluded, 1);
+  assert.equal(after.counts.newVariants, 1);
 });
 
 test("a decision that no longer matches the edited list is reported, never forced", () => {
@@ -227,11 +227,12 @@ test("an incompatible draft version safely resets", () => {
 
 test("malformed individual decisions are dropped, valid ones kept", () => {
   const storage = memoryStorage();
-  saveDraft(storage, draftOf({ resolutions: { good: record("good", { type: "skip_row" }) } }));
+  saveDraft(storage, draftOf({ resolutions: { good: record("good", { type: "accept_color_as_entered" }) } }));
   const stored = JSON.parse(storage.raw());
   stored.resolutions.bad1 = { rowKey: "bad1", resolution: { type: "delete_everything" } };
   stored.resolutions.bad2 = { rowKey: "bad2", resolution: { type: "set_physical_ram", ramGb: "3" } };
-  stored.resolutions.bad3 = { rowKey: "other", resolution: { type: "skip_row" } };
+  stored.resolutions.bad3 = { rowKey: "other", resolution: { type: "accept_color_as_entered" } };
+  stored.resolutions.bad4 = { rowKey: "bad4", resolution: { type: "skip_row" } };
   stored.selectionOverrides = { a: true, b: "yes" };
   const { draft } = loadDraft(memoryStorage({ [DRAFT_STORAGE_KEY]: JSON.stringify(stored) }));
   assert.deepEqual(Object.keys(draft.resolutions), ["good"]);
@@ -288,7 +289,7 @@ test("a restored draft carries no comparison and cannot authorise Apply", () => 
   // An old stamp is rejected as soon as the text or any decision changes.
   assert.equal(comparisonAuthorizesApply(live, `${LIST}\n`, resolutions), false);
   assert.equal(comparisonAuthorizesApply(live, LIST, {}), false);
-  assert.equal(comparisonAuthorizesApply(live, LIST, { [key]: record(key, { type: "skip_row" }) }), false);
+  assert.equal(comparisonAuthorizesApply(live, LIST, { [key]: record(key, { type: "replace_color", color: "Brown" }) }), false);
 });
 
 test("a restored draft can be re-compared against the current catalog", () => {
@@ -314,7 +315,7 @@ test("the real list pattern from the Owner round-trips with every resolution typ
     pick((r) => r.color === "I.blue", { type: "replace_color", color: "Ice Blue" }),
     pick((r) => r.ram === "3+5 GB", { type: "set_physical_ram", ramGb: 3 }),
     pick((r) => r.ram === "4+4 GB", { type: "set_physical_ram", ramGb: 4 }),
-    pick((r) => r.ram === "4+8 GB", { type: "skip_row" }),
+    pick((r) => r.ram === "4+8 GB", { type: "set_physical_ram", ramGb: 4 }),
     pick((r) => r.color === "5g Black", { type: "move_token_to_model", token: "5g" }),
   ]);
   const storage = memoryStorage();
@@ -326,7 +327,7 @@ test("the real list pattern from the Owner round-trips with every resolution typ
   assert.equal(resolved.parsed.rows.filter((r) => r.reviewReasons.length > 0).length, 0);
 });
 
-test("source: Apply stays disabled, no database write is reachable from the draft code", () => {
+test("source: no database write is reachable from the draft code or written directly by the page", () => {
   for (const file of ["../src/lib/stockListDraft.ts", "../src/admin/StockListUpdate.tsx"]) {
     const source = readFileSync(new URL(file, import.meta.url), "utf8");
     assert.doesNotMatch(source, /\.(insert|update|upsert)\s*\(|\.rpc\s*\(/, file);
@@ -334,7 +335,9 @@ test("source: Apply stays disabled, no database write is reachable from the draf
     assert.doesNotMatch(source, /service[_-]?role|password|access_token|apikey/i, file);
   }
   const ui = readFileSync(new URL("../src/admin/StockListUpdate.tsx", import.meta.url), "utf8");
-  assert.match(ui, /<button type="button" className="admin-primary" disabled title=/);
+  // A restored draft has no stamp, so checkIsCurrent is false and Update Website stays off until a fresh Check List.
+  assert.match(ui, /const checkIsCurrent = comparisonAuthorizesApply\(stamp, text, resolutions\);/);
+  assert.match(ui, /checkIsCurrent, plan: writePlan/);
   assert.match(ui, /STEP\.clear/);
   // An untouched tab must never overwrite/delete a saved draft (autosave and the pagehide/unmount flush are gated).
   assert.match(ui, /if \(touched\.current\) saveDraft\(/);

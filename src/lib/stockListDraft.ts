@@ -19,14 +19,15 @@ const MAX_TEXT_LENGTH = 2_000_000;
 // Resolutions
 // ---------------------------------------------------------------------------
 
-export type ResolutionType = "accept_color_as_entered" | "replace_color" | "set_physical_ram" | "move_token_to_model" | "skip_row";
+// There is no "skip": every Android line in the latest list must be fixed (or corrected in the list text), because a skipped
+// line would leave that phone hidden or at its old price. Skip decisions in older saved drafts are dropped on load.
+export type ResolutionType = "accept_color_as_entered" | "replace_color" | "set_physical_ram" | "move_token_to_model";
 
 export type Resolution =
   | { type: "accept_color_as_entered" }
   | { type: "replace_color"; color: string }
   | { type: "set_physical_ram"; ramGb: number }
-  | { type: "move_token_to_model"; token: string }
-  | { type: "skip_row" };
+  | { type: "move_token_to_model"; token: string };
 
 /** One Owner decision about one source row. Keyed by a content-based row key, so it survives re-parsing and line shifts. */
 export type ResolutionRecord = { rowKey: string; resolution: Resolution; sourceLine: string; label: string; decidedAt: string };
@@ -80,8 +81,6 @@ export function describeResolution(resolution: Resolution): string {
       return `Physical RAM set to ${resolution.ramGb} GB`;
     case "move_token_to_model":
       return `“${resolution.token}” moved to the model name`;
-    case "skip_row":
-      return "Row skipped";
   }
 }
 
@@ -104,7 +103,7 @@ const COLOR_REASON = /^(?:Colour ".*" not recognised — verify|Multi-word colou
 
 const MODEL_TOKEN = /^[2-6]g$/i;
 
-/** Which Owner actions make sense for a (resolved) row, derived from its remaining review reasons. Skip is always available. */
+/** Which Owner actions make sense for a (resolved) row, derived from its remaining review reasons. */
 export function resolutionOptions(row: CatalogSheetRow): { colorIssue: boolean; physicalRam: number | null; token: string | null } {
   const colorIssue = row.reviewReasons.some((reason) => COLOR_REASON.test(reason));
   const firstRamTerm = row.reviewReasons.includes(EXTENDED_RAM) ? Number(row.ram?.match(/^(\d+)\s*\+/)?.[1]) : NaN;
@@ -167,12 +166,7 @@ export function applyResolutions(parsed: ParsedStockList, resolutions: Readonly<
 
     if (record) {
       const { resolution } = record;
-      if (resolution.type === "skip_row") {
-        handled.add(key);
-        applied.push(key);
-        skipped.push({ lineNumber: row.lineNumber, line: row.sourceLine, reason: `Skipped by Owner: ${[row.model, row.ram, row.storage, row.color].filter(Boolean).join(" ")}` });
-        next = null;
-      } else if (resolution.type === "accept_color_as_entered" && row.color && withoutColorReasons(row).length !== row.reviewReasons.length) {
+      if (resolution.type === "accept_color_as_entered" && row.color && withoutColorReasons(row).length !== row.reviewReasons.length) {
         next = finish(row, withoutColorReasons(row), {}, { color: "explicit" });
         ownResolution = true;
       } else if (resolution.type === "replace_color" && row.color && withoutColorReasons(row).length !== row.reviewReasons.length && resolution.color.trim()) {
@@ -201,7 +195,7 @@ export function applyResolutions(parsed: ParsedStockList, resolutions: Readonly<
     }
 
     // Move the token into the model name of every surviving sibling colour of that line.
-    if (next && suffix && !(record?.resolution.type === "skip_row")) {
+    if (next && suffix) {
       const model = canonicalModel(`${next.model ?? row.model ?? ""} ${suffix.toUpperCase()}`);
       const hasSuffix = (next.model ?? "").toLowerCase().endsWith(` ${suffix.toLowerCase()}`);
       if (!hasSuffix && next.model) {
@@ -238,7 +232,6 @@ function readResolution(value: unknown): Resolution | null {
   if (!isRecord(value) || typeof value.type !== "string") return null;
   switch (value.type) {
     case "accept_color_as_entered":
-    case "skip_row":
       return { type: value.type };
     case "replace_color":
       return typeof value.color === "string" && value.color.trim() && value.color.length <= 60 ? { type: "replace_color", color: value.color.trim() } : null;

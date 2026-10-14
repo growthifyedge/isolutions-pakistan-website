@@ -2401,3 +2401,14 @@ p.bulk-images-error { padding-left: 14px; }
 @media (max-width: 720px) {
   .stock-step { padding: 12px; }
 }
+
+.stock-confirm { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding: 14px; border: 1px solid #d9b4ac; border-left: 4px solid #b3382a; background: #fdf4f2; font-size: 13px; overflow-wrap: anywhere; }
+.stock-confirm input { min-height: 38px; padding: 0 10px; border: 1px solid var(--a-line); font: 600 13px ui-monospace, Consolas, monospace; box-sizing: border-box; max-width: 320px; }
+
+.stock-progress { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid #cfe2d4; background: #f2f8f4; font-size: 13px; overflow-wrap: anywhere; }
+.stock-progress.stopped { margin-top: 14px; border-color: #e3c9a1; background: #fdf7ec; }
+.stock-progress-bar { position: relative; width: 100%; height: 12px; border-radius: 6px; background: #dfe7e2; overflow: hidden; }
+.stock-progress-bar span { display: block; height: 100%; background: #2f6b4a; transition: width 0.2s ease-out; }
+.stock-progress.stopped .stock-progress-bar span { background: #b7791f; }
+.stock-progress-count { font-weight: 700; font-variant-numeric: tabular-nums; }
+.stock-progress-failed { color: #b3382a; font-weight: 700; }
