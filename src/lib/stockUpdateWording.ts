@@ -1,4 +1,5 @@
 import type { DeltaKind, RowCategory } from "./stockListDelta.ts";
+import type { PhoneStatus } from "./stockUpdateApply.ts";
 
 // Every word the Owner reads on the Android Stock Update page lives here, in plain language.
 // Internal names (delta, ambiguous, blocked, fingerprint, plan …) stay in code and never reach the screen.
@@ -61,11 +62,54 @@ const EXPLANATIONS: Array<[RegExp, string]> = [
   [/^Mobile phones are Karachi-only/, "Mobile phones are delivered in Karachi only"],
 ];
 
+/** Reasons the engine already writes as a plain sentence for the Owner (they name the phone it looks like). */
+const PLAIN_REASONS = [
+  /^Looks like /,
+  /^The phone you chose for this line /,
+  // Why a whole phone is held (from the per-phone plan); these name the line, variant or phone already.
+  /^New variant .+: /,
+  /^A line that needs attention looks like this phone/,
+  /^Fix the rows that need attention for this phone first/,
+  /^The brand “.+” is not set up on the website yet/,
+  /^A new phone needs brand, RAM, storage and color/,
+];
+
 /** Turns an internal review reason into a sentence the Owner can act on. Unknown reasons become a generic request to check the line. */
 export function explainReason(reason: string): string {
+  if (PLAIN_REASONS.some((pattern) => pattern.test(reason))) return reason;
   for (const [pattern, text] of EXPLANATIONS) if (pattern.test(reason)) return text;
   return "Please check this line";
 }
+
+const SAVE_ERRORS: Array<[RegExp, (detail: string) => string]> = [
+  [/android_stock_phone_changed_since_check/, () => "This phone changed on the website after your check. Nothing was saved for it — click Check List and update again."],
+  [/android_stock_phone_busy/, () => "Someone else was changing this phone at the same moment. Nothing was saved for it — try again."],
+  [/android_stock_phone_admin_required|catalog_admin_required/, () => "Only an Owner or Admin can update the website. Nothing was saved."],
+  [/android_stock_phone_not_android/, () => "This is not an Android phone, so this update does not change it."],
+  [/android_stock_phone_variant_exists/, () => "A variant with the same details already exists on this phone. Nothing was saved for it."],
+  [/android_stock_phone_verification_failed: (.*)/, (detail) => `The website's own check found a difference, so nothing was saved for this phone (${detail}).`],
+  [/android_stock_phone_rejected: (.*)/, (detail) => `The website did not accept this phone's changes, so nothing was saved for it: ${detail}`],
+  [/bulk_import_v2_\w+: (.*)/, (detail) => `The website did not accept this new phone, so it was not created: ${detail}`],
+  [/^No answer from the website/, () => "No answer from the website. Click Check List to see whether this phone was saved."],
+];
+
+/** The exact reason a phone was not saved, in plain words (the original message is kept in the details). */
+export function explainSaveError(message: string): string {
+  for (const [pattern, text] of SAVE_ERRORS) {
+    const match = message.match(pattern);
+    if (match) return text(match[1] ?? "");
+  }
+  return `Not saved: ${message}`;
+}
+
+/** Result of each phone after Update Website. */
+export const STATUS_LABEL: Record<PhoneStatus, string> = {
+  updated: "Updated",
+  failed: "Not saved",
+  unknown: "Check again",
+  needs_check: "Saved — check again",
+  held: "Held for review",
+};
 
 export const TOKEN_EXPLANATION = (token: string) => `${token.toUpperCase()} looks like part of the phone name`;
 
@@ -74,6 +118,8 @@ export const ACTION = {
   changeColor: "Change color",
   ramOption: (gb: number) => `Use ${gb}GB RAM`,
   addToken: (token: string) => `Add ${token.toUpperCase()} to phone name`,
+  matchTo: (title: string) => `Yes, this is ${title}`,
+  newPhone: "This is a new phone",
   undo: "Undo",
 } as const;
 
@@ -93,12 +139,25 @@ export const WORDING = {
   nothingHere: "Nothing in this group.",
   nothingHidden: "Every Android phone on the website is in this list — nothing will be hidden.",
   listIsTruth: "The latest list decides everything: every phone in it gets its new price, is shown on the website and gets stock 30; every Android phone not in it is hidden. Ticks only mark the rows you have looked at — they do not change what is updated.",
-  attentionHelp: "Every line in the list must be fixed before the website can be updated — lines cannot be skipped. Use the buttons, or correct the line in your list above and click Check List again.",
+  attentionHelp: "These lines are held: their phones (and any phone a line looks like) are not changed or hidden this time, and every other phone still updates. Use the buttons, or correct the line in your list above and click Check List again.",
+  planSummary: (phones: number, held: number) => `${phones} phone(s) will be updated · ${held} held for review`,
+  heldTitle: "Held for review — not changed or hidden this time",
+  heldRow: "Held for review — this phone is not changed this time (see Held for review below)",
+  heldNotHidden: "Held for review — not hidden this time",
+  changesWritten: "Changes that will be made",
+  heldNotCounted: "Phones held for review are not included.",
+  excelTitle: "Fix in Excel (optional)",
+  excelHelp: "Download this list as an Excel sheet. Red cells need fixing and the last column says why. Correct them in Excel, type Yes under “New phone?” for a genuinely new phone, then upload the sheet above — it is checked again automatically.",
+  excelDownload: "Download list as Excel",
+  excelMaking: "Making the sheet…",
+  excelLoaded: (rows: number, newPhones: number) => `Excel sheet loaded: ${rows} row(s)${newPhones ? `, ${newPhones} marked as a new phone` : ""}. Checking it against the website now.`,
+  excelRefused: "This sheet could not be used, so nothing was changed:",
+  excelFixesReplaced: "Your earlier fixes were replaced by the sheet (the sheet now holds your corrections).",
   updateReady: "Ready. Clicking Update Website opens a confirmation first — nothing changes until you confirm.",
   wrongWebsite: "This page is connected to a different website than this build expects, so updating is switched off. Nothing was changed.",
   confirmTitle: (website: string) => `Update the ${website} website now?`,
-  confirmBody: (count: number, website: string) =>
-    `This makes ${count} change(s) on the ${website} website exactly as listed above. Just before saving, the website is read again; if anything changed since your check, nothing is saved and you are asked to check again. Nothing is ever deleted.`,
+  confirmBody: (count: number, phones: number, held: number, website: string) =>
+    `This makes ${count} change(s) to ${phones} phone(s) on the ${website} website exactly as listed above. Each phone is saved on its own: all of its changes or none. A phone that changed since your check is not saved and is listed for you. ${held} phone(s) held for review stay as they are. Nothing is ever deleted.`,
   confirmType: (phrase: string) => `Type ${phrase} to confirm`,
   confirmYes: "Yes, update the website",
   confirmCancel: "Cancel",
@@ -106,26 +165,19 @@ export const WORDING = {
   afterUpdate: "Click Check List again to confirm the website now matches the list.",
   updateDone: "Website updated and checked",
   updateStopped: "Nothing was changed",
-  updateProblem: "Some changes need a look",
-  progressChecking: "Checking the website again…",
-  progressSaving: "Saving a before-copy of each phone…",
-  progressVerifying: "Verifying changes…",
+  updateProblem: "Some phones need a look",
+  progressPhone: (title: string) => `Updating ${title}…`,
   progressFinished: "Finishing…",
-  progressStep: {
-    price: "Updating prices…",
-    set_stock: "Setting stock to 30…",
-    add_variant: "Creating new variants…",
-    create_phone: "Creating new phones…",
-    hide: "Hiding missing items…",
-    show: "Showing returning items…",
-  } as Record<string, string>,
-  progressCount: (done: number, total: number, percent: number) => `${done} / ${total} completed — ${percent}%`,
-  progressPhones: (checked: number, toCheck: number) => `${checked} / ${toCheck} phones`,
-  progressFailed: (failed: number) => `${failed} change(s) failed so far — the rest continue`,
-  progressKeepOpen: "Keep this page open until it finishes. Closing or refreshing it stops the remaining changes.",
-  progressStopped: (done: number, total: number, step: string) => `Stopped after ${done} / ${total} changes, while: ${step}`,
-  resultCompleted: (ok: number, total: number) => `${ok} of ${total} changes completed`,
-  resultFailedStep: (title: string, step: string, message: string) => `Failed: ${title} — ${step} ${message}`,
+  progressCount: (done: number, total: number, percent: number) => `${done} / ${total} phones — ${percent}%`,
+  progressFailed: (failed: number) => `${failed} phone(s) not updated so far — the others continue`,
+  progressKeepOpen: "Keep this page open until it finishes. Closing or refreshing it stops the phones not yet updated; the ones already done stay done.",
+  progressStopped: (done: number, total: number) => `Stopped after ${done} / ${total} phones`,
+  progressLastProblem: (title: string, message: string) => `${title}: ${message}`,
+  reportTitle: "Result for every phone",
+  reportDownload: "Download report (CSV)",
+  reportHint: "This report is not saved anywhere — download it if you want to keep it. To retry, fix the list, click Check List and update again; phones already updated then show as Same.",
+  reportChanges: "Changes",
+  reportNewSkus: (skus: string) => `New SKU(s): ${skus}`,
   nothingDeleted: "Nothing is ever deleted. Hidden phones keep their images, specifications, links and SKUs and come back when they appear in a later list.",
   heldHide: "Fix the rows that need attention for this phone first",
   alreadyHidden: "Already hidden — stays hidden",

@@ -128,12 +128,19 @@ test("harmless spelling differences map to the existing phone only when identity
   assert.ok(delta.entries[1].notes.some((note) => /Matched to/.test(note)));
 });
 
-test("Edge 70 is never merged with Edge 70 Fusion", () => {
+test("Edge 70 is never merged with Edge 70 Fusion: it waits for the Owner, and Fusion is held (never hidden) meanwhile", () => {
   const delta = run("Motorola\nEdge 70 12/256 grey @ 99000");
-  assert.equal(delta.entries[0].kind, "new_product");
+  assert.equal(delta.entries[0].kind, "ambiguous");
+  assert.equal(delta.entries[0].attention, "looks_like_existing");
   assert.equal(delta.entries[0].productId, null);
-  assert.ok(delta.entries[0].notes.some((note) => /Edge 70 Fusion/.test(note)));
-  assert.ok(delta.missing.some((m) => m.productTitle === "Motorola Edge 70 Fusion"));
+  assert.deepEqual(delta.entries[0].nearTitles, ["Motorola Edge 70 Fusion"]);
+  assert.equal(delta.missing.find((m) => m.productTitle === "Motorola Edge 70 Fusion").action, "held");
+
+  // Once the Owner confirms "this is a new phone", it is a new phone and Fusion follows the normal list rule again.
+  const confirmed = buildStockDelta(parseStockList("Motorola\nEdge 70 12/256 grey @ 99000", brands), catalog(), [{ confirmNewPhone: true }]);
+  assert.equal(confirmed.entries[0].kind, "new_product");
+  assert.ok(confirmed.entries[0].notes.some((note) => /Edge 70 Fusion/.test(note)));
+  assert.equal(confirmed.missing.find((m) => m.productTitle === "Motorola Edge 70 Fusion").action, "hide");
 });
 
 test("Same: an unchanged visible variant needs no price or visibility write", () => {
@@ -467,7 +474,7 @@ test("stock 30: a hidden item that returns is always shown AND set to 30 — it 
 
 test("page source: ticks are review marks only — the plan is built from the list alone and there is no Skip", () => {
   const ui = readFileSync(new URL("../src/admin/StockListUpdate.tsx", import.meta.url), "utf8");
-  assert.match(ui, /buildApplyPlan\(delta\)/);
+  assert.match(ui, /buildPhonePlan\(delta, catalog, activeBrands\)/);
   assert.doesNotMatch(ui, /defaultSelection|isSelectable|isHideSelectable|skip_row/);
   assert.match(ui, /<th>Reviewed<\/th>/);
   assert.match(ui, /as reviewed`/);

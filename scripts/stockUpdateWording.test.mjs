@@ -103,3 +103,19 @@ test("price, multiple-price and duplicate-line reasons have their own plain sent
   assert.match(wording.explainReason("Multiple/ambiguous prices detected; review price-to-color mapping."), /more than one price/);
   assert.equal(wording.explainReason("Duplicate variant (same as line 54)"), "This variant appears more than once in the list");
 });
+
+test("Safe Partial Updates wording: fix buttons, results and save errors are plain sentences", () => {
+  assert.equal(wording.ACTION.matchTo("Xiaomi Redmi Note 15 Pro"), "Yes, this is Xiaomi Redmi Note 15 Pro");
+  assert.equal(wording.ACTION.newPhone, "This is a new phone");
+  assert.deepEqual(Object.keys(wording.STATUS_LABEL).sort(), ["failed", "held", "needs_check", "unknown", "updated"]);
+  for (const resolution of [{ type: "accept_correction", productId: "x", productTitle: "Xiaomi Redmi Note 15 Pro" }, { type: "confirm_new_phone" }]) check(describeResolution(resolution), resolution.type);
+  assert.match(wording.explainSaveError("android_stock_phone_changed_since_check: x"), /changed on the website after your check/);
+  assert.match(wording.explainSaveError("android_stock_phone_busy: x"), /Someone else/);
+  assert.match(wording.explainSaveError('android_stock_phone_rejected: "A07": stock must be set to 30'), /did not accept.*stock must be set to 30/);
+  assert.match(wording.explainSaveError("No answer from the website (Failed to fetch)"), /Click Check List/);
+  assert.equal(wording.explainSaveError("boom"), "Not saved: boom");
+  for (const message of ["android_stock_phone_changed_since_check", "android_stock_phone_busy", "android_stock_phone_admin_required", "android_stock_phone_not_android", "android_stock_phone_variant_exists", "No answer from the website"]) check(wording.explainSaveError(message), message);
+  assert.equal(wording.explainReason("Looks like “Xiaomi Redmi Note 15 Pro” — correct the line, or confirm it is a new phone"), "Looks like “Xiaomi Redmi Note 15 Pro” — correct the line, or confirm it is a new phone");
+  check(wording.WORDING.confirmBody(10, 4, 2, "PRODUCTION"), "confirmBody");
+  check(wording.WORDING.planSummary(4, 2), "planSummary");
+});

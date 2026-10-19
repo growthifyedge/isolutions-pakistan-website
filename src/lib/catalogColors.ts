@@ -21,6 +21,14 @@ const COLOR_ALIASES: Record<string, string> = {
   nvy: "Navy",
   lav: "Lavender",
   forst: "Forest",
+  // Owner-confirmed 2026-10-19: Samsung's "Icyblue" (A57), as suppliers write it.
+  icyblue: "Icyblue",
+  "i.blue": "Icyblue",
+};
+
+// Owner-confirmed whole-phrase spellings of one colour (matched on the full value, case and spacing ignored).
+const COLOR_PHRASE_ALIASES: Record<string, string> = {
+  "icy blue": "Icyblue",
 };
 
 // Colour words (and common marketing colour words) accepted as written.
@@ -48,6 +56,8 @@ const titleWord = (word: string) => word[0].toUpperCase() + word.slice(1).toLowe
 
 /** "wht" -> White, "slv" -> Silver, "forst" -> Forest, "light blue" -> Light Blue; unknown words kept and flagged. */
 export function normalizeColor(value: string): NormalizedColor {
+  const phrase = COLOR_PHRASE_ALIASES[value.trim().toLowerCase().split(/\s+/).join(" ")];
+  if (phrase) return { color: phrase, known: true };
   let known = true;
   const color = value
     .trim()

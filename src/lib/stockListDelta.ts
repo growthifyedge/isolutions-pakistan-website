@@ -161,6 +161,45 @@ export function rowCategory(row: CatalogSheetRow): RowCategory {
 
 export type DeltaKind = "unchanged" | "price_change" | "new_variant" | "new_product" | "ambiguous" | "blocked";
 
+/**
+ * A possible spelling mistake for ONE existing phone ("Redmi Note 15 Pr" -> "Xiaomi Redmi Note 15 Pro"), found only when the
+ * line matches no phone exactly. Offered only when exactly one same-brand phone fits, no other phone looks alike, and that
+ * phone has exactly one variant with the line's RAM / storage / colour (and any PTA / condition / battery facts it states).
+ */
+export type SpellingSuggestion = {
+  productId: string;
+  productTitle: string;
+  variantId: string;
+  /** The listed word and the word it becomes. */
+  from: string;
+  to: string;
+  /** Safe to apply without the Owner's click only if the variant is visible and the phone is published or a draft. */
+  autoSafe: boolean;
+};
+
+/** Why a row needs the Owner (null for every other row). */
+export type AttentionKind =
+  /** One clear spelling correction is offered: the Owner confirms it (or corrects the line). */
+  | "spelling"
+  /** The line looks like one or more existing phones but cannot be matched safely: correct it, or confirm a new phone. */
+  | "looks_like_existing"
+  /** The Owner confirmed a phone for this line earlier, but it no longer matches exactly. */
+  | "decision_stale";
+
+/** The Owner's saved per-row decision about the line's identity (from stockListDraft.applyResolutions), aligned with the rows. */
+export type RowDecision = {
+  /** "Yes, this line is that phone": accepted only while it is still the one spelling suggestion for the line. */
+  matchProductId?: string;
+  /** "This is a new phone": the line is not compared with similar-looking phones. */
+  confirmNewPhone?: boolean;
+};
+
+/**
+ * Spelling corrections are never applied without the Owner's click (Owner rule: no guessing). Turning this on would apply a
+ * suggestion automatically when it is `autoSafe`; it stays off unless the Owner decides otherwise.
+ */
+export const AUTO_APPLY_SPELLING_CORRECTIONS = false;
+
 export type DeltaEntry = {
   id: string;
   kind: DeltaKind;
@@ -190,6 +229,12 @@ export type DeltaEntry = {
   willUpdate: boolean;
   /** New phones only: what is still needed before the phone can go live. */
   requirements: string[];
+  /** Why the Owner is needed for this row (spelling / looks like an existing phone / stale decision), else null. */
+  attention: AttentionKind | null;
+  /** The one spelling correction offered (attention "spelling") or applied (Owner-confirmed), else null. */
+  suggestion: SpellingSuggestion | null;
+  /** Existing phones this unmatched line looks like. They are never hidden while the row waits for the Owner. */
+  nearTitles: string[];
 };
 
 export type MissingAction = "hide" | "already_hidden" | "held";
@@ -242,6 +287,12 @@ export type DeltaCounts = {
   alreadyHidden: number;
   heldHides: number;
   ambiguous: number;
+  /** Rows waiting for the Owner to confirm a spelling correction. */
+  spellingSuggestions: number;
+  /** Unmatched rows that look like an existing phone (correct the line, or confirm a new phone). */
+  looksLikeExisting: number;
+  /** Rows needing attention that matched no phone at all (nothing on the website is changed for them). */
+  notMatched: number;
   blocked: number;
   excluded: number;
   /** Lines outside this Android update: non-Android rows + excluded lines. */
@@ -302,15 +353,110 @@ function newProductRequirements(row: CatalogSheetRow, complete: boolean) {
 
 const isPublished = (product: CatalogDeltaProduct) => product.publicationStatus === "published";
 
-export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDeltaProduct[]): StockDelta {
+// ---------------------------------------------------------------------------
+// Spelling suggestions (strict; never applied without the Owner)
+// ---------------------------------------------------------------------------
+
+/** Name words for comparison: lower case, "+" is the word "plus", punctuation separates words. */
+export const nameWords = (title: string) =>
+  title
+    .toLowerCase()
+    .replace(/\+/g, " plus ")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+/** True when a and b differ by exactly one insertion, deletion, substitution or swap of two neighbouring letters. */
+function oneEditApart(a: string, b: string): boolean {
+  if (a === b || Math.abs(a.length - b.length) > 1) return false;
+  if (a.length === b.length) {
+    const diffs: number[] = [];
+    for (let index = 0; index < a.length; index += 1) if (a[index] !== b[index]) diffs.push(index);
+    if (diffs.length === 1) return true;
+    return diffs.length === 2 && diffs[1] === diffs[0] + 1 && a[diffs[0]] === b[diffs[1]] && a[diffs[1]] === b[diffs[0]];
+  }
+  const [short, long] = a.length < b.length ? [a, b] : [b, a];
+  for (let index = 0; index < long.length; index += 1) if (long.slice(0, index) + long.slice(index + 1) === short) return true;
+  return false;
+}
+
+/**
+ * The single word correction that turns the listed name into the phone's name, or null. Rules (all must hold):
+ * same number of words; exactly one word differs; both words are letters only (a word with a digit — 15, A57, 5G — is never
+ * corrected); the listed word is not a real word of any phone name (so "Lite" is never turned into "Life"); and either the
+ * listed word is a shortened form of at least 2 letters (Pr -> Pro) or, for words of 4+ letters, one letter is wrong.
+ */
+export function oneWordCorrection(listed: readonly string[], existing: readonly string[], knownWords: ReadonlySet<string>): { from: string; to: string } | null {
+  if (listed.length !== existing.length) return null;
+  let found: { from: string; to: string } | null = null;
+  for (let index = 0; index < listed.length; index += 1) {
+    const from = listed[index];
+    const to = existing[index];
+    if (from === to) continue;
+    if (found) return null;
+    if (!/^[a-z]+$/.test(from) || !/^[a-z]+$/.test(to) || knownWords.has(from)) return null;
+    const shortened = from.length >= 2 && to.startsWith(from);
+    const misspelt = from.length >= 4 && to.length >= 4 && oneEditApart(from, to);
+    if (!shortened && !misspelt) return null;
+    found = { from, to };
+  }
+  return found;
+}
+
+type NearMatch = {
+  /** The one safe correction, or null. */
+  suggestion: SpellingSuggestion | null;
+  /** Every existing phone the line looks like (similar names + correction candidates). */
+  near: CatalogDeltaProduct[];
+  /** Exactly one phone fits the spelling, but it has no single variant with the line's RAM / storage / colour. */
+  variantMissing: boolean;
+};
+
+function findNearMatches(row: CatalogSheetRow, title: string, catalog: readonly CatalogDeltaProduct[], knownWords: ReadonlySet<string>): NearMatch {
+  const key = identityKey(title);
+  const similar = catalog.filter((product) => {
+    const other = identityKey(product.title);
+    return other !== key && (other.startsWith(key) || key.startsWith(other));
+  });
+  const brand = lower(row.brand);
+  const listed = nameWords(title);
+  const corrections = brand
+    ? catalog
+        .filter((product) => lower(product.brand) === brand && product.publicationStatus !== "archived")
+        .map((product) => ({ product, change: oneWordCorrection(listed, nameWords(product.title), knownWords) }))
+        .filter((item): item is { product: CatalogDeltaProduct; change: { from: string; to: string } } => item.change !== null)
+    : [];
+  const near = [...new Set([...similar, ...corrections.map((item) => item.product)])];
+  if (corrections.length !== 1 || near.length !== 1) return { suggestion: null, near, variantMissing: false };
+  const { product, change } = corrections[0];
+  const matches = product.variants.filter((variant) => sameConfiguration(row, variant) && factsCompatible(row, variant));
+  if (matches.length !== 1) return { suggestion: null, near, variantMissing: true };
+  const variant = matches[0];
+  return {
+    suggestion: {
+      productId: product.id,
+      productTitle: product.title,
+      variantId: variant.id,
+      from: change.from,
+      to: change.to,
+      autoSafe: variant.isActive && (product.publicationStatus === "published" || product.publicationStatus === "draft"),
+    },
+    near,
+    variantMissing: false,
+  };
+}
+
+export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDeltaProduct[], decisions?: readonly (RowDecision | undefined)[]): StockDelta {
   // Only Android phones take part. iPhones, tablets, accessories and feature phones on the website are never matched or hidden.
   const catalog = fullCatalog.filter(isAndroidCatalogProduct);
   const byKey = new Map<string, CatalogDeltaProduct[]>();
   const bySlug = new Map<string, CatalogDeltaProduct[]>();
+  const knownWords = new Set<string>();
   for (const product of catalog) {
     byKey.set(identityKey(product.title), [...(byKey.get(identityKey(product.title)) ?? []), product]);
     bySlug.set(product.slug, [...(bySlug.get(product.slug) ?? []), product]);
+    for (const word of nameWords(product.title)) knownWords.add(word);
   }
+  const byId = new Map(catalog.map((product) => [product.id, product] as const));
 
   const entries: DeltaEntry[] = [];
   const touchedProducts = new Set<string>();
@@ -346,6 +492,9 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
       notes: [],
       willUpdate: false,
       requirements: [],
+      attention: null,
+      suggestion: null,
+      nearTitles: [],
     };
 
     // Not an Android phone: listed for information only, never compared or applied.
@@ -353,9 +502,9 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
       entries.push({ ...base, reasons: [`${CATEGORY_LABEL[category]} — not part of this Android update`] });
       return;
     }
-    // An Android line we cannot read fully needs the Owner's attention (it can be skipped).
+    // An Android line we cannot read fully needs the Owner's attention (fix the line; there is no skip).
     if (row.priceMinor === null || !title) {
-      // The phone is still in the list: hold it (never hide it) until the Owner fixes or skips this row.
+      // The phone is still in the list: hold it (never hide it) until the Owner fixes this row.
       if (title) for (const product of [...(byKey.get(identityKey(title)) ?? []), ...(row.slug ? bySlug.get(row.slug) ?? [] : [])]) attentionProducts.add(product.id);
       entries.push({ ...base, kind: "ambiguous", reasons: [...row.reviewReasons, "Price or model missing — cannot compare"] });
       return;
@@ -380,25 +529,61 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
       return;
     }
 
+    // No exact match: never guess. A line that looks like an existing phone waits for the Owner (and that phone is never
+    // hidden meanwhile), so a typo can never create a duplicate phone or hide the real one.
+    let correction: SpellingSuggestion | null = null;
     if (candidates.length === 0) {
-      const complete = Boolean(row.ram && row.storage && row.color && row.priceMinor !== null);
-      if (similar.length) notes.push(`Different from the existing: ${similar.map((product) => product.title).join(", ")}`);
-      // A new phone must be complete: it cannot be left out, so a missing RAM / storage / color needs attention.
-      if (!complete) reasons.push("New phone is missing RAM / storage / color — add them to the line");
-      const held = reasons.length > 0;
-      entries.push({
-        ...base,
-        kind: held ? "ambiguous" : "new_product",
-        provisionalKind: held ? "new_product" : null,
-        reasons,
-        notes,
-        willUpdate: !held,
-        requirements: newProductRequirements(row, complete),
-      });
-      return;
+      const decision = decisions?.[index];
+      const near = findNearMatches(row, title, catalog, knownWords);
+      const nearTitles = near.near.map((product) => product.title);
+      const hold = () => {
+        for (const product of near.near) attentionProducts.add(product.id);
+      };
+      if (decision?.matchProductId) {
+        if (near.suggestion && near.suggestion.productId === decision.matchProductId) {
+          correction = near.suggestion;
+          notes.push(`Spelling corrected by you: “${correction.from}” → “${correction.to}”`);
+        } else {
+          hold();
+          if (byId.has(decision.matchProductId)) attentionProducts.add(decision.matchProductId);
+          entries.push({ ...base, kind: "ambiguous", attention: "decision_stale", nearTitles, reasons: [...reasons, "The phone you chose for this line no longer matches it exactly — check the line again"], notes });
+          return;
+        }
+      } else if (near.suggestion && AUTO_APPLY_SPELLING_CORRECTIONS && near.suggestion.autoSafe) {
+        correction = near.suggestion;
+        notes.push(`Spelling corrected: “${correction.from}” → “${correction.to}”`);
+      } else if (!decision?.confirmNewPhone && near.near.length) {
+        hold();
+        const reason = near.suggestion
+          ? `Looks like a spelling mistake for “${near.suggestion.productTitle}” (“${near.suggestion.from}” → “${near.suggestion.to}”) — confirm it, or correct the line`
+          : near.variantMissing
+            ? `Looks like “${nearTitles[0]}”, but that phone has no ${rowLabel(row)} variant — correct the line, or confirm it is a new phone`
+            : `Looks like the existing ${nearTitles.join(", ")} — correct the line, or confirm it is a new phone`;
+        entries.push({ ...base, kind: "ambiguous", attention: near.suggestion ? "spelling" : "looks_like_existing", suggestion: near.suggestion, nearTitles, reasons: [...reasons, reason], notes });
+        return;
+      }
+
+      if (!correction) {
+        const complete = Boolean(row.ram && row.storage && row.color && row.priceMinor !== null);
+        if (near.near.length) notes.push(`You confirmed this is a new phone (different from ${nearTitles.join(", ")})`);
+        else if (similar.length) notes.push(`Different from the existing: ${similar.map((product) => product.title).join(", ")}`);
+        // A new phone must be complete: it cannot be left out, so a missing RAM / storage / color needs attention.
+        if (!complete) reasons.push("New phone is missing RAM / storage / color — add them to the line");
+        const held = reasons.length > 0;
+        entries.push({
+          ...base,
+          kind: held ? "ambiguous" : "new_product",
+          provisionalKind: held ? "new_product" : null,
+          reasons,
+          notes,
+          willUpdate: !held,
+          requirements: newProductRequirements(row, complete),
+        });
+        return;
+      }
     }
 
-    const product = candidates[0];
+    const product = correction ? (byId.get(correction.productId) as CatalogDeltaProduct) : candidates[0];
     touchedProducts.add(product.id);
     if (product.slug !== row.slug || product.title !== title) notes.push(`Matched to “${product.title}” on the website`);
     if (similar.length) notes.push(`Not the same as: ${similar.map((other) => other.title).join(", ")}`);
@@ -406,6 +591,13 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
 
     const configMatches = product.variants.filter((variant) => sameConfiguration(row, variant));
     const variantMatches = configMatches.filter((variant) => factsCompatible(row, variant));
+
+    // A corrected spelling only ever updates the one existing variant it was verified against — never a new variant.
+    if (correction && (variantMatches.length !== 1 || variantMatches[0].id !== correction.variantId)) {
+      attentionProducts.add(product.id);
+      entries.push({ ...base, ...common, kind: "ambiguous", attention: "decision_stale", reasons: [...reasons, "The phone you chose for this line no longer matches it exactly — check the line again"], notes });
+      return;
+    }
 
     if (variantMatches.length > 1) {
       attentionProducts.add(product.id);
@@ -458,8 +650,18 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
       reasons,
       notes,
       willUpdate: !held && (kind === "price_change" || showAgain),
+      suggestion: correction,
     });
   });
+
+  // A spelling suggestion for a variant that another line already lists exactly is not offered (it would claim it twice).
+  for (const entry of entries) {
+    if (entry.attention !== "spelling" || !entry.suggestion || !matchedVariantIds.has(entry.suggestion.variantId)) continue;
+    const title = entry.suggestion.productTitle;
+    entry.suggestion = null;
+    entry.attention = "looks_like_existing";
+    entry.reasons = [...entry.row.reviewReasons, `Looks like “${title}”, but another line already lists that variant — correct the line, or confirm it is a new phone`];
+  }
 
   // The same existing variant claimed by two list rows is a conflict (e.g. the same colour listed twice at different prices).
   for (const entry of entries) {
@@ -539,6 +741,9 @@ export function buildStockDelta(parsed: ParsedStockList, fullCatalog: CatalogDel
     alreadyHidden: missing.filter((entry) => entry.action === "already_hidden").length,
     heldHides: missing.filter((entry) => entry.action === "held").length,
     ambiguous: count("ambiguous"),
+    spellingSuggestions: entries.filter((entry) => entry.attention === "spelling").length,
+    looksLikeExisting: entries.filter((entry) => entry.attention === "looks_like_existing").length,
+    notMatched: entries.filter((entry) => entry.kind === "ambiguous" && entry.category === "smartphone" && entry.productId === null).length,
     blocked,
     excluded: parsed.excluded.length,
     notAndroid: blocked + parsed.excluded.length,

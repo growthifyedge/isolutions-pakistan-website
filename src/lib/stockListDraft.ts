@@ -1,6 +1,6 @@
 import { EXTENDED_RAM, canonicalModel, catalogSlug, type CatalogSheetRow } from "./catalogSheet.ts";
 import { normalizeColor } from "./catalogColors.ts";
-import type { ExcludedLine, ParsedStockList } from "./stockListDelta.ts";
+import type { ExcludedLine, ParsedStockList, RowDecision } from "./stockListDelta.ts";
 
 // Durable Owner working state for Admin "Stock List Update": the raw list, the Owner's decisions
 // (ambiguity resolutions, checkbox overrides) and nothing else. Pure functions plus an injectable
@@ -21,13 +21,18 @@ const MAX_TEXT_LENGTH = 2_000_000;
 
 // There is no "skip": every Android line in the latest list must be fixed (or corrected in the list text), because a skipped
 // line would leave that phone hidden or at its old price. Skip decisions in older saved drafts are dropped on load.
-export type ResolutionType = "accept_color_as_entered" | "replace_color" | "set_physical_ram" | "move_token_to_model";
+export type ResolutionType = "accept_color_as_entered" | "replace_color" | "set_physical_ram" | "move_token_to_model" | "accept_correction" | "confirm_new_phone";
 
 export type Resolution =
   | { type: "accept_color_as_entered" }
   | { type: "replace_color"; color: string }
   | { type: "set_physical_ram"; ramGb: number }
-  | { type: "move_token_to_model"; token: string };
+  | { type: "move_token_to_model"; token: string }
+  /** "This line is that existing phone" (a spelling correction). Applies to every colour of the line; the comparison only
+   *  accepts it while that phone is still the one spelling suggestion for the line, otherwise the row needs attention again. */
+  | { type: "accept_correction"; productId: string; productTitle: string }
+  /** "This line is a new phone", although its name looks like an existing one. Applies to every colour of the line. */
+  | { type: "confirm_new_phone" };
 
 /** One Owner decision about one source row. Keyed by a content-based row key, so it survives re-parsing and line shifts. */
 export type ResolutionRecord = { rowKey: string; resolution: Resolution; sourceLine: string; label: string; decidedAt: string };
@@ -81,6 +86,10 @@ export function describeResolution(resolution: Resolution): string {
       return `Physical RAM set to ${resolution.ramGb} GB`;
     case "move_token_to_model":
       return `“${resolution.token}” moved to the model name`;
+    case "accept_correction":
+      return `Matched to “${resolution.productTitle}”`;
+    case "confirm_new_phone":
+      return "Confirmed as a new phone";
   }
 }
 
@@ -117,6 +126,8 @@ export type ResolvedStockList = {
   rowKeys: string[];
   /** Keys of the unresolved source rows, in parse order — what the Owner can still decide on. */
   baseKeys: string[];
+  /** The Owner's identity decisions (spelling correction / new phone), aligned with `parsed.rows`; pass to buildStockDelta. */
+  rowDecisions: (RowDecision | undefined)[];
   applied: string[];
   /** Decisions that no longer match any current row, or whose condition no longer holds (list edited). */
   unmatched: string[];
@@ -143,6 +154,18 @@ export function applyResolutions(parsed: ParsedStockList, resolutions: Readonly<
   const applied: string[] = [];
   const skipped: ExcludedLine[] = [];
 
+  // Identity decisions (spelling correction / new phone) apply to every sibling colour of the same source line.
+  const lineDecision = new Map<string, RowDecision>();
+  for (const record of Object.values(resolutions)) {
+    const index = keyIndex.get(record.rowKey);
+    const { resolution } = record;
+    if (index === undefined || (resolution.type !== "accept_correction" && resolution.type !== "confirm_new_phone")) continue;
+    const row = parsed.rows[index];
+    lineDecision.set(`${row.lineNumber}|${row.sourceLine}`, resolution.type === "accept_correction" ? { matchProductId: resolution.productId } : { confirmNewPhone: true });
+    handled.add(record.rowKey);
+    applied.push(record.rowKey);
+  }
+
   // Model suffixes move to every sibling colour of the same source line.
   const lineSuffix = new Map<string, string>();
   for (const record of Object.values(resolutions)) {
@@ -157,6 +180,7 @@ export function applyResolutions(parsed: ParsedStockList, resolutions: Readonly<
 
   const rows: CatalogSheetRow[] = [];
   const rowKeys: string[] = [];
+  const rowDecisions: (RowDecision | undefined)[] = [];
   parsed.rows.forEach((row, index) => {
     const key = baseKeys[index];
     const record = resolutions[key];
@@ -207,12 +231,13 @@ export function applyResolutions(parsed: ParsedStockList, resolutions: Readonly<
     if (next) {
       rows.push(next);
       rowKeys.push(key);
+      rowDecisions.push(lineDecision.get(`${row.lineNumber}|${row.sourceLine}`));
     }
   });
 
   const unmatched = Object.keys(resolutions).filter((key) => !handled.has(key));
   const skippedExcluded = [...parsed.excluded, ...skipped];
-  return { parsed: { ...parsed, rows, excluded: skippedExcluded }, rowKeys, baseKeys, applied, unmatched, skipped };
+  return { parsed: { ...parsed, rows, excluded: skippedExcluded }, rowKeys, baseKeys, rowDecisions, applied, unmatched, skipped };
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +264,12 @@ function readResolution(value: unknown): Resolution | null {
       return typeof value.ramGb === "number" && Number.isInteger(value.ramGb) && value.ramGb > 0 && value.ramGb <= 64 ? { type: "set_physical_ram", ramGb: value.ramGb } : null;
     case "move_token_to_model":
       return typeof value.token === "string" && /^[A-Za-z0-9+]{1,12}$/.test(value.token) ? { type: "move_token_to_model", token: value.token } : null;
+    case "accept_correction":
+      return typeof value.productId === "string" && value.productId.trim() && value.productId.length <= 100 && typeof value.productTitle === "string" && value.productTitle.trim() && value.productTitle.length <= 200
+        ? { type: "accept_correction", productId: value.productId, productTitle: value.productTitle }
+        : null;
+    case "confirm_new_phone":
+      return { type: "confirm_new_phone" };
     default:
       return null;
   }

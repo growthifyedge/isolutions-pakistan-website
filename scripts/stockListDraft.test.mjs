@@ -33,7 +33,7 @@ const memoryStorage = (initial = {}) => {
 
 const LIST = [
   "Motorola", "Edge 50 Ultra 12/512 wood @ 100000", "",
-  "Samsung", "A57 8/256 i.blue/black @ 90000", "A07 4/64 black @ 36900", "",
+  "Samsung", "A57 8/256 q.blue/black @ 90000", "A07 4/64 black @ 36900", "",
   "Realme", "Note 60x 3+5/64 black @ 20000", "Note 60x 4+4/64 blue @ 21000", "",
   "ZTE", "A36 4+8/64 blue @ 20000", "Focus Pro 8/256 5g black/brown @ 50000",
 ].join("\n");
@@ -119,7 +119,7 @@ test("accepted unusual colour persists and clears only the colour warning", () =
 
 test("replace_color with an Owner-provided value persists", () => {
   const parsed = parse();
-  const { key } = rowWhere(parsed, (r) => r.color === "I.blue");
+  const { key } = rowWhere(parsed, (r) => r.color === "Q.blue");
   const storage = memoryStorage();
   saveDraft(storage, draftOf({ resolutions: { [key]: record(key, { type: "replace_color", color: "ice blue" }) } }));
   const { draft } = reload(storage);
@@ -190,8 +190,8 @@ test("a decision that no longer matches the edited list is reported, never force
   const resolved = applyResolutions(edited, { [key]: record(key, { type: "accept_color_as_entered" }) });
   assert.deepEqual(resolved.unmatched, [key]);
   // A decision whose condition no longer holds is also reported (colour fixed in the source).
-  const fixed = parse(LIST.replace("i.blue", "blue"));
-  const k2 = rowWhere(parsed, (r) => r.color === "I.blue").key;
+  const fixed = parse(LIST.replace("q.blue", "blue"));
+  const k2 = rowWhere(parsed, (r) => r.color === "Q.blue").key;
   assert.deepEqual(applyResolutions(fixed, { [k2]: record(k2, { type: "replace_color", color: "x" }) }).unmatched, [k2]);
 });
 
@@ -312,7 +312,7 @@ test("the real list pattern from the Owner round-trips with every resolution typ
   const pick = (predicate, resolution) => { const { key } = rowWhere(parsed, predicate); return [key, record(key, resolution)]; };
   const resolutions = Object.fromEntries([
     pick((r) => r.color === "Wood", { type: "accept_color_as_entered" }),
-    pick((r) => r.color === "I.blue", { type: "replace_color", color: "Ice Blue" }),
+    pick((r) => r.color === "Q.blue", { type: "replace_color", color: "Ice Blue" }),
     pick((r) => r.ram === "3+5 GB", { type: "set_physical_ram", ramGb: 3 }),
     pick((r) => r.ram === "4+4 GB", { type: "set_physical_ram", ramGb: 4 }),
     pick((r) => r.ram === "4+8 GB", { type: "set_physical_ram", ramGb: 4 }),
@@ -337,7 +337,7 @@ test("source: no database write is reachable from the draft code or written dire
   const ui = readFileSync(new URL("../src/admin/StockListUpdate.tsx", import.meta.url), "utf8");
   // A restored draft has no stamp, so checkIsCurrent is false and Update Website stays off until a fresh Check List.
   assert.match(ui, /const checkIsCurrent = comparisonAuthorizesApply\(stamp, text, resolutions\);/);
-  assert.match(ui, /checkIsCurrent, plan: writePlan/);
+  assert.match(ui, /checkIsCurrent, plan: phonePlan/);
   assert.match(ui, /STEP\.clear/);
   // An untouched tab must never overwrite/delete a saved draft (autosave and the pagehide/unmount flush are gated).
   assert.match(ui, /if \(touched\.current\) saveDraft\(/);
