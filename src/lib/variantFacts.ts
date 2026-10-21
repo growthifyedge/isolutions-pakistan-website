@@ -4,12 +4,14 @@
 
 export const CONDITION_GRADES = ["A++"] as const;
 
-// SIM configuration (202609270003): optional; blank stays NULL and is never inferred.
+// SIM configuration (202609270003; dual_physical_sim = two physical SIMs, 202610210002): optional; blank stays NULL
+// and is never inferred.
 export const SIM_CONFIGURATIONS = [
   { value: "physical_sim", label: "Physical SIM" },
   { value: "esim", label: "eSIM" },
   { value: "physical_plus_esim", label: "Physical + eSIM" },
   { value: "dual_esim", label: "Dual eSIM" },
+  { value: "dual_physical_sim", label: "Dual Physical SIM" },
 ] as const;
 
 /** Display label for a stored SIM configuration; NULL (not supplied) has no label. */
@@ -23,7 +25,7 @@ export function parseSimConfiguration(value: string | null | undefined):
   if (value === null || value === undefined || value.trim() === "") return { ok: true, value: null };
   return SIM_CONFIGURATIONS.some((option) => option.value === value)
     ? { ok: true, value }
-    : { ok: false, message: "SIM Configuration must be Physical SIM, eSIM, Physical + eSIM or Dual eSIM." };
+    : { ok: false, message: "SIM Configuration must be Physical SIM, eSIM, Physical + eSIM, Dual eSIM or Dual Physical SIM." };
 }
 
 const PTA_LABELS: Record<string, string> = {

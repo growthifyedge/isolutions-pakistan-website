@@ -578,7 +578,7 @@ const simLetter = () => String.fromCharCode(64 + column("SIM Configuration"));
 
 test("SIM: template has an optional SIM Configuration column with a label dropdown", async () => {
   assert.ok(PRODUCT_HEADERS.includes("SIM Configuration"));
-  assert.deepEqual(CATALOG_LISTS.simConfiguration, ["Physical SIM", "eSIM", "Physical + eSIM", "Dual eSIM"]);
+  assert.deepEqual(CATALOG_LISTS.simConfiguration, ["Physical SIM", "eSIM", "Physical + eSIM", "Dual eSIM", "Dual Physical SIM"]);
   const workbook = await load(await buildCatalogWorkbook([], [], reference));
   const products = workbook.getWorksheet("Products");
   assert.equal(products.getRow(1).getCell(column("SIM Configuration")).value, "SIM Configuration");

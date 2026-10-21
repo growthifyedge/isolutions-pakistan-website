@@ -117,7 +117,7 @@ test("SECURITY DEFINER RPCs callable by visitors are exactly the reviewed set", 
     "set_product_media_color_assignment", "submit_contact_message", "subscribe_newsletter", "validate_storefront_coupon"];
   assert.deepEqual(await callable("anon"), reviewed);
   assert.deepEqual(await callable("authenticated"),
-    [...reviewed, "apply_android_stock_phone", "apply_catalog_bulk_import", "apply_catalog_bulk_import_v2"].sort());
+    [...reviewed, "apply_android_stock_phone", "apply_catalog_bulk_import", "apply_catalog_bulk_import_v2", "apply_iphone_stock_phone"].sort());
 });
 
 test("visitors, customers and inactive admins cannot read Admin, order, stock or contact data", async () => {

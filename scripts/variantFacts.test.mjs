@@ -101,13 +101,14 @@ test("database accepts the Admin update and enforces the same rules", async () =
   await assert.rejects(update({ condition: "used", condition_grade: null, battery_health_percent: null, battery_cycle_count: -1 }), /variants_battery_cycle_nonnegative/);
 });
 
-test("SIM Configuration: four locked options, blank saves NULL, nothing inferred", () => {
+test("SIM Configuration: five locked options (Dual Physical SIM = two physical SIMs), blank saves NULL, nothing inferred", () => {
   assert.deepEqual(SIM_CONFIGURATIONS.map((option) => [option.value, option.label]), [
     ["physical_sim", "Physical SIM"], ["esim", "eSIM"], ["physical_plus_esim", "Physical + eSIM"], ["dual_esim", "Dual eSIM"],
+    ["dual_physical_sim", "Dual Physical SIM"],
   ]);
   for (const value of ["", " ", null, undefined]) assert.deepEqual(parseSimConfiguration(value), { ok: true, value: null });
   for (const { value } of SIM_CONFIGURATIONS) assert.deepEqual(parseSimConfiguration(value), { ok: true, value });
-  for (const value of ["both_esim_ready", "Dual eSIM", "physical"])
+  for (const value of ["both_esim_ready", "Dual eSIM", "physical", "physical_dual", "Dual Physical SIM"])
     assert.equal(parseSimConfiguration(value).ok, false, value);
 });
 
@@ -136,4 +137,5 @@ test("database stores SIM Configuration, keeps NULL, rejects unknown values", as
   await update(null);
   assert.equal(await sim(), null);
   await assert.rejects(update("both_esim_ready"), /variants_sim_configuration_valid/);
+  await assert.rejects(update("physical_dual"), /variants_sim_configuration_valid/);
 });
