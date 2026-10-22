@@ -9,7 +9,7 @@ import {
   emptyDecisions,
   parseIphoneList,
 } from "../src/lib/iphoneStockUpdate.ts";
-import { DEV_ONLY_REASON, iphoneUpdateBlocker, runIphoneUpdate } from "../src/lib/iphoneStockApply.ts";
+import { IPHONE_WRITE_ENVIRONMENTS, iphoneUpdateBlocker, runIphoneUpdate } from "../src/lib/iphoneStockApply.ts";
 import { PhoneWriteError } from "../src/lib/stockUpdateApply.ts";
 import { normalizeColor } from "../src/lib/catalogColors.ts";
 import { SKIPPED_NO_COLOUR } from "../src/lib/iphoneStockUpdate.ts";
@@ -391,23 +391,55 @@ test("Update Website stays off while the Owner gate is off, and needs a matching
   assert.match(iphoneUpdateBlocker({ ...ok, plan: allHeld }), /needs attention/);
 });
 
-test("Update Website is DEV only: a matching PROD build and project is still refused", () => {
+test("Update Website is approved for DEV and PROD only, each with its own matching build", () => {
+  assert.deepEqual([...IPHONE_WRITE_ENVIRONMENTS], ["development", "production"]);
   const { plan } = run("IPhone 15Pro Max 256Gb\nNatural @280,000", usedCatalog());
-  assert.equal(iphoneUpdateBlocker({ supabaseUrl: PROD_URL, buildMode: "production", enabled: true, checkIsCurrent: true, plan }), DEV_ONLY_REASON);
+  const prod = { supabaseUrl: PROD_URL, buildMode: "production", enabled: true, checkIsCurrent: true, plan };
+  assert.equal(iphoneUpdateBlocker(prod), null);
+  // PROD keeps every other guard: build/project pairing, fresh check, held phones, Owner gate.
+  assert.match(iphoneUpdateBlocker({ ...prod, buildMode: "development" }), /Blocked/);
+  assert.match(iphoneUpdateBlocker({ ...prod, enabled: false }), /switched off/);
+  assert.match(iphoneUpdateBlocker({ ...prod, checkIsCurrent: false }), /Check Changes again/);
+  assert.match(iphoneUpdateBlocker({ ...prod, plan: null }), /Check Changes first/);
+  const allHeld = run("IPhone 15Pro Max 256Gb\nBlakc @280,000", usedCatalog()).plan;
+  assert.match(iphoneUpdateBlocker({ ...prod, plan: allHeld }), /needs attention/);
 });
 
-test("the page has the Owner gate switched on (approved 2026-10-22 for DEV)", () => {
+test("the page has the Owner gate switched on (approved 2026-10-22 for DEV and PROD)", () => {
   const source = readFileSync(new URL("../src/admin/IphoneStockUpdate.tsx", import.meta.url), "utf8");
   assert.match(source, /const IPHONE_UPDATE_WEBSITE_ENABLED = true;/);
   assert.match(source, /disabled=\{Boolean\(blocker\) \|\| busy \|\| writing\}/, "the button is disabled whenever a blocker exists");
 });
 
-test("runner refuses PROD before any call, even with a matching PROD build", async () => {
+test("runner refuses a PROD project with a non-PROD build before any call", async () => {
   const { plan } = run("iPhone 13 128GB\nRed @ 90,000", []);
   const never = async () => assert.fail("no call may be made");
-  const result = await runIphoneUpdate({ supabaseUrl: PROD_URL, buildMode: "production", readSnapshot: never, applyPhone: never, createPhone: never, readCreatedPhone: never }, plan);
-  assert.equal(result.outcome, "blocked");
-  assert.match(result.message, /DEV website only/);
+  for (const buildMode of ["development", "test", undefined]) {
+    const result = await runIphoneUpdate({ supabaseUrl: PROD_URL, buildMode, readSnapshot: never, applyPhone: never, createPhone: never, readCreatedPhone: never }, plan);
+    assert.equal(result.outcome, "blocked");
+    assert.match(result.message, /Blocked.*Nothing was written/);
+  }
+});
+
+test("runner writes on a matching PROD build: new phone created with Create only and read back", async () => {
+  const { plan } = run("iPhone 13 128GB\nRed @ 90,000", []);
+  const payloads = [];
+  const deps = {
+    supabaseUrl: PROD_URL,
+    buildMode: "production",
+    readSnapshot: async () => assert.fail("no existing phone"),
+    applyPhone: async () => assert.fail("no existing phone"),
+    createPhone: async (payload) => {
+      payloads.push(payload);
+      return { products: [{ id: "new-1", title: payload.title, action: "Create" }], assigned_skus: [{ product: payload.title, sku: "MB329" }] };
+    },
+    readCreatedPhone: async () => ({ publicationStatus: "draft", variantCount: 1, skus: ["MB329"], stock: [20], sims: [null] }),
+  };
+  const result = await runIphoneUpdate(deps, plan);
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].action, "Create");
+  assert.equal(result.phones[0].status, "updated");
+  assert.deepEqual(result.phones[0].newSkus, ["MB329"]);
 });
 
 function snapshotOf(productRow, variants, stock) {

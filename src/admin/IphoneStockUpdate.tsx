@@ -29,7 +29,7 @@ import { installUnloadGuard } from "../lib/unloadGuard";
 // fresh check of exactly this list, choices and decisions. Phones with any line that needs attention are held, never written.
 // Existing variants keep their stock; variants missing from the list are never touched.
 
-/** Owner gate (approved 2026-10-22 for DEV, migrations applied). The write itself is still DEV-only (iphoneStockApply). */
+/** Owner gate (approved 2026-10-22 for DEV and PROD, migrations applied on both). The write is limited to DEV + PROD (iphoneStockApply). */
 const IPHONE_UPDATE_WEBSITE_ENABLED = true;
 
 const BUILD_MODE: string = import.meta.env.MODE;

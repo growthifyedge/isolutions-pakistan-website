@@ -78,21 +78,21 @@ function describe(phone: IphonePhoneUpdate): string[] {
 
 const emptyCounts = (): Record<PhoneStatus, number> => ({ updated: 0, failed: 0, unknown: 0, needs_check: 0, held: 0 });
 
-/** Owner approval (2026-10-22): iPhone Stock Update may write to DEV only. PROD needs a separate approval and code change. */
-export const IPHONE_WRITE_ENVIRONMENTS: readonly string[] = ["development"];
-export const DEV_ONLY_REASON = "iPhone Stock Update is approved for the DEV website only; this website is not DEV.";
+/** Owner approval (2026-10-22): iPhone Stock Update may write to DEV and PROD. Any other environment is refused. */
+export const IPHONE_WRITE_ENVIRONMENTS: readonly string[] = ["development", "production"];
+export const ENVIRONMENT_NOT_ALLOWED_REASON = "iPhone Stock Update is approved for the DEV and PROD websites only; this website is neither.";
 
-/** The write target if it is allowed for the iPhone update (matching build/project AND DEV), else the reason it is not. */
+/** The write target if it is allowed for the iPhone update (matching build/project AND DEV or PROD), else the reason it is not. */
 function iphoneWriteTarget(supabaseUrl: string | undefined | null, buildMode: string | undefined | null): string | null {
   const target = commercialWriteTarget(supabaseUrl, buildMode);
   if (!target.allowed) return target.reason ?? "The website environment could not be confirmed.";
-  if (!target.environment || !IPHONE_WRITE_ENVIRONMENTS.includes(target.environment)) return DEV_ONLY_REASON;
+  if (!target.environment || !IPHONE_WRITE_ENVIRONMENTS.includes(target.environment)) return ENVIRONMENT_NOT_ALLOWED_REASON;
   return null;
 }
 
 /** Every condition Update Website needs. Returns the first reason it must stay off, or null. */
 export function iphoneUpdateBlocker(input: { supabaseUrl: string | undefined | null; buildMode: string | undefined | null; enabled: boolean; checkIsCurrent: boolean; plan: IphonePlan | null }): string | null {
-  if (!input.enabled) return "Update Website is switched off on this build until the Owner approves the DEV step.";
+  if (!input.enabled) return "Update Website is switched off on this build until the Owner approves it.";
   const environmentProblem = iphoneWriteTarget(input.supabaseUrl, input.buildMode);
   if (environmentProblem) return environmentProblem;
   if (!input.plan) return "Click Check Changes first.";
