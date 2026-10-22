@@ -2412,3 +2412,28 @@ p.bulk-images-error { padding-left: 14px; }
 .stock-progress.stopped .stock-progress-bar span { background: #b7791f; }
 .stock-progress-count { font-weight: 700; font-variant-numeric: tabular-nums; }
 .stock-progress-failed { color: #b3382a; font-weight: 700; }
+.specs-images-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
+.specs-images-filters button { padding: 7px 12px; border: 1px solid var(--a-line); background: #fff; color: var(--a-ink); font: 700 11.5px Manrope, sans-serif; cursor: pointer; }
+.specs-images-filters button.active { background: var(--a-ink); color: #fff; border-color: var(--a-ink); }
+.specs-images-table-wrap { overflow-x: auto; border: 1px solid var(--a-line); background: #fff; }
+.specs-images-table { width: 100%; min-width: 1080px; border-collapse: collapse; font-size: 12.5px; }
+.specs-images-table th { padding: 10px 12px; border-bottom: 1px solid var(--a-line); color: var(--a-muted); font: 700 9.5px/1 Manrope, sans-serif; letter-spacing: .08em; text-transform: uppercase; text-align: left; white-space: nowrap; }
+.specs-images-table td { padding: 11px 12px; border-bottom: 1px solid #ECEEEA; vertical-align: top; }
+.specs-images-table td small { display: block; margin-top: 4px; color: var(--a-muted); font-size: 11.5px; line-height: 1.4; max-width: 300px; }
+.specs-images-pill { display: inline-block; padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.specs-images-pill.ready { background: #e3f5e8; color: #176b37; }
+.specs-images-pill.warning { background: #fff6dc; color: #7a5600; }
+.specs-images-pill.blocked { background: #fff0e5; color: #9a3e16; }
+.specs-images-pill.muted { background: #eef0ec; color: #59625b; }
+/* Specifications Bulk Upload */
+.spec-upload-step { margin: 18px 0; padding: 14px; border: 1px solid var(--a-line); background: #fff; }
+.spec-upload-step h3 { margin: 0 0 8px; font-size: 14px; }
+.spec-upload-step > small { display: block; margin-top: 6px; color: var(--a-muted); font-size: 11.5px; }
+.spec-upload-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.spec-upload-actions button:not(.admin-primary), .spec-upload-file { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--a-line); background: #fff; color: var(--a-ink); font: 700 12px Manrope, sans-serif; cursor: pointer; }
+.spec-upload-actions svg, .spec-upload-file svg { width: 14px; height: 14px; }
+.spec-upload-actions input[type="text"] { min-width: 220px; padding: 8px 10px; border: 1px solid var(--a-line); font: 700 12px Manrope, sans-serif; }
+.spec-upload-file input { display: none; }
+.spec-upload-result { margin-top: 12px; font-size: 12.5px; }
+.spec-upload-result p svg, .spec-upload-result summary svg { width: 14px; height: 14px; vertical-align: -2px; }
+.spec-upload-result ul { margin: 6px 0 8px; padding-left: 18px; color: var(--a-muted); }
