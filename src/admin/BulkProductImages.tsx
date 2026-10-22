@@ -1,5 +1,5 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import { FileArchive, ImagePlus, Search, ShieldCheck, Star, Trash2, X } from "lucide-react";
+import { ImagePlus, Search, ShieldCheck, Star, X } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import {
   resolveUploadTarget,
@@ -23,54 +23,33 @@ import { supabaseRefsInText } from "../lib/supabaseEnvironment";
 import { installUnloadGuard } from "../lib/unloadGuard";
 import {
   LOCAL_IMAGE_ACCEPT,
-  addLocalFiles,
-  assignProduct,
   attachLocalImages,
-  catalogCoverage,
-  chooseSourceSet,
   clearLocalSet,
-  deselectAll,
   keepOnlyBlockReason,
   keepOnlySet,
-  selectAllEligible,
-  confirmAllReviewSuggestions,
-  confirmMatch,
-  eligibleReviewSetIds,
   createPreviewUrlRegistry,
   emptyReview,
-  filterReviewSets,
   localFileProblems,
   localImageContentProblems,
   missingImageProducts,
-  parseShopifyReview,
   previewUrlsInReview,
-  readShopifyExport,
   referenceCatalogEnvironment,
   removeLocalImage,
-  restoreSet,
   reviewSetStates,
-  searchCatalogProducts,
-  setExistingMode,
-  setImageSelected,
   setIncluded,
   setPrimaryImage,
-  skipSet,
-  summarizeReview,
   validateBulkImageSelection,
   type BulkImageCatalogProduct,
-  type BulkImageFilter,
   type BulkImageReview,
-  type BulkImageSet,
   type BulkImageSetState,
-  type BulkImageSourceKind,
-  type ExistingImageMode,
 } from "../lib/bulkProductImagesReview";
 
-// Review panel + environment-aware bulk uploader. The only write path is the single upload button
-// (src/lib/bulkImageUpload.ts): it exists only for the exact DEVELOPMENT or PRODUCTION build, runs a
-// preflight first, needs an explicit confirmation (typed "PRODUCTION" on production) and uploads one product at a time.
+// Manual product image upload + environment-aware uploader. The Owner picks a product without a primary image,
+// uploads its images and chooses the Primary (the rest are gallery images). The only write path is the single upload
+// button (src/lib/bulkImageUpload.ts): it exists only for the exact DEVELOPMENT or PRODUCTION build, runs a preflight
+// first, needs an explicit confirmation (typed "PRODUCTION" on production) and uploads one product at a time.
+// Same flow for every category and condition. Products that already have a primary image are managed in the product editor's Media tab.
 
-const PAGE_SIZE = 60;
 const MISSING_PAGE_SIZE = 20;
 const environment = referenceCatalogEnvironment(import.meta.env.VITE_SUPABASE_URL);
 const BUILD_MODE: string = import.meta.env.MODE;
@@ -90,18 +69,6 @@ const STATUS_LABEL: Record<BulkImageSetState["status"], string> = {
   not_used: "Not used",
   skipped: "Skipped",
 };
-
-const FILTERS: { key: BulkImageFilter; label: string }[] = [
-  { key: "relevant", label: "Relevant" },
-  { key: "all", label: "All" },
-  { key: "matched", label: "Matched" },
-  { key: "review", label: "Review" },
-  { key: "multiple", label: "Multiple" },
-  { key: "conflict", label: "Conflict" },
-  { key: "unmatched", label: "Unmatched" },
-  { key: "invalid", label: "Invalid" },
-  { key: "existing", label: "Existing image" },
-];
 
 type CatalogRecord = {
   id: string;
@@ -142,19 +109,7 @@ export function BulkProductImages() {
   const [catalog, setCatalog] = useState<BulkImageCatalogProduct[]>([]);
   const [catalogError, setCatalogError] = useState("");
   const [catalogLoading, setCatalogLoading] = useState(true);
-  const [sourceKind, setSourceKind] = useState<BulkImageSourceKind>("shopify");
-  const [shopifyFile, setShopifyFile] = useState<File | null>(null);
-  const [localFiles, setLocalFiles] = useState<File[]>([]);
-  const [inputKey, setInputKey] = useState(0);
   const [review, setReview] = useState<BulkImageReview>(emptyReview);
-  const [notes, setNotes] = useState<string[]>([]);
-  const [errors, setErrors] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [filter, setFilter] = useState<BulkImageFilter>("relevant");
-  const [query, setQuery] = useState("");
-  const [limit, setLimit] = useState(PAGE_SIZE);
-  const [pickerFor, setPickerFor] = useState<string | null>(null);
-  const [galleryFor, setGalleryFor] = useState<string | null>(null);
   const previews = useRef(createPreviewUrlRegistry());
   const uploadLatch = useRef(createSubmitLatch());
   const [keepNotice, setKeepNotice] = useState("");
@@ -185,24 +140,6 @@ export function BulkProductImages() {
 
   const update: Update = (change) => setReview((current) => change(current));
 
-  /** "Confirm all review suggestions": accepts only the matcher's existing, unambiguous Review suggestions. */
-  function confirmAllReview() {
-    const result = confirmAllReviewSuggestions(review, catalog);
-    setReview(result.review);
-    const after = reviewSetStates(result.review, catalog);
-    const count = (status: string) => [...after.values()].filter((state) => state.status === status).length;
-    const conflictProducts = new Set([...after.values()].filter((state) => state.status === "conflict").map((state) => state.targetId)).size;
-    const missing = missingImageProducts(result.review, after, catalog).length;
-    const head = `Confirmed ${result.confirmed} review suggestion${result.confirmed === 1 ? "" : "s"}. ${result.skipped} skipped${result.skipped ? " — manual review still required" : ""}.`;
-    const remaining = [
-      conflictProducts ? `${conflictProducts} Conflict product${conflictProducts === 1 ? "" : "s"}` : "",
-      count("multiple") ? `${count("multiple")} Multiple` : "",
-      count("review") ? `${count("review")} Review` : "",
-      missing ? `${missing} Missing` : "",
-    ].filter(Boolean);
-    setKeepNotice(`${head} ${remaining.length ? `${count("review") ? "Review not complete" : "Review complete"}. Remaining manual actions: ${remaining.join(", ")}.` : "Nothing else needs manual action."}`);
-  }
-
   /** "Keep only this set" with a visible result, so a click is never silent. */
   function keepOnly(setId: string) {
     const blockedReason = keepOnlyBlockReason(review, setId);
@@ -218,62 +155,8 @@ export function BulkProductImages() {
     if (next !== review) setReview(next);
   }
 
-  async function loadAndMatch() {
-    setErrors([]);
-    setBusy(true);
-    try {
-      if (sourceKind === "shopify") {
-        if (!shopifyFile) return;
-        const exported = await readShopifyExport(shopifyFile);
-        if ("error" in exported) {
-          setErrors([exported.error]);
-          return;
-        }
-        const parsed = parseShopifyReview(review, exported.text, catalog);
-        if (!parsed.review) {
-          setErrors(parsed.errors);
-          return;
-        }
-        setReview(parsed.review);
-        setNotes((current) => [
-          ...current.filter((note) => !note.startsWith("Shopify")),
-          `Shopify ${exported.csvName}: ${parsed.rowCount} CSV rows → ${parsed.productCount} source sets (one per Handle).`,
-        ]);
-        setFilter("relevant");
-      } else {
-        if (localFiles.length === 0) return;
-        const contentProblems = await localImageContentProblems(localFiles);
-        const previewUrls = localFiles.map((file, index) => (contentProblems[index] ? null : previews.current.create(file)));
-        setReview((current) => addLocalFiles(current, localFiles, catalog, { contentProblems, previewUrls }));
-        setNotes((current) => [...current, `Local: ${localFiles.length} file${localFiles.length === 1 ? "" : "s"} added — shown first in the table (Source = Local).`]);
-        setFilter("all");
-        setQuery("");
-        setLocalFiles([]);
-        setInputKey((key) => key + 1);
-      }
-      setLimit(PAGE_SIZE);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function clearReview() {
-    setReview(emptyReview());
-    setNotes([]);
-    setErrors([]);
-    setPickerFor(null);
-    setGalleryFor(null);
-  }
-
   const states = useMemo(() => reviewSetStates(review, catalog), [review, catalog]);
-  const summary = useMemo(() => summarizeReview(review, states), [review, states]);
-  const coverage = useMemo(() => catalogCoverage(review, states, catalog), [review, states, catalog]);
   const validation = useMemo(() => validateBulkImageSelection(review, catalog, environment), [review, catalog]);
-  const visibleSets = useMemo(() => filterReviewSets(review, states, catalog, filter, query), [review, states, catalog, filter, query]);
-  const productById = useMemo(() => new Map(catalog.map((product) => [product.id, product])), [catalog]);
-  const canLoad = !busy && !catalogLoading && !catalogError && (sourceKind === "shopify" ? Boolean(shopifyFile) : localFiles.length > 0);
-  const hasSets = review.sets.length > 0;
-  const eligibleReviewIds = useMemo(() => eligibleReviewSetIds(review, catalog), [review, catalog]);
   const devUpload = useMemo(() => planBulkUpload(review, catalog, import.meta.env.VITE_SUPABASE_URL, BUILD_MODE), [review, catalog]);
   const uploading = uploadProgress !== null;
 
@@ -367,11 +250,12 @@ export function BulkProductImages() {
     <section className="admin-panel bulk-images" aria-labelledby="bulk-images-title">
       <div className="bulk-images-head">
         <div>
-          <span className="admin-kicker">BULK PRODUCT IMAGES</span>
-          <h2 id="bulk-images-title">Bulk Product Images</h2>
+          <span className="admin-kicker">PRODUCT IMAGES</span>
+          <h2 id="bulk-images-title">Manual Product Image Upload</h2>
           <p>
-            Match Shopify image sets or local images to catalog products, choose the primary and gallery images, review, then upload the
-            selected sets to the {uploadTarget.environment === "production" ? "PRODUCTION" : "DEV"} catalog.
+            Choose a product without a primary image, upload its images, pick the Primary (the rest become gallery images), then upload the
+            selected products to the {uploadTarget.environment === "production" ? "PRODUCTION" : "DEV"} catalog. Works for every category,
+            New and Used. Products that already have a primary image are managed in the product editor's Media tab.
           </p>
         </div>
         <div className={`bulk-images-env ${environment.label.toLowerCase()}`} role="status">
@@ -387,203 +271,11 @@ export function BulkProductImages() {
       )}
 
       <fieldset className="bulk-images-lock" disabled={uploading}>
-      <div className="bulk-images-source" role="group" aria-label="Image source">
-        <button type="button" className={sourceKind === "shopify" ? "active" : ""} aria-pressed={sourceKind === "shopify"} onClick={() => setSourceKind("shopify")}>
-          <FileArchive /> Shopify CSV / ZIP
-        </button>
-        <button type="button" className={sourceKind === "local" ? "active" : ""} aria-pressed={sourceKind === "local"} onClick={() => setSourceKind("local")}>
-          <ImagePlus /> Local Images
-        </button>
-      </div>
-      <div className="bulk-images-load">
-        {sourceKind === "shopify" ? (
-          <label>
-            Shopify Products export (.csv or .zip)
-            <input key={`shopify-${inputKey}`} type="file" accept=".csv,.zip,text/csv,application/zip" onChange={(event) => setShopifyFile(event.target.files?.[0] ?? null)} />
-          </label>
-        ) : (
-          <label>
-            Product images (JPEG, PNG, WebP, AVIF · named "Brand Model", extra images "Brand Model (2)")
-            <input
-              key={`local-${inputKey}`}
-              type="file"
-              multiple
-              accept={LOCAL_IMAGE_ACCEPT}
-              onChange={(event: ChangeEvent<HTMLInputElement>) => setLocalFiles([...(event.target.files ?? [])])}
-            />
-          </label>
-        )}
-        <button type="button" className="admin-primary" disabled={!canLoad} onClick={() => void loadAndMatch()}>
-          {busy ? "Matching…" : "Load & Match"}
-        </button>
-        {hasSets && (
-          <button type="button" className="admin-secondary" onClick={clearReview}>
-            Clear review
-          </button>
-        )}
-      </div>
-      {errors.length > 0 && (
-        <ul className="bulk-images-error" role="alert">
-          {errors.map((error) => (
-            <li key={error}>{error}</li>
-          ))}
-        </ul>
+      {keepNotice && (
+        <p className="bulk-images-note" role="status">
+          {keepNotice}
+        </p>
       )}
-      {notes.length > 0 && <p className="bulk-images-note">{notes.join(" · ")}</p>}
-
-      {!catalogLoading && !catalogError && (
-        <div className="bulk-images-coverage" aria-label="Catalog coverage">
-          <h3>Catalog coverage</h3>
-          <div className="bulk-images-cards six">
-            {(
-              [
-                ["Catalog products", coverage.total],
-                ["With usable source", coverage.withSource],
-                ["Selected for images", coverage.selected],
-                ["Still missing", coverage.missing],
-                ["Existing primary", coverage.existingPrimary],
-                ["Needs manual action", coverage.needsManualAction],
-              ] as const
-            ).map(([label, value]) => (
-              <article key={label}>
-                <small>{label}</small>
-                <strong>{value}</strong>
-              </article>
-            ))}
-          </div>
-          <p>
-            By best source: {coverage.matched} matched{coverage.confirmed ? ` · ${coverage.confirmed} confirmed` : ""} · {coverage.review} review ·{" "}
-            {coverage.conflict} conflict · {coverage.multiple} multiple · {coverage.none} without a source
-          </p>
-        </div>
-      )}
-
-      {hasSets && (
-        <>
-          <h3 className="bulk-images-section-title">Source sets</h3>
-          <div className="bulk-images-cards" aria-label="Source summary">
-            {(
-              [
-                ["Loaded", summary.loaded, `${summary.images} images`],
-                ["Matched", summary.matched + summary.confirmed],
-                ["Review", summary.review],
-                ["Multiple", summary.multiple],
-                ["Conflict", summary.conflict, `${summary.conflictProducts} product${summary.conflictProducts === 1 ? "" : "s"}`],
-                ["Unmatched", summary.unmatched, summary.skipped ? `${summary.skipped} skipped` : undefined],
-                ["Invalid", summary.invalid],
-                ["Included", summary.included, `${summary.includedImages} images`],
-              ] as const
-            ).map(([label, value, note]) => (
-              <article key={label}>
-                <small>{label}</small>
-                <strong>{value}</strong>
-                {note && <span>{note}</span>}
-              </article>
-            ))}
-          </div>
-
-          <div className="bulk-images-tools">
-            <div className="bulk-images-filters" role="group" aria-label="Filter source sets">
-              {FILTERS.map((entry) => (
-                <button
-                  key={entry.key}
-                  type="button"
-                  className={filter === entry.key ? "active" : ""}
-                  aria-pressed={filter === entry.key}
-                  onClick={() => {
-                    setFilter(entry.key);
-                    setLimit(PAGE_SIZE);
-                  }}
-                >
-                  {entry.label}
-                </button>
-              ))}
-            </div>
-            <label className="bulk-images-search">
-              <Search />
-              <input
-                type="search"
-                placeholder="Search title, handle, brand, model or product"
-                value={query}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setLimit(PAGE_SIZE);
-                }}
-              />
-            </label>
-          </div>
-
-          <div className="bulk-images-bulk" role="group" aria-label="Bulk selection">
-            <button type="button" className="admin-secondary" disabled={eligibleReviewIds.length === 0} onClick={confirmAllReview}>
-              Confirm all review suggestions
-            </button>
-            <button type="button" className="admin-secondary" onClick={() => update((current) => selectAllEligible(current, catalog))}>
-              Select all eligible
-            </button>
-            <button type="button" className="admin-secondary" onClick={() => update(deselectAll)}>
-              Deselect all
-            </button>
-            <small>Review-only: changes which sets are included. Nothing is saved or uploaded.</small>
-          </div>
-          {keepNotice && (
-            <p className="bulk-images-note" role="status">
-              {keepNotice}
-            </p>
-          )}
-
-          <div className="bulk-images-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Include Set?</th>
-                  <th>Source</th>
-                  <th>Shopify Title / Files</th>
-                  <th>Handle</th>
-                  <th>Detected Brand</th>
-                  <th>Detected Model</th>
-                  <th>Matched iSolutions Product</th>
-                  <th>Images</th>
-                  <th>Primary Preview</th>
-                  <th>Status</th>
-                  <th>Issue</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleSets.slice(0, limit).map((set) => (
-                  <SetRows
-                    key={set.setId}
-                    set={set}
-                    state={states.get(set.setId)!}
-                    review={review}
-                    catalog={catalog}
-                    productById={productById}
-                    pickerOpen={pickerFor === set.setId}
-                    onPicker={(open) => setPickerFor(open ? set.setId : null)}
-                    galleryOpen={galleryFor === set.setId}
-                    onGallery={(open) => setGalleryFor(open ? set.setId : null)}
-                    update={update}
-                    onKeepOnly={keepOnly}
-                  />
-                ))}
-                {visibleSets.length === 0 && (
-                  <tr>
-                    <td colSpan={12} className="bulk-images-empty">
-                      No source sets for this filter.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          {visibleSets.length > limit && (
-            <button type="button" className="admin-secondary bulk-images-more" onClick={() => setLimit((current) => current + PAGE_SIZE)}>
-              Show {Math.min(PAGE_SIZE, visibleSets.length - limit)} more of {visibleSets.length - limit} remaining
-            </button>
-          )}
-        </>
-      )}
-
       {!catalogLoading && !catalogError && (
         <MissingImages review={review} states={states} catalog={catalog} createPreview={(file) => previews.current.create(file)} update={update} onKeepOnly={keepOnly} />
       )}
@@ -807,243 +499,7 @@ function Thumb({ url, large = false }: { url: string | null; large?: boolean }) 
   );
 }
 
-function SetRows({
-  set,
-  state,
-  review,
-  catalog,
-  productById,
-  pickerOpen,
-  onPicker,
-  galleryOpen,
-  onGallery,
-  update,
-  onKeepOnly,
-}: {
-  set: BulkImageSet;
-  state: BulkImageSetState;
-  review: BulkImageReview;
-  catalog: BulkImageCatalogProduct[];
-  productById: Map<string, BulkImageCatalogProduct>;
-  pickerOpen: boolean;
-  onPicker: (open: boolean) => void;
-  galleryOpen: boolean;
-  onGallery: (open: boolean) => void;
-  update: Update;
-  onKeepOnly: (setId: string) => void;
-}) {
-  const decision = review.decisions[set.setId];
-  const target = state.targetId ? productById.get(state.targetId) : undefined;
-  const dismissed = state.status === "not_used" || state.status === "skipped";
-  const includable = state.status !== "invalid" && Boolean(target);
-  const primary = set.images.find((image) => image.id === decision.primaryImageId) ?? null;
-  const assign = (productId: string | null) => {
-    update((current) => assignProduct(current, set.setId, productId, catalog));
-    onPicker(false);
-  };
-  const reviewImages = state.status !== "invalid" && (
-    <button type="button" onClick={() => onGallery(!galleryOpen)}>
-      {galleryOpen ? "Hide images" : "Review Images"}
-    </button>
-  );
-  return (
-    <>
-      <tr className={`status-${state.status}${decision.included ? " included" : ""}`}>
-        <td>
-          <input
-            type="checkbox"
-            aria-label={`Include ${set.title}`}
-            checked={decision.included}
-            disabled={!includable}
-            onChange={(event) => update((current) => setIncluded(current, set.setId, event.target.checked))}
-          />
-        </td>
-        <td>
-          {set.sourceKind === "shopify" ? "Shopify" : "Local"}
-          {set.shopifyStatus && <small>{set.shopifyStatus}</small>}
-        </td>
-        <td className="bulk-images-label">
-          {set.sourceKind === "local" && set.images.length > 1 ? `${set.images.length} local files` : set.title}
-          {set.sourceKind === "local" && set.images.length > 1 && <small className="plain">{set.images.map((image) => image.label).join(", ")}</small>}
-        </td>
-        <td className="bulk-images-candidate">{set.handle ?? "—"}</td>
-        <td>{set.match.detectedBrand ?? "—"}</td>
-        <td>{set.match.detectedModel || "—"}</td>
-        <td className="bulk-images-target">
-          {target ? (
-            <>
-              <strong>{target.title}</strong>
-              {!decision.confirmed && !dismissed && <small>Suggested</small>}
-              {target.hasPrimary && <small className="has-primary">Has primary image</small>}
-            </>
-          ) : state.status === "multiple" ? (
-            <small>{set.match.candidateProductIds.length} candidates</small>
-          ) : (
-            "—"
-          )}
-          {pickerOpen && <ProductPicker catalog={catalog} onPick={assign} onClose={() => onPicker(false)} />}
-        </td>
-        <td className="bulk-images-strip-cell">
-          <span className="bulk-images-count">
-            {decision.selectedImageIds.length}/{set.images.length} selected
-          </span>
-          <span className="bulk-images-strip">
-            {set.images.slice(0, 4).map((image) => (
-              <Thumb key={image.id} url={image.previewUrl} />
-            ))}
-            {set.images.length > 4 && <em>+{set.images.length - 4}</em>}
-          </span>
-        </td>
-        <td>
-          <Thumb url={primary?.previewUrl ?? null} large />
-          {primary && <small className="plain">{target?.hasPrimary && decision.existingMode !== "add_make_primary" ? "Gallery only" : primary.label}</small>}
-        </td>
-        <td>
-          <span className={`bulk-images-status ${state.status}`}>{STATUS_LABEL[state.status]}</span>
-        </td>
-        <td className="bulk-images-issue">{state.issue}</td>
-        <td className="bulk-images-actions">
-          {dismissed ? (
-            <button type="button" onClick={() => update((current) => restoreSet(current, set.setId))}>
-              Restore
-            </button>
-          ) : (
-            <>
-              {state.status === "review" && (
-                <button type="button" onClick={() => update((current) => confirmMatch(current, set.setId, catalog))}>
-                  Confirm Match
-                </button>
-              )}
-              {state.status === "conflict" && (
-                <button type="button" onClick={() => update((current) => chooseSourceSet(current, set.setId, catalog))}>
-                  Use This Source Set
-                </button>
-              )}
-              {state.status === "multiple" &&
-                set.match.candidateProductIds.map((id) => (
-                  <button key={id} type="button" onClick={() => assign(id)}>
-                    Use {productById.get(id)?.title ?? "product"}
-                  </button>
-                ))}
-              {state.status !== "invalid" && (
-                <button type="button" onClick={() => onPicker(!pickerOpen)}>
-                  {target ? "Change Product" : "Choose Product"}
-                </button>
-              )}
-              {state.status === "unmatched" && (
-                <button type="button" onClick={() => update((current) => skipSet(current, set.setId))}>
-                  Skip
-                </button>
-              )}
-              {reviewImages}
-              {includable && (
-                <button type="button" onClick={() => onKeepOnly(set.setId)}>
-                  Keep only this set
-                </button>
-              )}
-              {target && decision.confirmed && !set.match.productId && set.sourceKind === "shopify" && (
-                <button type="button" onClick={() => assign(null)}>
-                  Clear product
-                </button>
-              )}
-              {set.sourceKind === "local" && (
-                <button type="button" onClick={() => update((current) => clearLocalSet(current, set.setId))}>
-                  Remove set
-                </button>
-              )}
-              {target?.hasPrimary && (
-                <ExistingModeSelect
-                  value={decision.existingMode}
-                  onChange={(mode) => update((current) => setExistingMode(current, set.setId, mode))}
-                />
-              )}
-            </>
-          )}
-        </td>
-      </tr>
-      {galleryOpen && (
-        <tr className="bulk-images-gallery-row">
-          <td colSpan={12}>
-            <GalleryEditor set={set} review={review} target={target} update={update} />
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-function ExistingModeSelect({ value, onChange }: { value: ExistingImageMode; onChange: (mode: ExistingImageMode) => void }) {
-  return (
-    <label className="bulk-images-override">
-      Existing image
-      <select value={value} onChange={(event) => onChange(event.target.value as ExistingImageMode)}>
-        <option value="skip">Skip (default)</option>
-        <option value="add">Add images (gallery)</option>
-        <option value="add_make_primary">Add and make primary</option>
-      </select>
-    </label>
-  );
-}
-
-/** All images of one source set: select gallery images and choose the single primary. */
-function GalleryEditor({ set, review, target, update }: { set: BulkImageSet; review: BulkImageReview; target?: BulkImageCatalogProduct; update: Update }) {
-  const decision = review.decisions[set.setId];
-  const galleryOnly = Boolean(target?.hasPrimary && decision.existingMode !== "add_make_primary");
-  return (
-    <div className="bulk-images-gallery" aria-label={`Images of ${set.title}`}>
-      <p>
-        {galleryOnly
-          ? "This product already has a primary image: selected images are added as gallery images only (old media is kept)."
-          : "One selected image is Primary; every other selected image is added as a gallery image. Untick an image to leave it out."}
-      </p>
-      <ul>
-        {set.images.map((image) => {
-          const selected = decision.selectedImageIds.includes(image.id);
-          const isPrimary = decision.primaryImageId === image.id;
-          return (
-            <li key={image.id} className={`${selected ? "selected" : ""}${isPrimary && !galleryOnly ? " primary" : ""}${image.invalidReason ? " invalid" : ""}`}>
-              <Thumb url={image.previewUrl} large />
-              <span className="bulk-images-image-label">{image.label}</span>
-              {image.invalidReason ? (
-                <small className="plain">{image.invalidReason}</small>
-              ) : (
-                <>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      disabled={isPrimary && !galleryOnly}
-                      onChange={(event) => update((current) => setImageSelected(current, set.setId, image.id, event.target.checked))}
-                    />
-                    {isPrimary && !galleryOnly ? "Included (primary)" : "Include"}
-                  </label>
-                  {!galleryOnly && (
-                    <label>
-                      <input
-                        type="radio"
-                        name={`primary-${set.setId}`}
-                        checked={isPrimary}
-                        onChange={() => update((current) => setPrimaryImage(current, set.setId, image.id))}
-                      />
-                      Primary
-                    </label>
-                  )}
-                </>
-              )}
-              {set.sourceKind === "local" && (
-                <button type="button" onClick={() => update((current) => removeLocalImage(current, set.setId, image.id))}>
-                  <Trash2 /> Remove
-                </button>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
-/** Catalog perspective: products without a primary image and without a usable Shopify source set. */
+/** Catalog perspective: products without a primary image, each with its own Upload Images action. */
 function MissingImages({
   review,
   states,
@@ -1082,7 +538,7 @@ function MissingImages({
         <div>
           <h3 id="bulk-images-missing-title">Missing Images</h3>
           <p>
-            Catalog products with no primary image and no usable Shopify source. Upload one or more local images per product — one is Primary,
+            Catalog products with no primary image (every category, New and Used). Upload one or more images per product — one is Primary,
             the rest are gallery images.
           </p>
         </div>
@@ -1091,7 +547,7 @@ function MissingImages({
           <input type="search" placeholder="Search missing products" value={query} onChange={(event) => setQuery(event.target.value)} />
         </label>
       </div>
-      <p className="bulk-images-note">{missing.length} product{missing.length === 1 ? "" : "s"} without a usable Shopify source.</p>
+      <p className="bulk-images-note">{missing.length} product{missing.length === 1 ? "" : "s"} without a primary image.</p>
       <ul className="bulk-images-missing-list">
         {missing.slice(0, limit).map(({ product, localSetId }) => {
           const set = localSetId ? review.sets.find((entry) => entry.setId === localSetId) : undefined;
@@ -1166,57 +622,13 @@ function MissingImages({
             </li>
           );
         })}
-        {missing.length === 0 && <li className="bulk-images-empty">Every product has a primary image or a usable Shopify source.</li>}
+        {missing.length === 0 && <li className="bulk-images-empty">Every product has a primary image.</li>}
       </ul>
       {missing.length > limit && (
         <button type="button" className="admin-secondary bulk-images-more" onClick={() => setLimit((current) => current + MISSING_PAGE_SIZE)}>
           Show {Math.min(MISSING_PAGE_SIZE, missing.length - limit)} more of {missing.length - limit} remaining
         </button>
       )}
-    </div>
-  );
-}
-
-function ProductPicker({
-  catalog,
-  onPick,
-  onClose,
-}: {
-  catalog: BulkImageCatalogProduct[];
-  onPick: (productId: string) => void;
-  onClose: () => void;
-}) {
-  const [term, setTerm] = useState("");
-  const results = useMemo(() => searchCatalogProducts(catalog, term), [catalog, term]);
-  return (
-    <div className="bulk-images-picker">
-      <div>
-        <input
-          type="search"
-          autoFocus
-          aria-label="Search products by title, brand or slug"
-          placeholder="Search title, brand or slug"
-          value={term}
-          onChange={(event) => setTerm(event.target.value)}
-        />
-        <button type="button" aria-label="Close product picker" onClick={onClose}>
-          <X />
-        </button>
-      </div>
-      <ul>
-        {results.map((product) => (
-          <li key={product.id}>
-            <button type="button" onClick={() => onPick(product.id)}>
-              <strong>{product.title}</strong>
-              <small>
-                {product.brand ?? "No brand"} · {product.slug}
-                {product.hasPrimary ? " · has primary" : ""}
-              </small>
-            </button>
-          </li>
-        ))}
-        {results.length === 0 && <li className="bulk-images-empty">No products found.</li>}
-      </ul>
     </div>
   );
 }

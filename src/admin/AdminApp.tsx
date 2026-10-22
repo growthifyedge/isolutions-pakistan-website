@@ -676,8 +676,8 @@ export function AdminApp() {
             <span className="admin-kicker">CATALOG · MEDIA</span>
             <h1>Product media</h1>
             <p>
-              Review media records here, then open the product Media editor for
-              upload and management actions.
+              Upload and manage product images manually. Existing images are
+              preserved.
             </p>
           </div>
         </div>

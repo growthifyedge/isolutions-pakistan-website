@@ -428,11 +428,15 @@ test("22. Keep only this set leaves one included set with its gallery, Primary a
   assert.match(plan(review3, catalog).reason, /Review is unresolved/);
 });
 
-test("22. selection controls are pure review state and remain in the panel", async () => {
+test("22. selection controls are pure review state; the panel is manual upload only (Shopify import removed)", async () => {
   const lib = await readFile("src/lib/bulkProductImagesReview.ts", "utf8");
   assert.doesNotMatch(lib, /supabase\.from|\.insert\(|\.rpc\(|fetch\(|XMLHttpRequest|cloudinary\.com/);
   const panel = await readFile("src/admin/BulkProductImages.tsx", "utf8");
-  assert.match(panel, /Select all eligible/);
-  assert.match(panel, /Deselect all/);
-  assert.equal((panel.match(/>\s*Keep only this set\s*</g) ?? []).length, 2, "Source Sets row and Missing Images local set");
+  assert.doesNotMatch(panel, /Shopify|readShopifyExport|parseShopifyReview|Load & Match|loadAndMatch|Catalog coverage|Source sets/);
+  assert.doesNotMatch(panel, /Select all eligible|Deselect all|Confirm all review suggestions/);
+  assert.equal((panel.match(/>\s*Keep only this set\s*</g) ?? []).length, 1, "Missing Images local set only");
+  assert.match(panel, /Manual Product Image Upload/);
+  assert.match(panel, /<ImagePlus \/> Upload Images/, "per-product upload in Missing Images");
+  assert.match(panel, /setPrimaryImage\(current, set\.setId, image\.id\)/, "primary selection");
+  assert.match(panel, /<MissingImages /);
 });

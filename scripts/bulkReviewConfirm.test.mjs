@@ -160,12 +160,9 @@ test("13-14. no database or Cloudinary access", async () => {
   assert.deepEqual(calls, []);
   const lib = await readFile("src/lib/bulkProductImagesReview.ts", "utf8");
   assert.doesNotMatch(lib, /supabase\.(from|rpc|functions)|\.insert\(|\.rpc\(|\bfetch\(|XMLHttpRequest|api\.cloudinary\.com/);
+  // The Shopify Load & Match review (and its bulk buttons) was removed from the panel; the pure review helpers stay shared.
   const panel = await readFile("src/admin/BulkProductImages.tsx", "utf8");
-  assert.match(panel, />\s*Confirm all review suggestions\s*</);
-  assert.match(panel, /disabled=\{eligibleReviewIds\.length === 0\} onClick=\{confirmAllReview\}/);
-  assert.match(panel, /Remaining manual actions/);
-  const order = ["Confirm all review suggestions", "Select all eligible", "Deselect all"].map((label) => panel.search(new RegExp(`>\\s*${label}\\s*<`)));
-  assert.ok(order.every((index) => index > 0) && order[0] < order[1] && order[1] < order[2], "button order");
+  assert.doesNotMatch(panel, /Confirm all review suggestions|confirmAllReview|Remaining manual actions|Select all eligible|Deselect all/);
 });
 
 const REAL_ZIP = process.env.BULK_IMAGES_SHOPIFY_ZIP ?? "C:/Users/User/Downloads/products_export_1 (3).zip";
