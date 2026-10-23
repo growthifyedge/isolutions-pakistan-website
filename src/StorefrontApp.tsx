@@ -59,6 +59,7 @@ import {
   type CatalogVariant,
   type FrequentlyBoughtTogetherProduct,
 } from "./lib/catalog";
+import { askSellerWhatsappUrl, isIphoneProduct, pdpProductInformation, pdpWarrantyText } from "./lib/pdpCustomerFacts";
 import { parsePkrMajorToMinor } from "./lib/money";
 import { cloudinaryDeliveryUrl } from "./lib/cloudinary";
 import { supabase } from "./lib/supabase";
@@ -3208,9 +3209,22 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
   const selectColor = (color: string) => selectVariant(product.variants.find((item) =>
     configurationLabel(item) === selectedConfiguration && item.color === color,
   ));
+  const warrantyText = pdpWarrantyText(variant);
+  // iPhones only: saved facts of the selected variant; a missing one gets a field-specific WhatsApp link.
+  const productInformation = pdpProductInformation(product, variant);
+  const askSellerUrl = (field: string) => askSellerWhatsappUrl({
+    whatsappNumber: storefrontContact.whatsappNumber,
+    productTitle: product.title,
+    storage: variant?.storage ? displayConfigurationLabel(variant.storage) : null,
+    color: variant?.color ? labelize(variant.color) : null,
+    field,
+    productUrl: `${window.location.origin}/product/${encodeURIComponent(product.slug)}`,
+  });
+  // No stored warranty: the Warranty card is hidden (never a generic fallback).
+  // iPhones show warranty only in the Product Information block, so the card is left out for them.
   const commercialFacts = [
     { title: "Cash on Delivery", subtitle: "Available", animation: deliveryAnimation },
-    { title: "Warranty", subtitle: variant.warranty?.trim() || "Warranty Support", animation: warrantyAnimation },
+    ...(warrantyText && !isIphoneProduct(product) ? [{ title: "Warranty", subtitle: warrantyText, animation: warrantyAnimation }] : []),
     { title: "100% Authentic", subtitle: "Official Product", animation: authenticAnimation },
     { title: "Trusted by Thousands", subtitle: "Customers across Pakistan", animation: trustedAnimation },
   ];
@@ -3411,6 +3425,26 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
                 )}
               </div>
             )}
+            {productInformation.length > 0 && (
+              <section className="pdp-product-info" aria-labelledby="pdp-product-info-title">
+                <h2 id="pdp-product-info-title">Product Information</h2>
+                <dl>
+                  {productInformation.map((row) => {
+                    const askUrl = row.value === null ? askSellerUrl(row.label) : null;
+                    return (
+                      <div className={row.tone ? `is-${row.tone}` : undefined} data-info={row.key} key={row.key}>
+                        <dt>{row.label}</dt>
+                        <dd>
+                          {row.value ?? (askUrl
+                            ? <a className="pdp-ask-seller" href={askUrl} target="_blank" rel="noopener noreferrer" aria-label={`Ask seller about ${row.label} on WhatsApp`}><MessageCircle aria-hidden="true" />Ask Seller</a>
+                            : <span className="pdp-info-unconfirmed">Not confirmed</span>)}
+                        </dd>
+                      </div>
+                    );
+                  })}
+                </dl>
+              </section>
+            )}
             <div className="pdp-buying-controls">
               <div className="pdp-quantity-control" aria-label="Quantity selector">
                 <span>Quantity</span>
@@ -3476,7 +3510,7 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
           </div>
         </section>
         <section className="pdp-facts-strip" aria-label="Selected product details">
-          <div className="pdp-facts container">
+          <div className="pdp-facts container" data-count={commercialFacts.length}>
             {commercialFacts.map(({ title, subtitle, animation }) => (
               <div key={title}>
                 <ServiceCardAnimation animation={animation} reducedMotion={reducedMotion} />

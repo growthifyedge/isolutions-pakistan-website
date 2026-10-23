@@ -18,6 +18,9 @@ export type CatalogVariant = {
   carrierJv: string | null;
   deliveryScope: "karachi_only" | "nationwide" | null;
   quantity: number;
+  /** search_public_catalog only (202610230002); absent from other catalog RPCs. NULL = not supplied. */
+  simConfiguration?: string | null;
+  batteryHealthPercent?: number | null;
 };
 
 export type CatalogMedia = {
