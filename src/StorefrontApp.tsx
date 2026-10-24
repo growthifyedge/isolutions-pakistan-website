@@ -59,6 +59,7 @@ import {
   type CatalogVariant,
   type FrequentlyBoughtTogetherProduct,
 } from "./lib/catalog";
+import { initialPdpSelection, mediaForVariant, mediaIsAssignedTo, variantForMedia } from "./lib/pdpMediaSync";
 import { askSellerWhatsappUrl, isIphoneProduct, pdpProductInformation, pdpWarrantyText } from "./lib/pdpCustomerFacts";
 import { parsePkrMajorToMinor } from "./lib/money";
 import { cloudinaryDeliveryUrl } from "./lib/cloudinary";
@@ -3118,16 +3119,6 @@ const configurationLabel = (variant: CatalogVariant) =>
   [variant.ram, variant.storage].filter(Boolean).join(" / ") || variant.sku;
 const displayConfigurationLabel = (configuration: string) =>
   configuration.replace(/\s+GB/g, "GB").replace(/\s*\/\s*/g, "/");
-const mediaMatchesVariant = (
-  media: CatalogProduct["media"][number],
-  variantId: string,
-) =>
-  media.variantId === variantId || media.variantIds?.includes(variantId) ||
-  (media.variantId === null && (media.variantIds?.length ?? 0) === 0);
-const mediaIsAssignedToVariant = (
-  media: CatalogProduct["media"][number],
-  variantId: string,
-) => media.variantId === variantId || media.variantIds?.includes(variantId) || false;
 // PDP image sizing (Owner-approved, scoped): these products' gallery images are trimmed of their uniform margin so
 // every colour's product shows at a similar size. A trim Cloudinary cannot produce falls back to the original URL.
 const PDP_TRIMMED_GALLERY_SLUGS = new Set(["apple-iphone-13-used"]);
@@ -3163,8 +3154,10 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
       .then(async (items) => {
         const next = items[0] ?? null;
         setProduct(next);
-        setVariantId(next?.variants.find((item) => item.quantity > 0)?.id ?? next?.variants[0]?.id ?? "");
-        setImage(primaryMedia(next!)?.url ?? "");
+        // Selected colour and first image agree on load (the image's stored colour association decides).
+        const initial = next ? initialPdpSelection(next) : { variantId: "", media: null };
+        setVariantId(initial.variantId);
+        setImage(initial.media?.url ?? "");
         setQuantity(1);
         setShareFeedback("");
         setWishlisted(next ? hasStorefrontWishlistItem(next.id) : false);
@@ -3209,10 +3202,16 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
     setVariantId(candidate.id);
     setQuantity((current) => Math.max(1, Math.min(current, cartLineLimit(candidate.quantity))));
     setPurchaseFeedback("");
-    const media = product.media.find((item) => mediaIsAssignedToVariant(item, candidate.id))
-      ?? product.media.find((item) => mediaMatchesVariant(item, candidate.id))
-      ?? primaryMedia(product);
-    setImage(media?.url ?? "");
+    setImage(mediaForVariant(product, candidate.id)?.url ?? "");
+  };
+  // Showing an image that belongs to a colour selects that colour (shared images keep the current selection).
+  const showMedia = (media: CatalogProduct["media"][number]) => {
+    setImage(media.url);
+    const owner = variantForMedia(product, media, variant, (item) => configurationLabel(item) === selectedConfiguration);
+    if (!owner || owner.id === variant?.id) return;
+    setVariantId(owner.id);
+    setQuantity((current) => Math.max(1, Math.min(current, cartLineLimit(owner.quantity))));
+    setPurchaseFeedback("");
   };
   const selectConfiguration = (configuration: string) => {
     const candidates = product.variants.filter((item) => configurationLabel(item) === configuration);
@@ -3290,7 +3289,7 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
     if (gallery.length < 2) return;
     const currentIndex = Math.max(0, gallery.findIndex((item) => item.id === selectedMedia?.id));
     const nextIndex = (currentIndex + direction + gallery.length) % gallery.length;
-    setImage(gallery[nextIndex].url);
+    showMedia(gallery[nextIndex]);
   };
   const shareProduct = async () => {
     const url = window.location.href;
@@ -3335,7 +3334,7 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
               {gallery.map((item, index) => (
                 <button
                   className={selectedMedia?.id === item.id ? "active" : ""}
-                  onClick={() => setImage(item.url)}
+                  onClick={() => showMedia(item)}
                   aria-label={`View product image ${index + 1}`}
                   key={item.id}
                 >
@@ -3419,9 +3418,9 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
                           .filter((item) => item.color === color)
                           .map((item) => item.id);
                         const colorMedia = product.media.find((item) =>
-                          item.isPrimary && colorVariantIds.some((id) => mediaIsAssignedToVariant(item, id)),
+                          item.isPrimary && colorVariantIds.some((id) => mediaIsAssignedTo(item, id)),
                         ) ?? product.media.find((item) =>
-                          colorVariantIds.some((id) => mediaIsAssignedToVariant(item, id)),
+                          colorVariantIds.some((id) => mediaIsAssignedTo(item, id)),
                         ) ?? null;
                           return (
                             <button
