@@ -160,5 +160,6 @@ test("anonymous and non-admin mutation remains blocked", () =>
   ));
 test("readiness UI is read-only and routed", () => {
   assert.match(app, /never\s+publishes products/);
-  assert.match(bulk, /Batch defaults/);
+  // Batch defaults belonged to the removed v1 rough-text/CSV import; Bulk Import is Excel Create-only.
+  assert.doesNotMatch(bulk, /Batch defaults/);
 });

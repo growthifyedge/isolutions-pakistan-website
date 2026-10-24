@@ -44,9 +44,6 @@ import { MediaManager } from "./MediaManager";
 import { MediaLibrary } from "./MediaLibrary";
 import { BulkProductImages } from "./BulkProductImages";
 import { BulkImport } from "./BulkImport";
-import { AndroidCommercialDefaults } from "./AndroidCommercialDefaults";
-import { AndroidBulkPublish } from "./AndroidBulkPublish";
-import { SpecificationMigration } from "./SpecificationMigration";
 import { StockListUpdate } from "./StockListUpdate";
 import { IphoneStockUpdate } from "./IphoneStockUpdate";
 import { SpecificationBulkUpload } from "./SpecificationBulkUpload";
@@ -635,9 +632,6 @@ export function AdminApp() {
     page = (
       <AdminLayout section="Bulk Import">
         <BulkImport />
-        <AndroidCommercialDefaults />
-        <AndroidBulkPublish />
-        <SpecificationMigration />
       </AdminLayout>
     );
   else if (path === "/admin/stock-update")

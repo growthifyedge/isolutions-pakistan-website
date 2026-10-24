@@ -2,7 +2,6 @@ import { ChangeEvent, useDeferredValue, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, FileDown, FileUp, Play, ShieldCheck } from "lucide-react";
 import { supabaseEnvironmentLabel } from "../lib/supabase";
 import {
-  MASTER_ACTION_STRATEGIES,
   catalogImportFilename,
   defaultMasterSheet,
   evaluateMasterRows,
@@ -33,6 +32,8 @@ type RowFilter = "all" | "attention" | "excluded";
 const STATUS_LABEL = { ready: "Ready", warning: "Warning", blocked: "Blocked" } as const;
 const rowList = (rows: number[]) => (rows.length > 12 ? `${rows.slice(0, 12).join(", ")} … (+${rows.length - 12})` : rows.join(", "));
 const pkr = (minor: number | null) => (minor === null ? "—" : `Rs ${(minor / 100).toLocaleString("en-PK")}`);
+/** Bulk Import is Create-only: every row is a new product; products already in the catalog are blocked. */
+const strategy: MasterActionStrategy = "create";
 
 /** Prepare Import Workbook: master Excel → normalized, self-validated Bulk Upload v2 workbook. */
 export function PrepareImportWorkbook({ loadReference, onDownload, onPreview, disabled }: Props) {
@@ -40,7 +41,6 @@ export function PrepareImportWorkbook({ loadReference, onDownload, onPreview, di
   const [master, setMaster] = useState<MasterWorkbook | null>(null);
   const [sheetName, setSheetName] = useState("");
   const [productType, setProductType] = useState<CatalogProductType>("Mobile Phone");
-  const [strategy, setStrategy] = useState<MasterActionStrategy>("create");
   const [stockText, setStockText] = useState("10");
   const [reference, setReference] = useState<MasterReference | null>(null);
   const [included, setIncluded] = useState<Set<number> | null>(null);
@@ -58,7 +58,7 @@ export function PrepareImportWorkbook({ loadReference, onDownload, onPreview, di
       sheet?.usable && reference && stock !== null
         ? prepareMasterRows(sheet, { productType, strategy, defaultStock: stock, reference })
         : null,
-    [sheet, reference, productType, strategy, stock],
+    [sheet, reference, productType, stock],
   );
   const review = useMemo(
     () => (prepared && included && reference ? evaluateMasterRows(prepared, included, reference) : null),
@@ -242,16 +242,6 @@ export function PrepareImportWorkbook({ loadReference, onDownload, onPreview, di
             </select>
           </label>
           <label>
-            Action
-            <select value={strategy} onChange={(event) => setStrategy(event.target.value as MasterActionStrategy)} disabled={working}>
-              {Object.entries(MASTER_ACTION_STRATEGIES).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
             Default stock for blank quantities
             <input
               type="number"
@@ -265,11 +255,7 @@ export function PrepareImportWorkbook({ loadReference, onDownload, onPreview, di
             />
           </label>
           <p>
-            {strategy === "create"
-              ? "Every row is written as Create. Products already in the target catalog are blocked."
-              : strategy === "replace"
-                ? "Every row is written as Replace Existing: active variants missing from this file will be hidden."
-                : "Create for new products, Replace Existing for products already in the target catalog (their variants missing from this file will be hidden)."}{" "}
+            Every row is written as Create (new Draft products only). Products already in the target catalog are blocked.{" "}
             SKU and Slug stay blank (assigned on import). PTA, Condition, Battery Health, Cycle Count and SIM stay blank unless the
             master supplies them.
             {defaultStock === null ? " Default stock must be a whole number of 0 or more." : ""}

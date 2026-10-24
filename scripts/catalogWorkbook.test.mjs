@@ -560,7 +560,8 @@ test("SKU preview: matching never uses SKU; matched variant keeps its SKU; new v
   assert.ok(source.includes("SKU is assigned automatically; leave SKU blank for a new variant"));
   assert.ok(source.includes("catalogSkuPending(variant.skuPrefix)"));
   assert.ok(source.includes("CATALOG_SKU_PREFIX_BY_CATEGORY_SLUG[effectiveCategorySlug]"));
-  assert.ok(source.includes("// Blank for a new variant: the database assigns its SKU.\n          sku: variant.skuResolved,"));
+  // Blank for a new variant: the database assigns its SKU (v2 sends null; the v1 path was removed).
+  assert.ok(source.includes("sku: variant.skuResolved || null,"));
 });
 
 // ---------------------------------------------------------------------------

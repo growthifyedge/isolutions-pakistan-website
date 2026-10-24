@@ -290,5 +290,6 @@ test("the UI: preview first (publish disabled before it), one environment, exact
   assert.match(panel, /Product \{Math\.min\(progress\.done \+ 1, progress\.total\)\} of \{progress\.total\}: \{progress\.current/);
   assert.doesNotMatch(panel, /\.update\(|\.insert\(|\.delete\(|\.upsert\(|\.rpc\(|\.from\(/, "the component itself has no direct database access");
   const app = await readFile("src/admin/AdminApp.tsx", "utf8");
-  assert.match(app, /<AndroidCommercialDefaults \/>\s*<AndroidBulkPublish \/>/);
+  // Removed from the Admin UI (Owner decision): the component stays on disk, unmounted.
+  assert.doesNotMatch(app, /<AndroidCommercialDefaults \/>|<AndroidBulkPublish \/>/);
 });

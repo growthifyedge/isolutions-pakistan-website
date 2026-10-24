@@ -266,8 +266,9 @@ test("preview proposes explicit new taxonomy and never writes", () => {
 });
 
 test("authorized apply preserves notes and upserts specifications idempotently", () => {
-  assert.match(adminSource, /content: product\.notes/);
-  assert.match(adminSource, /specifications: product\.specifications/);
+  // The v1 apply path was removed from the Admin UI; the database function itself is unchanged.
+  assert.doesNotMatch(adminSource, /rpc\("apply_catalog_bulk_import",/);
+  assert.match(adminSource, /specifications: product\.specifications\.map/);
   assert.match(hardeningMigration, /content = coalesce/);
   assert.match(
     hardeningMigration,

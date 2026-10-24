@@ -11,17 +11,14 @@ import { supabase } from "../lib/supabase";
 import {
   BulkProduct,
   BulkVariant,
-  BatchDefaults,
-  applyBatchDefaults,
   bulkInventoryPreview,
   matchingActiveRealCategoryTaxonomy,
   matchingActiveRealTaxonomy,
   requiresExplicitPricedVariant,
   normalizedPriceDisplay,
-  normalizeRawCatalog,
-  parseBulkCatalog,
   unresolvedVariantFacts,
 } from "../lib/bulkCatalog";
+import { commercialWriteTarget } from "../lib/commercialDefaults";
 import {
   CATALOG_SKU_PREFIX_BY_CATEGORY_SLUG,
   ANDROID_MOBILE_WARRANTY,
@@ -107,9 +104,15 @@ type PreviewProduct = Omit<BulkProduct, "variants"> & {
   taxonomyNotes: string[];
   brandAction: "REUSE BRAND" | "CREATE BRAND" | "NO BRAND" | "NEEDS REVIEW";
   categoryAction: "REUSE CATEGORY" | "CREATE CATEGORY" | "NEEDS REVIEW";
-  /** v2 Replace Existing: active variants missing from the file (they will be hidden). */
+  /** Always empty: Bulk Import is Create-only and never hides existing variants. */
   hiddenVariants: Array<{ sku: string; label: string }>;
 };
+
+// Bulk Import creates NEW products only (as Drafts). Existing products are never updated, replaced or hidden here;
+// they are changed in Catalog or the Stock Update pages. PRODUCTION needs the typed phrase before the write.
+const BUILD_MODE: string = import.meta.env.MODE;
+const target = commercialWriteTarget(import.meta.env.VITE_SUPABASE_URL, BUILD_MODE);
+const createConfirmationPhrase = (count: number) => `CREATE ${count} PRODUCTS`;
 
 const normalized = (value: string | null | undefined) =>
   value?.trim().toLowerCase() ?? "";
@@ -149,36 +152,19 @@ function downloadWorkbook(bytes: Uint8Array<ArrayBuffer>, filename: string) {
 }
 
 export function BulkImport() {
-  const [source, setSource] = useState("");
-  const [rawSource, setRawSource] = useState("");
   const [stockSource, setStockSource] = useState("");
   const [stagingProfile, setStagingProfile] = useState<StagingProfileId>("none");
   const [preview, setPreview] = useState<PreviewProduct[]>([]);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [format, setFormat] = useState("");
   const [working, setWorking] = useState(false);
-  const [result, setResult] = useState<Record<string, number> | null>(null);
   const [importResult, setImportResult] = useState<CatalogImportResult | null>(null);
   const [message, setMessage] = useState("");
-  const [batchDefaults, setBatchDefaults] = useState<BatchDefaults>({
-    brand: null,
-    category: null,
-    condition: null,
-    deliveryScope: null,
-    warranty: null,
-    ptaStatus: null,
-    inventory: null,
-  });
+  const [typed, setTyped] = useState("");
 
   const parseAndPreview = async (
-    parsedInput?: ReturnType<typeof parseBulkCatalog>,
+    parsedInput: ReturnType<typeof catalogSheetToBulkParseResult>,
   ) => {
-    if (!parsedInput && !source.trim()) {
-      setMessage(
-        "Paste rough catalog text or upload a CSV file before parsing.",
-      );
-      return;
-    }
     if (!supabase) {
       setMessage(
         "Preview unavailable: Supabase environment is not configured.",
@@ -186,14 +172,12 @@ export function BulkImport() {
       return;
     }
     setWorking(true);
-    setResult(null);
     setImportResult(null);
     setMessage("");
     setPreview([]);
+    setTyped("");
     try {
-      const parsed = parsedInput ?? parseBulkCatalog(source);
-      if (parsed.format !== "catalog_sheet")
-        parsed.products = applyBatchDefaults(parsed.products, batchDefaults);
+      const parsed = parsedInput;
       setFormat(parsed.format);
       setParseErrors(parsed.errors);
       if (!parsed.products.length) {
@@ -259,10 +243,11 @@ export function BulkImport() {
             );
         if (candidates.length > 1) blocked.push("Ambiguous product match");
         const existing = candidates.length === 1 ? candidates[0] : null;
-        if (product.requestedAction === "Create" && existing)
-          blocked.push("Action is Create but this product already exists");
-        if (product.requestedAction === "Replace Existing" && !existing && candidates.length === 0)
-          blocked.push("Action is Replace Existing but no matching product exists");
+        // Create-only: an existing product, or any action other than Create, is never written here.
+        if (existing)
+          blocked.push("Already in this catalog: Bulk Import only creates new products (change existing products in Catalog or Stock Update)");
+        if (product.requestedAction && product.requestedAction !== "Create")
+          blocked.push(`Action "${product.requestedAction}" is not allowed: Bulk Import only creates new products`);
         const existingCategory = existing
           ? categories.find((item) => item.id === existing.category_id) ?? null
           : null;
@@ -595,21 +580,8 @@ export function BulkImport() {
         }
         if (variants.some((variant) => variant.warnings.length))
           blocked.push("One or more variants require review");
-        // Replace Existing: active variants the file no longer lists will be hidden (never deleted).
-        const matchedIds = new Set(variants.map((variant) => variant.id).filter(Boolean));
-        const hiddenVariants =
-          catalogSheet && existing
-            ? existing.product_variants
-                .filter((item) => item.is_active !== false && !matchedIds.has(item.id))
-                .map((item) => ({
-                  sku: item.sku,
-                  label: [item.ram_display, item.storage_display, item.color_finish]
-                    .filter(Boolean)
-                    .join(" / ") || "Default",
-                }))
-            : [];
         return {
-          hiddenVariants,
+          hiddenVariants: [],
           ...product,
           defaultCondition: effectiveDefaults.condition,
           defaultConditionSource: effectiveDefaults.conditionSource,
@@ -639,9 +611,7 @@ export function BulkImport() {
             catalogSheet
               ? blocked.length
                 ? "NEEDS REVIEW"
-                : existing
-                  ? "REPLACE EXISTING"
-                  : "CREATE"
+                : "CREATE"
               : blocked.length
                 ? "BLOCKED"
                 : existing
@@ -707,7 +677,7 @@ export function BulkImport() {
   };
 
   // Prepare Import Workbook: the same reference data plus the titles of real products already
-  // in this catalog, so Create / Replace Existing can be checked before the workbook is built.
+  // in this catalog, so products that already exist are blocked before the workbook is built.
   const loadMasterReference = async (): Promise<MasterReference> => {
     if (!supabase) throw new Error("Supabase environment is not configured.");
     const client = supabase;
@@ -804,31 +774,30 @@ export function BulkImport() {
     });
   };
 
-  const normalizeAndPreview = () => {
-    if (!rawSource.trim()) {
-      setMessage("Paste raw product data before normalizing it.");
-      return;
-    }
-    const normalized = normalizeRawCatalog(rawSource);
-    setSource(rawSource);
-    void parseAndPreview(normalized);
-  };
-
-  // Bulk Upload v2: one atomic call to apply_catalog_bulk_import_v2. The database
-  // re-validates everything and assigns SKUs; nothing is published.
+  // Bulk Upload v2, Create only: one atomic call to apply_catalog_bulk_import_v2. The database
+  // re-validates everything and assigns SKUs; new products are Drafts and nothing is published.
   const applyCatalogImport = async () => {
     if (!supabase || !canApplyCatalogImport(format, preview, parseErrors)) return;
+    if (preview.some((product) => product.id !== null || product.action !== "CREATE")) {
+      setMessage("Import blocked: Bulk Import only creates new products; nothing was changed.");
+      return;
+    }
+    if (!target.allowed) {
+      setMessage(`Import blocked: ${target.reason}`);
+      return;
+    }
     const counts = catalogImportCounts(preview);
-    if (!confirm(`Apply this import?\n\n${catalogImportConfirmation(counts)}`)) return;
+    if (target.environment === "production") {
+      if (typed !== createConfirmationPhrase(counts.productsToCreate)) return;
+    } else if (!confirm(`Create these Draft products on ${target.environment?.toUpperCase()}?\n\n${catalogImportConfirmation(counts)}`)) return;
     setWorking(true);
     setMessage("");
-    setResult(null);
     setImportResult(null);
     const supplied = (value: string | null | undefined) =>
       value && value !== "unknown" ? value : null;
     const batch = {
       products: preview.map((product) => ({
-        action: product.action === "REPLACE EXISTING" ? "Replace Existing" : "Create",
+        action: "Create",
         source: product.source,
         product_type: product.productType ?? null,
         brand: product.brandExplicit ? product.brand : null,
@@ -869,85 +838,22 @@ export function BulkImport() {
       setImportResult(data as CatalogImportResult);
       setPreview([]);
       setFormat("");
-      setMessage("Products imported successfully.");
+      setTyped("");
+      setMessage("Draft products created successfully.");
     }
     setWorking(false);
-  };
-
-  const apply = async () => {
-    if (format === "catalog_sheet") return applyCatalogImport();
-    if (
-      !supabase ||
-      preview.some((product) => product.blocked.length) ||
-      parseErrors.length
-    )
-      return;
-    setWorking(true);
-    const batch = {
-      products: preview.map((product) => ({
-        id: product.id,
-        title: product.title,
-        slug: product.slugResolved,
-        brand: product.brand,
-        brand_id: product.brandId,
-        category: product.category,
-        category_id: product.categoryId,
-        short_description: product.shortDescription,
-        seo_title: product.seoTitle,
-        seo_description: product.seoDescription,
-        default_pta_status: product.defaultPtaStatus,
-        default_pta_source: product.defaultPtaSource,
-        default_condition: product.defaultCondition,
-        default_condition_source: product.defaultConditionSource,
-        default_delivery_scope: product.defaultDeliveryScope,
-        default_delivery_source: product.defaultDeliverySource,
-        default_warranty: product.defaultWarranty,
-        default_warranty_source: product.defaultWarrantySource,
-        content: product.notes.length ? product.notes.join("\n") : null,
-        specifications: product.specifications,
-        variants: product.variants.map((variant) => ({
-          source: variant.source,
-          id: variant.id,
-          action: variant.action,
-          // Blank for a new variant: the database assigns its SKU.
-          sku: variant.skuResolved,
-          ram_display: variant.ram,
-          storage_display: variant.storage,
-          color_finish: variant.color,
-          price_minor: variant.priceMinor,
-          compare_at_price_minor: variant.compareAtPriceMinor,
-          pta_status: variant.ptaStatus,
-          condition: variant.condition,
-          warranty_override: variant.warranty,
-          delivery_scope: variant.deliveryScope,
-          inventory: variant.inventory,
-        })),
-      })),
-    };
-    const { data, error } = await supabase.rpc("apply_catalog_bulk_import", {
-      p_batch: batch,
-    });
-    if (error) setMessage(error.message);
-    else {
-      setResult(data as Record<string, number>);
-      setMessage("Approved batch applied atomically.");
-    }
-    setWorking(false);
-  };
-
-  const uploadCsv = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) setSource(await file.text());
   };
 
   // Excel v2 previews apply through apply_catalog_bulk_import_v2; Apply stays disabled
-  // while any product or row needs review.
+  // while any product or row needs review, and on PRODUCTION until the phrase is typed.
   const stagingOnly = format === "catalog_sheet";
   const importCounts = stagingOnly ? catalogImportCounts(preview) : null;
-  const blocked = stagingOnly
-    ? !canApplyCatalogImport(format, preview, parseErrors)
-    : parseErrors.length > 0 ||
-      preview.some((product) => product.blocked.length > 0);
+  const phrase = createConfirmationPhrase(importCounts?.productsToCreate ?? 0);
+  const production = target.environment === "production";
+  const blocked =
+    !canApplyCatalogImport(format, preview, parseErrors) ||
+    !target.allowed ||
+    (production && typed !== phrase);
   const missingImages =
     importResult?.products.filter((product) => !product.has_primary_image) ?? [];
   const totals = preview.reduce(
@@ -970,11 +876,19 @@ export function BulkImport() {
           <span className="admin-kicker">CATALOG · BULK IMPORT</span>
           <h1>Bulk catalog import</h1>
           <p>
-            Paste rough product blocks or upload CSV. Nothing writes until this
-            preview is approved.
+            Create NEW products from an Excel workbook (mobile phones, tablets, laptops,
+            accessories and gadgets). New products are created as Drafts; existing products
+            are never updated, replaced or hidden here. Nothing writes until the preview is
+            approved.
           </p>
         </div>
       </div>
+      <div className={`bulk-images-env ${production ? "production" : "development"}`} role="status">
+        <span>Environment</span>
+        <strong>{target.environment ? target.environment.toUpperCase() : "UNKNOWN"}</strong>
+        <small>{target.projectRef ?? "Import blocked"}</small>
+      </div>
+      {!target.allowed && <p className="bulk-images-error">{target.reason}</p>}
       <PrepareImportWorkbook
         loadReference={loadMasterReference}
         onDownload={downloadWorkbook}
@@ -1051,182 +965,10 @@ export function BulkImport() {
           />
         </label>
       </div>
-      <div className="bulk-step">
-        <b>1. Source data</b>
-        <span>PKR major units · missing facts remain unresolved</span>
-      </div>
-      <div className="bulk-step">
-        <b>Smart Raw Import</b>
-        <span>Rule-based normalization only · no database writes until approval</span>
-      </div>
-      <label className="bulk-raw-source">
-        Raw Product Data
-        <textarea
-          aria-label="Raw product data"
-          value={rawSource}
-          onChange={(event) => setRawSource(event.target.value)}
-          placeholder={"Samsung A57 12/256 blue/grey @ 165000\nPTA Approved\n1 Year Warranty\n5000mAh Battery\n6.7 AMOLED Display\n50MP Camera"}
-        />
-      </label>
-      <div className="bulk-actions">
-        <button
-          className="admin-primary"
-          onClick={normalizeAndPreview}
-          disabled={working || !rawSource.trim()}
-          type="button"
-        >
-          <Play /> Normalize &amp; Preview
-        </button>
-      </div>
-      <fieldset className="bulk-defaults">
-        <legend>Batch defaults</legend>
-        <p>
-          Optional Owner-supplied values. Explicit product and variant values
-          always win.
-        </p>
-        <label>
-          Brand
-          <input
-            value={batchDefaults.brand ?? ""}
-            onChange={(event) =>
-              setBatchDefaults({
-                ...batchDefaults,
-                brand: event.target.value.trimStart() || null,
-              })
-            }
-            placeholder="Exact real brand name"
-          />
-        </label>
-        <label>
-          Category
-          <input
-            value={batchDefaults.category ?? ""}
-            onChange={(event) =>
-              setBatchDefaults({
-                ...batchDefaults,
-                category: event.target.value.trimStart() || null,
-              })
-            }
-            placeholder="Exact real category name"
-          />
-        </label>
-        <label>
-          Condition
-          <select
-            value={batchDefaults.condition ?? ""}
-            onChange={(event) =>
-              setBatchDefaults({
-                ...batchDefaults,
-                condition: (event.target.value ||
-                  null) as BatchDefaults["condition"],
-              })
-            }
-          >
-            <option value="">Unresolved</option>
-            <option value="brand_new">Brand New</option>
-            <option value="used">Used</option>
-            <option value="open_box">Open Box</option>
-            <option value="refurbished">Refurbished</option>
-          </select>
-        </label>
-        <label>
-          Delivery scope
-          <select
-            value={batchDefaults.deliveryScope ?? ""}
-            onChange={(event) =>
-              setBatchDefaults({
-                ...batchDefaults,
-                deliveryScope: (event.target.value ||
-                  null) as BatchDefaults["deliveryScope"],
-              })
-            }
-          >
-            <option value="">Unresolved</option>
-            <option value="karachi_only">Karachi only</option>
-            <option value="nationwide">Nationwide</option>
-          </select>
-        </label>
-        <label>
-          Warranty
-          <input
-            value={batchDefaults.warranty ?? ""}
-            onChange={(event) =>
-              setBatchDefaults({
-                ...batchDefaults,
-                warranty: event.target.value.trimStart() || null,
-              })
-            }
-            placeholder="Unresolved"
-          />
-        </label>
-        <label>
-          PTA status
-          <select
-            value={batchDefaults.ptaStatus ?? ""}
-            onChange={(event) =>
-              setBatchDefaults({
-                ...batchDefaults,
-                ptaStatus: (event.target.value ||
-                  null) as BatchDefaults["ptaStatus"],
-              })
-            }
-          >
-            <option value="">Unresolved</option>
-            <option value="approved">PTA Approved</option>
-            <option value="not_approved">Non-PTA</option>
-            <option value="not_applicable">Not applicable</option>
-          </select>
-        </label>
-        <label>
-          Inventory
-          <input
-            type="number"
-            min="0"
-            step="1"
-            value={batchDefaults.inventory ?? ""}
-            onChange={(event) =>
-              setBatchDefaults({
-                ...batchDefaults,
-                inventory:
-                  event.target.value === "" ? null : Number(event.target.value),
-              })
-            }
-            placeholder="Unresolved"
-          />
-        </label>
-      </fieldset>
-      <label className="bulk-raw-source">
-        Structured source data
-        <textarea
-          aria-label="Bulk catalog source"
-          value={source}
-          onChange={(event) => setSource(event.target.value)}
-          placeholder="Apple 17 Pro Max&#10;Category: Mobile Phones&#10;256 GB Blue/Orange/Silver 472000&#10;Brand New&#10;Karachi only"
-        />
-      </label>
-      <div className="bulk-actions">
-        <label className="admin-secondary">
-          <FileUp /> Upload CSV
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            onChange={uploadCsv}
-            hidden
-          />
-        </label>
-        <button
-          className="admin-primary"
-          onClick={() => void parseAndPreview()}
-          disabled={working || !source.trim()}
-          type="button"
-        >
-          <Play /> Parse and preview
-        </button>
-      </div>
       {message && (
         <p
-          className={result || preview.length ? "admin-success" : "admin-error"}
-          role={result || preview.length ? "status" : "alert"}
+          className={importResult || preview.length ? "admin-success" : "admin-error"}
+          role={importResult || preview.length ? "status" : "alert"}
           aria-live="polite"
         >
           {message}
@@ -1367,35 +1109,34 @@ export function BulkImport() {
                       ))}
                   </div>
                 ))}
-                {product.hiddenVariants.map((hidden) => (
-                  <div className="bulk-variant" key={`hide-${hidden.sku}`}>
-                    <div>
-                      <b>{hidden.label}</b>
-                      <small>{hidden.sku}</small>
-                    </div>
-                    <span>Not in this file: hidden from the store (kept with its SKU, stock and order history)</span>
-                    <span className="bulk-status blocked">HIDE VARIANT</span>
-                  </div>
-                ))}
               </article>
             ))}
           </div>
           <div className="bulk-step">
-            <b>5. {stagingOnly ? "Apply import" : "Apply approved batch"}</b>
+            <b>5. Create Draft products</b>
             <span>
-              {stagingOnly && importCounts
-                ? `Create ${importCounts.productsToCreate} · Replace ${importCounts.productsToReplace} products · Variants: create ${importCounts.variantsToCreate}, update ${importCounts.variantsToUpdate + importCounts.variantsToReactivate}, hide ${importCounts.variantsToHide} · Rows needing review: ${importCounts.rowsNeedingReview}${blocked ? " · Resolve all rows needing review before applying" : ""}`
-                : blocked
-                  ? "Resolve all blocked rows before apply"
-                  : "Server authorization + atomic transaction"}
+              {importCounts
+                ? `Create ${importCounts.productsToCreate} new Draft product(s) with ${importCounts.variantsToCreate} variant(s) · Rows needing review: ${importCounts.rowsNeedingReview}${canApplyCatalogImport(format, preview, parseErrors) ? "" : " · Resolve every product and row needing review before creating"}`
+                : "Upload an Excel workbook to preview"}
             </span>
           </div>
+          {production && (
+            <input
+              type="text"
+              value={typed}
+              placeholder={phrase}
+              onChange={(event) => setTyped(event.target.value)}
+              disabled={working || !canApplyCatalogImport(format, preview, parseErrors)}
+              aria-label="PRODUCTION confirmation"
+            />
+          )}
+          {production && <small>Type {phrase} to create these Draft products on PRODUCTION.</small>}
           <button
             className="admin-primary"
             disabled={working || blocked}
-            onClick={apply}
+            onClick={() => void applyCatalogImport()}
           >
-            <Upload /> {stagingOnly ? "Apply Import" : "Apply approved batch"}
+            <Upload /> Create Draft Products on {target.environment ? target.environment.toUpperCase() : "—"}
           </button>
         </>
       )}
@@ -1403,15 +1144,9 @@ export function BulkImport() {
         <div className="bulk-result">
           <CheckCircle2 />
           <div>
-            <b>Products imported successfully</b>
-            <span>Products created: {importResult.products_created}</span>
-            <span>Products replaced: {importResult.products_replaced}</span>
+            <b>Draft products created successfully</b>
+            <span>Products created (Draft): {importResult.products_created}</span>
             <span>Variants created: {importResult.variants_created}</span>
-            <span>
-              Variants updated: {importResult.variants_updated}
-              {importResult.variants_reactivated ? ` (+${importResult.variants_reactivated} brought back)` : ""}
-            </span>
-            <span>Variants hidden: {importResult.variants_hidden}</span>
             <span>
               Assigned SKUs:{" "}
               {importResult.assigned_skus.length
@@ -1434,19 +1169,6 @@ export function BulkImport() {
                 View Products Missing Images
               </a>
             )}
-          </div>
-        </div>
-      )}
-      {result && (
-        <div className="bulk-result">
-          <CheckCircle2 />
-          <div>
-            <b>6. Result report</b>
-            {Object.entries(result).map(([key, value]) => (
-              <span key={key}>
-                {key.replaceAll("_", " ")}: {value}
-              </span>
-            ))}
           </div>
         </div>
       )}

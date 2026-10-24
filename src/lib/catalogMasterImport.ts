@@ -280,7 +280,7 @@ export function prepareMasterRows(sheet: MasterSheet, options: MasterOptions): P
     let action: CatalogAction = strategy === "replace" ? "Replace Existing" : "Create";
     if (strategy === "auto" && exists) action = "Replace Existing";
     if (exists === true && strategy === "create")
-      issues.push("Already in the target catalog: Create would be rejected (use Replace Existing)");
+      issues.push("Already in the target catalog: Create would be rejected (Bulk Import only creates new products)");
     if (exists === false && strategy === "replace")
       issues.push("Not in the target catalog: Replace Existing would be rejected (use Create)");
     if (exists === true && strategy === "auto")

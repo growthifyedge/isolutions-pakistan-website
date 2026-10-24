@@ -22,7 +22,8 @@ Karachi only
 
 test("product-level delivery persists during bulk create and update", () => {
   assert.equal(inherited.defaultDeliveryScope, "karachi_only");
-  assert.match(bulk, /default_delivery_scope: product\.defaultDeliveryScope/);
+  // v2 carries the inherited product delivery on every variant.
+  assert.match(bulk, /delivery_scope: variant\.deliveryScope/);
   assert.match(migration, /default_delivery_scope = coalesce/);
 });
 test("product delivery inherits when variant delivery is omitted", () =>

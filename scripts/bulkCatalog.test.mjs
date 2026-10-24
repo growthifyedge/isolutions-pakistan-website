@@ -199,7 +199,7 @@ test("Parse and Preview catches failures and renders a visible error", () => {
   assert.match(admin, /Parse and preview failed:/);
   assert.match(
     admin,
-    /role=\{result \|\| preview\.length \? "status" : "alert"\}/,
+    /role=\{importResult \|\| preview\.length \? "status" : "alert"\}/,
   );
   assert.match(admin, /type="button"/);
 });

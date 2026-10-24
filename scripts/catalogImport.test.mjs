@@ -83,9 +83,9 @@ test("Apply Import stays disabled for 3 blocked rows + 1 valid row, and is visib
   assert.equal(canApplyCatalogImport("catalog_sheet", [preview(), preview()], []), true, "a fully valid file still enables Apply");
 
   const source = readFileSync(new URL("../src/admin/BulkImport.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-  assert.ok(source.includes("? !canApplyCatalogImport(format, preview, parseErrors)"));
+  assert.ok(source.includes("!canApplyCatalogImport(format, preview, parseErrors) ||"));
   assert.ok(source.includes("disabled={working || blocked}"));
-  assert.ok(source.includes("Resolve all rows needing review before applying"));
+  assert.ok(source.includes("Resolve every product and row needing review before creating"));
   const css = readFileSync(new URL("../src/admin/admin.css", import.meta.url), "utf8");
   assert.match(css, /\.admin-primary:disabled\s*\{[^}]*cursor:\s*not-allowed[^}]*opacity:/);
 });
@@ -94,17 +94,26 @@ test("Bulk Import wires Apply Import to the v2 function with blank SKUs for new 
   const source = readFileSync(new URL("../src/admin/BulkImport.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.ok(source.includes('supabase.rpc("apply_catalog_bulk_import_v2"'));
   assert.ok(source.includes("canApplyCatalogImport(format, preview, parseErrors)"));
-  assert.ok(source.includes("confirm(`Apply this import?\\n\\n${catalogImportConfirmation(counts)}`)"));
+  assert.ok(source.includes("${catalogImportConfirmation(counts)}`)"));
   assert.ok(source.includes('sku: variant.skuResolved || null,'));
-  assert.ok(source.includes('{stagingOnly ? "Apply Import" : "Apply approved batch"}'));
-  assert.ok(source.includes("Products imported successfully"));
+  assert.ok(source.includes("Create Draft Products on"));
+  assert.ok(source.includes("Draft products created successfully"));
   assert.ok(source.includes('href="/admin/products?missing=images"'));
   assert.ok(source.includes("View Products Missing Images"));
-  assert.ok(source.includes('"REACTIVATE VARIANT"'));
-  assert.ok(source.includes("HIDE VARIANT"));
+  // Create-only: every product is sent as Create; existing products are blocked; nothing is hidden.
+  assert.ok(source.includes('action: "Create",'));
+  assert.ok(!source.includes('"Replace Existing" : "Create"'));
+  assert.ok(source.includes("Already in this catalog: Bulk Import only creates new products"));
+  assert.ok(source.includes("product.id !== null || product.action !== \"CREATE\""));
+  assert.ok(!source.includes("HIDE VARIANT"));
+  assert.ok(!source.includes('rpc("apply_catalog_bulk_import",'));
+  // PRODUCTION needs the typed phrase; the environment comes from the shared write-target guard.
+  assert.ok(source.includes("commercialWriteTarget(import.meta.env.VITE_SUPABASE_URL, BUILD_MODE)"));
+  assert.ok(source.includes("`CREATE ${count} PRODUCTS`"));
+  assert.ok(source.includes('if (typed !== createConfirmationPhrase(counts.productsToCreate)) return;'));
   assert.ok(!source.includes("database import arrives in Phase 2"));
-  // The legacy path still uses the legacy function.
-  assert.ok(source.includes('supabase.rpc("apply_catalog_bulk_import", {'));
+  // The legacy v1 path was removed from the Admin UI.
+  assert.ok(!source.includes('supabase.rpc("apply_catalog_bulk_import", {'));
   const admin = readFileSync(new URL("../src/admin/AdminCatalog.tsx", import.meta.url), "utf8");
   assert.ok(admin.includes('get("missing") === "images"'));
 });
