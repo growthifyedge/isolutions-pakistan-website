@@ -3128,6 +3128,22 @@ const mediaIsAssignedToVariant = (
   media: CatalogProduct["media"][number],
   variantId: string,
 ) => media.variantId === variantId || media.variantIds?.includes(variantId) || false;
+// PDP image sizing (Owner-approved, scoped): these products' gallery images are trimmed of their uniform margin so
+// every colour's product shows at a similar size. A trim Cloudinary cannot produce falls back to the original URL.
+const PDP_TRIMMED_GALLERY_SLUGS = new Set(["apple-iphone-13-used"]);
+const pdpGalleryImage = (media: CatalogProduct["media"][number], width: number, trim: boolean) => {
+  const original = cloudinaryDeliveryUrl(media.publicId, width) || media.url;
+  const src = trim ? cloudinaryDeliveryUrl(media.publicId, width, { trim: true }) || original : original;
+  return {
+    src,
+    "data-fallback-src": original,
+    onError: (event: React.SyntheticEvent<HTMLImageElement>) => {
+      const image = event.currentTarget;
+      const fallback = image.dataset.fallbackSrc;
+      if (fallback && image.src !== fallback) image.src = fallback;
+    },
+  };
+};
 function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
   const [product, setProduct] = useState<CatalogProduct | null>(null);
   const [loading, setLoading] = useState(true);
@@ -3180,6 +3196,7 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
     ? Math.round(((compareAt - variant.priceMinor) / compareAt) * 100)
     : null;
   const gallery = product.media;
+  const trimGallery = PDP_TRIMMED_GALLERY_SLUGS.has(product.slug);
   const selectedMedia = gallery.find((item) => item.url === image) ?? gallery[0] ?? primaryMedia(product);
   const configurations = [...new Set(product.variants.map(configurationLabel))];
   const selectedConfiguration = configurationLabel(variant);
@@ -3322,13 +3339,13 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
                   aria-label={`View product image ${index + 1}`}
                   key={item.id}
                 >
-                  <img src={cloudinaryDeliveryUrl(item.publicId, 240) || item.url} alt={item.alt} />
+                  <img {...pdpGalleryImage(item, 240, trimGallery)} alt={item.alt} />
                 </button>
               ))}
             </div>
             <div className="pdp-main-image">
               {selectedMedia && (
-                <img src={cloudinaryDeliveryUrl(selectedMedia.publicId, 1400) || selectedMedia.url} alt={selectedMedia.alt} />
+                <img {...pdpGalleryImage(selectedMedia, 1400, trimGallery)} alt={selectedMedia.alt} />
               )}
               {gallery.length > 1 && (
                 <>
