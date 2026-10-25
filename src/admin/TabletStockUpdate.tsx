@@ -32,7 +32,7 @@ import { installUnloadGuard } from "../lib/unloadGuard";
 // after a fresh check of exactly this list, choices and decisions. Products with any line that needs attention are held.
 // Existing variants keep their stock; products and variants missing from the list are never touched.
 
-/** Owner gate: ON (approved 2026-10-26). Which websites may write is decided by TABLET_WRITE_ENVIRONMENTS (DEV only). */
+/** Owner gate: ON (approved 2026-10-26). Which websites may write is decided by TABLET_WRITE_ENVIRONMENTS (DEV and PROD). */
 const TABLET_UPDATE_WEBSITE_ENABLED = true;
 
 const BUILD_MODE: string = import.meta.env.MODE;

@@ -8,8 +8,8 @@
  * blank warranty / grade / battery / SIM, stock 20, an IP / MC SKU).
  * Database access is injected, so the whole flow runs offline in tests.
  *
- * apply_tablet_stock_product comes from migration 202610270001 (applied to DEV only). Update Website is approved per
- * environment: TABLET_WRITE_ENVIRONMENTS lists DEV only; PROD stays blocked until its own Owner approval.
+ * apply_tablet_stock_product comes from migration 202610270001 (applied to DEV and PROD). Update Website is approved per
+ * environment: TABLET_WRITE_ENVIRONMENTS lists DEV and PROD; the build mode must still match its Supabase project.
  */
 import { commercialWriteTarget } from "./commercialDefaults.ts";
 import { TABLET_NEW_VARIANT_STOCK, variantLabel, type TabletNewProductPayload, type TabletPlan, type TabletProductUpdate, type TabletRpcPayload } from "./tabletStockUpdate.ts";
@@ -37,8 +37,8 @@ export type TabletProductReport = { key: string; productId: string | null; produ
 
 export type TabletUpdateResult = { outcome: "blocked" | "finished"; message: string; products: TabletProductReport[]; counts: Record<PhoneStatus, number> };
 
-/** Owner-approved 2026-10-26 for DEV only (apply_tablet_stock_product installed on DEV). PROD is added only after its own approval. */
-export const TABLET_WRITE_ENVIRONMENTS: readonly string[] = ["development"];
+/** Owner-approved 2026-10-26: DEV, then PROD (apply_tablet_stock_product installed on both). */
+export const TABLET_WRITE_ENVIRONMENTS: readonly string[] = ["development", "production"];
 export const TABLET_NOT_APPROVED_REASON = "Update Website for Tablets & MacBooks is not approved for this website yet (the database function is not installed).";
 
 const rupees = (minor: number) => `Rs ${(minor / 100).toLocaleString("en-PK")}`;

@@ -9,7 +9,7 @@ import {
   emptyDecisions,
   parseTabletList,
 } from "../src/lib/tabletStockUpdate.ts";
-import { TABLET_NOT_APPROVED_REASON, TABLET_WRITE_ENVIRONMENTS, runTabletUpdate, tabletUpdateBlocker } from "../src/lib/tabletStockApply.ts";
+import { TABLET_WRITE_ENVIRONMENTS, runTabletUpdate, tabletUpdateBlocker } from "../src/lib/tabletStockApply.ts";
 
 const DEV_URL = "https://acwatgxkcyrdxpcljxjb.supabase.co";
 const PROD_URL = "https://nlxfwppywxumymbjkvwt.supabase.co";
@@ -241,13 +241,13 @@ test("Fingerprint changes with the list, every choice and every decision", () =>
 // Write path (offline fake database) and the switch
 // ---------------------------------------------------------------------------
 
-test("Update Website is approved for DEV only: PROD stays blocked; build mode and project must match", () => {
-  assert.deepEqual([...TABLET_WRITE_ENVIRONMENTS], ["development"]);
+test("Update Website is approved for DEV and PROD; build mode and project must match", () => {
+  assert.deepEqual([...TABLET_WRITE_ENVIRONMENTS], ["development", "production"]);
   const plan = buildTabletPlan(compare("Galaxy Tab A8 4/64; 43,000"), []);
   const base = { supabaseUrl: DEV_URL, buildMode: "development", enabled: true, checkIsCurrent: true, plan };
   assert.match(tabletUpdateBlocker({ ...base, enabled: false }), /switched off/);
   assert.equal(tabletUpdateBlocker(base), null);
-  assert.equal(tabletUpdateBlocker({ ...base, supabaseUrl: PROD_URL, buildMode: "production" }), TABLET_NOT_APPROVED_REASON);
+  assert.equal(tabletUpdateBlocker({ ...base, supabaseUrl: PROD_URL, buildMode: "production" }), null);
   assert.match(tabletUpdateBlocker({ ...base, supabaseUrl: PROD_URL, buildMode: "development" }), /Blocked/);
   const page = readFileSync(new URL("../src/admin/TabletStockUpdate.tsx", import.meta.url), "utf8");
   assert.match(page, /const TABLET_UPDATE_WEBSITE_ENABLED = true;/);
@@ -331,7 +331,7 @@ test("Update Website (offline): existing product updated and verified; new produ
   assert.ok(result.products[0].checks.every((item) => item.ok), JSON.stringify(result.products[0].checks.filter((item) => !item.ok)));
   assert.deepEqual(db.calls, [["apply", "p1"], ["create", "Oppo Pad Air"]]);
 
-  const blocked = await runTabletUpdate({ ...fakeDb(catalog).deps, supabaseUrl: PROD_URL, buildMode: "production", testWriteEnvironments: undefined }, plan);
+  const blocked = await runTabletUpdate({ ...fakeDb(catalog).deps, supabaseUrl: PROD_URL, buildMode: "production", testWriteEnvironments: [] }, plan);
   assert.equal(blocked.outcome, "blocked");
   assert.match(blocked.message, /not approved.*Nothing was written/);
 });
