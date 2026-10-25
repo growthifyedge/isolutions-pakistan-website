@@ -4,8 +4,8 @@
  *   new gadget      -> ONE call to apply_catalog_bulk_import_v2 ("Create": draft, server SKU, stock 20), then — only when the
  *                      sheet has a description — ONE call to apply_gadget_stock_product that sets the description.
  *
- * apply_gadget_stock_product comes from migration 202610260001 (applied to DEV only). Update Website is approved per
- * environment: GADGET_WRITE_ENVIRONMENTS lists DEV only; PROD stays blocked until its own Owner approval.
+ * apply_gadget_stock_product comes from migration 202610260001 (applied to DEV and PROD). Update Website is approved per
+ * environment: GADGET_WRITE_ENVIRONMENTS lists DEV and PROD; the build mode must still match its Supabase project.
  *
  * Partial success: a new gadget can be created while its description is not saved (the second call fails or its answer is
  * lost). That gadget is reported as "Created — description NOT saved", never as Updated. A retry is safe: Check Changes
@@ -43,8 +43,8 @@ export type GadgetReport = { key: string; productId: string | null; productTitle
 
 export type GadgetUpdateResult = { outcome: "blocked" | "finished"; message: string; products: GadgetReport[]; counts: Record<GadgetStatus, number> };
 
-/** Owner-approved 2026-10-25 for DEV only (apply_gadget_stock_product installed on DEV). PROD is added only after its own approval. */
-export const GADGET_WRITE_ENVIRONMENTS: readonly string[] = ["development"];
+/** Owner-approved 2026-10-25: DEV, then PROD (apply_gadget_stock_product installed on both). */
+export const GADGET_WRITE_ENVIRONMENTS: readonly string[] = ["development", "production"];
 export const GADGET_NOT_APPROVED_REASON = "Update Website for gadgets is not approved for this website yet (the gadget database function is not installed).";
 export const RETRY_HINT = "Click Check Changes again: it shows under Description Updates and is not created twice.";
 

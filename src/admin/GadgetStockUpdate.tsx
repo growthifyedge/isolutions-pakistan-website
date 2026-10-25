@@ -24,7 +24,7 @@ import { installUnloadGuard } from "../lib/unloadGuard";
 // Generate Excel and Check Changes only read. Update Website writes gadget by gadget and only after a fresh check of exactly
 // this sheet. Gadgets that need review are held, never written. Stock of existing gadgets is never changed.
 
-/** Owner gate: ON (approved 2026-10-25). Which websites may write is decided by GADGET_WRITE_ENVIRONMENTS (DEV only). */
+/** Owner gate: ON (approved 2026-10-25). Which websites may write is decided by GADGET_WRITE_ENVIRONMENTS (DEV and PROD). */
 const GADGET_UPDATE_WEBSITE_ENABLED = true;
 
 const BUILD_MODE: string = import.meta.env.MODE;

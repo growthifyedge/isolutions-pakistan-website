@@ -16,7 +16,7 @@ import {
   parseGadgetList,
   readGadgetSheet,
 } from "../src/lib/gadgetStockUpdate.ts";
-import { GADGET_NOT_APPROVED_REASON, GADGET_WRITE_ENVIRONMENTS, gadgetUpdateBlocker, runGadgetUpdate } from "../src/lib/gadgetStockApply.ts";
+import { GADGET_WRITE_ENVIRONMENTS, gadgetUpdateBlocker, runGadgetUpdate } from "../src/lib/gadgetStockApply.ts";
 import { PhoneWriteError } from "../src/lib/stockUpdateApply.ts";
 import { descriptionParagraphs, gadgetDeliveryInfo, gadgetWhatsappOrderUrl, isGadgetProduct } from "../src/lib/pdpDescription.ts";
 
@@ -290,14 +290,15 @@ test("Products missing from the sheet are never planned", () => {
 // Environment guard and confirmation
 // ---------------------------------------------------------------------------
 
-test("Update Website is approved for DEV only: PROD stays blocked", () => {
-  assert.deepEqual([...GADGET_WRITE_ENVIRONMENTS], ["development"]);
+test("Update Website is approved for DEV and PROD; build mode and project must still match", () => {
+  assert.deepEqual([...GADGET_WRITE_ENVIRONMENTS], ["development", "production"]);
   const plan = buildGadgetPlan(compare([row(2, "Cable", 1200)], []));
   const base = { supabaseUrl: DEV_URL, buildMode: "development", enabled: true, checkIsCurrent: true, plan };
   assert.match(gadgetUpdateBlocker({ ...base, enabled: false }), /switched off/);
   assert.equal(gadgetUpdateBlocker(base), null);
-  assert.equal(gadgetUpdateBlocker({ ...base, supabaseUrl: PROD_URL, buildMode: "production" }), GADGET_NOT_APPROVED_REASON);
+  assert.equal(gadgetUpdateBlocker({ ...base, supabaseUrl: PROD_URL, buildMode: "production" }), null);
   assert.match(gadgetUpdateBlocker({ ...base, buildMode: "production" }), /Blocked/);
+  assert.match(gadgetUpdateBlocker({ ...base, supabaseUrl: PROD_URL, buildMode: "development" }), /Blocked/);
   assert.match(gadgetUpdateBlocker({ ...base, supabaseUrl: "https://unknown.supabase.co" }), /Blocked/);
 });
 
@@ -428,7 +429,7 @@ test("A failed existing update is Not saved; held rows are reported and never wr
   assert.equal(db.variants.get("p1-v001").price_minor, 500000);
 
   const blockedDb = fakeDb(catalog);
-  const blocked = await runGadgetUpdate({ ...blockedDb.deps, supabaseUrl: PROD_URL, buildMode: "production", testWriteEnvironments: undefined }, plan);
+  const blocked = await runGadgetUpdate({ ...blockedDb.deps, supabaseUrl: PROD_URL, buildMode: "production", testWriteEnvironments: [] }, plan);
   assert.equal(blocked.outcome, "blocked");
   assert.match(blocked.message, /not approved.*Nothing was written/);
   assert.deepEqual(blockedDb.calls, []);
