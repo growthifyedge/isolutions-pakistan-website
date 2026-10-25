@@ -240,7 +240,7 @@ export function GadgetStockUpdate() {
         <h3 id="gadget-step-1"><span className="stock-step-number">1</span> Paste List</h3>
         <label className="stock-field">
           <span>Gadgets list — one product per line: name, then the price</span>
-          <textarea value={text} rows={10} placeholder={"Apple AirPods Pro 2 @ 58,000\nAnker PowerCore 10000 - Rs 6,500\nSamsung 25W Charger @ 4,200"} onChange={(event) => setText(event.target.value)} />
+          <textarea value={text} rows={10} placeholder="Paste your gadgets list here..." onChange={(event) => setText(event.target.value)} />
         </label>
         <div className="bulk-images-bulk">
           <button type="button" className="admin-primary" disabled={busy || writing || !text.trim()} onClick={() => void generateExcel()}>Generate Excel</button>
