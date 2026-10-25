@@ -18,7 +18,7 @@ import {
 } from "../src/lib/gadgetStockUpdate.ts";
 import { GADGET_NOT_APPROVED_REASON, GADGET_WRITE_ENVIRONMENTS, gadgetUpdateBlocker, runGadgetUpdate } from "../src/lib/gadgetStockApply.ts";
 import { PhoneWriteError } from "../src/lib/stockUpdateApply.ts";
-import { descriptionParagraphs, isGadgetProduct } from "../src/lib/pdpDescription.ts";
+import { descriptionParagraphs, gadgetDeliveryInfo, gadgetWhatsappOrderUrl, isGadgetProduct } from "../src/lib/pdpDescription.ts";
 
 const DEV_URL = "https://acwatgxkcyrdxpcljxjb.supabase.co";
 const PROD_URL = "https://nlxfwppywxumymbjkvwt.supabase.co";
@@ -449,12 +449,61 @@ test("PDP: gadget descriptions become paragraphs and lines; spacing is cleaned f
   assert.equal(isGadgetProduct({ category: { id: "c", name: "Mobile Phones", slug: "mobile-phones" } }), false);
 });
 
-test("PDP: only gadgets use the paragraph rendering, through React text (no dangerouslySetInnerHTML); other products keep one paragraph", () => {
+test("PDP: gadgets get the About This Product section through React text (no dangerouslySetInnerHTML); other products keep their section", () => {
   const app = readFileSync(new URL("../src/StorefrontApp.tsx", import.meta.url), "utf8");
   assert.match(app, /const gadgetParagraphs = isGadgetProduct\(product\) \? descriptionParagraphs\(product\.content\) : null;/);
-  assert.match(app, /<div className="pdp-story-text">/);
-  assert.match(app, /\) : \(\s*<p>\{product\.content\}<\/p>\s*\)\}/);
+  const about = app.match(/<section className="pdp-about container" aria-labelledby="pdp-about-heading">[\s\S]*?<\/section>/)?.[0] ?? "";
+  assert.match(about, /<h2 id="pdp-about-heading">About This Product<\/h2>/);
+  assert.match(about, /<div className="pdp-story-text pdp-about-text">/);
+  assert.equal(about.includes("product.title"), false, "the product name is not repeated in the description section");
+  // Non-gadget products: the original Product Information section, unchanged.
+  assert.match(app, /<section className="pdp-story container">\s*<div><span className="eyebrow accent">PRODUCT INFORMATION<\/span><h2>Made to fit<br \/>your everyday\.<\/h2><\/div>\s*<div>\s*<h3>\{product\.title\}<\/h3>\s*<p>\{product\.content\}<\/p>/);
   assert.equal(app.includes("dangerouslySetInnerHTML"), false);
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.pdp-story-text p \+ p \{ margin-top:1em; \}/);
+  assert.match(css, /\.pdp-about \{ display:grid;/);
+  assert.equal(css.includes(".pdp-about-card"), false, "no floating card");
+  // The new classes must not reuse the short-description class (.pdp-description is line-clamped on mobile).
+  assert.equal(/className="pdp-description container"/.test(app), false);
+});
+
+test("PDP: Order on WhatsApp — product, quantity and shown price only, encoded, no customer details", () => {
+  const url = gadgetWhatsappOrderUrl({ whatsappNumber: "923132344912", productTitle: "Crank Chop Blade Chopper (Box Packing)", variantLabel: "", quantity: 3, unitPriceMinor: 45000, productUrl: "https://example.test/product/crank-chop-blade-chopper-box-packing" });
+  const parsed = new URL(url);
+  assert.equal(`${parsed.origin}${parsed.pathname}`, "https://wa.me/923132344912");
+  assert.equal(parsed.searchParams.get("text"), [
+    "Assalam o Alaikum, mujhe ye product order karna hai:",
+    "Product: Crank Chop Blade Chopper (Box Packing)",
+    "Quantity: 3",
+    "Price: Rs 450 each",
+    "Link: https://example.test/product/crank-chop-blade-chopper-box-packing",
+  ].join("\n"));
+  assert.match(url, /%0A/, "line breaks are encoded");
+  assert.equal(/[\s&#?]/.test(url.split("?text=")[1]), false, "the message is URL-encoded");
+  const withVariant = new URL(gadgetWhatsappOrderUrl({ whatsappNumber: "923132344912", productTitle: "Fan", variantLabel: "Blue", quantity: 0, unitPriceMinor: 75000, productUrl: "u" })).searchParams.get("text");
+  assert.match(withVariant, /\nVariant: Blue\nQuantity: 1\nPrice: Rs 750 each\n/);
+  assert.equal(gadgetWhatsappOrderUrl({ whatsappNumber: "", productTitle: "Fan", quantity: 1, unitPriceMinor: 100, productUrl: "u" }), null);
+});
+
+test("PDP: delivery facts come from the stored scope and the checkout shipping rules only", () => {
+  const rules = { freeThresholdMinor: 1_000_000, standardFeeMinor: 20_000, fastSurchargeMinor: 20_000 };
+  assert.deepEqual(gadgetDeliveryInfo("nationwide", rules), {
+    heading: "Delivery Across Pakistan",
+    rows: [
+      { key: "standard", label: "Standard Delivery", price: "Rs 200", offer: "Free on orders of Rs 10,000 or more" },
+      { key: "fast", label: "Fast Delivery", price: "Rs 400", offer: "Rs 200 on orders of Rs 10,000 or more" },
+    ],
+    note: "Final delivery charges are calculated at checkout based on your order total.",
+  });
+  assert.equal(gadgetDeliveryInfo("karachi_only", rules).heading, "Delivery in Karachi Only");
+  assert.equal(gadgetDeliveryInfo(null, rules).heading, "Delivery", "no stored scope: no nationwide claim");
+  assert.equal(gadgetDeliveryInfo(undefined, rules).heading, "Delivery");
+  // Amounts follow the rules passed in (the checkout constants), never fixed text.
+  const other = gadgetDeliveryInfo("nationwide", { freeThresholdMinor: 500_000, standardFeeMinor: 15_000, fastSurchargeMinor: 25_000 });
+  assert.deepEqual(other.rows.map((row) => [row.price, row.offer]), [["Rs 150", "Free on orders of Rs 5,000 or more"], ["Rs 400", "Rs 250 on orders of Rs 5,000 or more"]]);
+  const app = readFileSync(new URL("../src/StorefrontApp.tsx", import.meta.url), "utf8");
+  // Gadgets only, the checkout constants, and Add to Cart / Buy Now untouched.
+  assert.match(app, /const gadgetOrderUrl = isGadgetProduct\(product\) && variant \? gadgetWhatsappOrderUrl\(\{\s*whatsappNumber: storefrontContact\.whatsappNumber,/);
+  assert.match(app, /const gadgetDelivery = isGadgetProduct\(product\) && variant \? gadgetDeliveryInfo\(variant\.deliveryScope, \{\s*freeThresholdMinor: FREE_STANDARD_DELIVERY_THRESHOLD_MINOR,\s*standardFeeMinor: STANDARD_DELIVERY_FEE_MINOR,\s*fastSurchargeMinor: FAST_DELIVERY_SURCHARGE_MINOR,/);
+  assert.match(app, /<button type="button" className="pdp-buy-now" disabled=\{variant\.quantity <= 0\} onClick=\{\(\) => addSelectionToCart\(true\)\}>Buy Now<\/button>\s*<\/div>\s*\{gadgetOrderUrl && variant\.quantity > 0 && \(/);
 });

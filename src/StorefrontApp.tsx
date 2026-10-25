@@ -61,7 +61,7 @@ import {
 } from "./lib/catalog";
 import { initialPdpSelection, mediaForVariant, mediaIsAssignedTo, variantForMedia } from "./lib/pdpMediaSync";
 import { askSellerWhatsappUrl, isIphoneProduct, pdpProductInformation, pdpWarrantyText } from "./lib/pdpCustomerFacts";
-import { descriptionParagraphs, isGadgetProduct } from "./lib/pdpDescription";
+import { descriptionParagraphs, gadgetDeliveryInfo, gadgetWhatsappOrderUrl, isGadgetProduct } from "./lib/pdpDescription";
 import { parsePkrMajorToMinor } from "./lib/money";
 import { cloudinaryDeliveryUrl } from "./lib/cloudinary";
 import { supabase } from "./lib/supabase";
@@ -1215,7 +1215,7 @@ function Layout({
       >
         <span className="storefront-whatsapp-icon" aria-hidden="true">
           <svg viewBox="0 0 32 32" focusable="false">
-            <path d="M16 3.2A12.72 12.72 0 0 0 5.16 22.58L3.35 28.65l6.22-1.75A12.8 12.8 0 1 0 16 3.2Zm0 23.28c-2.08 0-4.1-.56-5.87-1.62l-.42-.25-3.69 1.04 1.07-3.59-.27-.43A10.63 10.63 0 1 1 16 26.48Zm5.83-7.97c-.32-.16-1.9-.94-2.19-1.05-.3-.1-.52-.16-.74.16-.22.32-.85 1.05-1.04 1.26-.19.21-.38.24-.7.08a8.76 8.76 0 0 1-2.58-1.59 9.72 9.72 0 0 1-1.8-2.24c-.19-.32-.02-.49.14-.64.14-.14.32-.37.48-.56.16-.19.21-.32.32-.53.1-.21.05-.4-.03-.56-.08-.16-.74-1.78-1.01-2.44-.27-.64-.54-.55-.74-.56h-.63c-.22 0-.57.08-.87.4-.3.32-1.14 1.11-1.14 2.71s1.17 3.15 1.33 3.37c.16.21 2.29 3.5 5.54 4.91.77.33 1.38.53 1.85.68.78.25 1.49.21 2.05.13.63-.1 1.9-.78 2.16-1.53.27-.75.27-1.39.19-1.53-.08-.13-.29-.21-.61-.37Z" />
+            <path d={WHATSAPP_ICON_PATH} />
           </svg>
         </span>
         <span className="storefront-whatsapp-label" aria-hidden="true">Chat with us</span>
@@ -3247,6 +3247,20 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
   ];
   // Gadgets: the Owner's description as clean paragraphs and line breaks. Other categories keep the single paragraph.
   const gadgetParagraphs = isGadgetProduct(product) ? descriptionParagraphs(product.content) : null;
+  // Gadgets only: a WhatsApp order enquiry (no website order) and delivery facts from the stored scope and checkout rules.
+  const gadgetOrderUrl = isGadgetProduct(product) && variant ? gadgetWhatsappOrderUrl({
+    whatsappNumber: storefrontContact.whatsappNumber,
+    productTitle: product.title,
+    variantLabel: [variant.storage ? displayConfigurationLabel(variant.storage) : null, variant.color ? labelize(variant.color) : null].filter(Boolean).join(", "),
+    quantity,
+    unitPriceMinor: variant.priceMinor,
+    productUrl: `${window.location.origin}/product/${encodeURIComponent(product.slug)}`,
+  }) : null;
+  const gadgetDelivery = isGadgetProduct(product) && variant ? gadgetDeliveryInfo(variant.deliveryScope, {
+    freeThresholdMinor: FREE_STANDARD_DELIVERY_THRESHOLD_MINOR,
+    standardFeeMinor: STANDARD_DELIVERY_FEE_MINOR,
+    fastSurchargeMinor: FAST_DELIVERY_SURCHARGE_MINOR,
+  }) : null;
   const addSelectionToCart = (buyNow = false) => {
     if (!variant || variant.quantity <= 0) return;
     addStorefrontCartItem({
@@ -3524,6 +3538,27 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
                 <button type="button" className="pdp-add-cart" disabled={variant.quantity <= 0} onClick={() => addSelectionToCart(false)}><ShoppingCart />Add to Cart</button>
                 <button type="button" className="pdp-buy-now" disabled={variant.quantity <= 0} onClick={() => addSelectionToCart(true)}>Buy Now</button>
               </div>
+              {gadgetOrderUrl && variant.quantity > 0 && (
+                <a className="pdp-whatsapp-order" href={gadgetOrderUrl} target="_blank" rel="noopener noreferrer">
+                  <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d={WHATSAPP_ICON_PATH} /></svg>
+                  Order on WhatsApp
+                </a>
+              )}
+              {gadgetDelivery && (
+                <section className="pdp-delivery" aria-labelledby="pdp-delivery-heading">
+                  <h3 id="pdp-delivery-heading"><Truck aria-hidden="true" />{gadgetDelivery.heading}</h3>
+                  <dl>
+                    {gadgetDelivery.rows.map((row) => (
+                      <div key={row.key}>
+                        <dt>{row.label}</dt>
+                        <dd className="pdp-delivery-price">{row.price}</dd>
+                        <dd className="pdp-delivery-offer">{row.offer}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <small>{gadgetDelivery.note}</small>
+                </section>
+              )}
               <p className="pdp-purchase-feedback" role="status" aria-live="polite">{purchaseFeedback}</p>
             </div>
           </div>
@@ -3562,27 +3597,38 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
             </div>
           </section>
         )}
-        {(gadgetParagraphs ? gadgetParagraphs.length > 0 : product.content) && (
-          <section className="pdp-story container">
-            <div><span className="eyebrow accent">PRODUCT INFORMATION</span><h2>Made to fit<br />your everyday.</h2></div>
-            <div>
-              <h3>{product.title}</h3>
-              {gadgetParagraphs ? (
-                <div className="pdp-story-text">
-                  {gadgetParagraphs.map((lines, index) => (
-                    <p key={index}>{lines.map((line, lineIndex) => (lineIndex ? [<br key={`br${lineIndex}`} />, line] : line))}</p>
-                  ))}
-                </div>
-              ) : (
+        {gadgetParagraphs ? (
+          gadgetParagraphs.length > 0 && (
+            // Gadgets: the Owner's description as an editorial section of the page. Other categories keep the section below unchanged.
+            <section className="pdp-about container" aria-labelledby="pdp-about-heading">
+              <div className="pdp-about-head">
+                <span className="eyebrow accent">PRODUCT INFORMATION</span>
+                <h2 id="pdp-about-heading">About This Product</h2>
+              </div>
+              <div className="pdp-story-text pdp-about-text">
+                {gadgetParagraphs.map((lines, index) => (
+                  <p key={index}>{lines.map((line, lineIndex) => (lineIndex ? [<br key={`br${lineIndex}`} />, line] : line))}</p>
+                ))}
+              </div>
+            </section>
+          )
+        ) : (
+          product.content && (
+            <section className="pdp-story container">
+              <div><span className="eyebrow accent">PRODUCT INFORMATION</span><h2>Made to fit<br />your everyday.</h2></div>
+              <div>
+                <h3>{product.title}</h3>
                 <p>{product.content}</p>
-              )}
-            </div>
-          </section>
+              </div>
+            </section>
+          )
         )}
       </div>
     </Layout>
   );
 }
+const WHATSAPP_ICON_PATH = "M16 3.2A12.72 12.72 0 0 0 5.16 22.58L3.35 28.65l6.22-1.75A12.8 12.8 0 1 0 16 3.2Zm0 23.28c-2.08 0-4.1-.56-5.87-1.62l-.42-.25-3.69 1.04 1.07-3.59-.27-.43A10.63 10.63 0 1 1 16 26.48Zm5.83-7.97c-.32-.16-1.9-.94-2.19-1.05-.3-.1-.52-.16-.74.16-.22.32-.85 1.05-1.04 1.26-.19.21-.38.24-.7.08a8.76 8.76 0 0 1-2.58-1.59 9.72 9.72 0 0 1-1.8-2.24c-.19-.32-.02-.49.14-.64.14-.14.32-.37.48-.56.16-.19.21-.32.32-.53.1-.21.05-.4-.03-.56-.08-.16-.74-1.78-1.01-2.44-.27-.64-.54-.55-.74-.56h-.63c-.22 0-.57.08-.87.4-.3.32-1.14 1.11-1.14 2.71s1.17 3.15 1.33 3.37c.16.21 2.29 3.5 5.54 4.91.77.33 1.38.53 1.85.68.78.25 1.49.21 2.05.13.63-.1 1.9-.78 2.16-1.53.27-.75.27-1.39.19-1.53-.08-.13-.29-.21-.61-.37Z";
+
 const aboutPaymentMethods = [
   { title: "Cash On Delivery", image: "/assets/about/payment/cash-on-delivery.png", comingSoon: false },
   { title: "Bank Transfer", image: "/assets/about/payment/bank-transfer.png", comingSoon: false },

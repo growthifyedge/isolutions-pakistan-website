@@ -1875,6 +1875,42 @@ body:has(.home-page) footer { padding-top:96px; }
 .pdp-story p { color:#5d675f; font-size:16px; line-height:1.75; margin:0; }
 .pdp-story-text p { overflow-wrap:anywhere; }
 .pdp-story-text p + p { margin-top:1em; }
+/* Gadgets PDP: About This Product — editorial section (heading left, the Owner's text right) */
+.pdp-about { display:grid; grid-template-columns:minmax(220px,.36fr) 1fr; gap:clamp(32px,6vw,96px); align-items:start; padding-top:64px; padding-bottom:72px; border-top:1px solid var(--line); }
+.pdp-about-head { display:flex; flex-direction:column; gap:12px; }
+.pdp-about-head::before { content:""; width:36px; height:3px; border-radius:3px; background:var(--accent); }
+.pdp-about-head h2 { font:600 clamp(30px,3vw,42px)/1.05 Manrope,sans-serif; letter-spacing:-.045em; margin:0; color:var(--ink); }
+.pdp-about-text { max-width:760px; }
+.pdp-about-text p { color:#4a534f; font-size:16.5px; line-height:1.8; margin:0; }
+.pdp-about-text p + p { margin-top:1.05em; }
+.pdp-about-text p:first-child { padding-left:18px; border-left:3px solid var(--accent); color:var(--ink); font:500 clamp(18px,1.6vw,21px)/1.6 Manrope,sans-serif; letter-spacing:-.01em; }
+.pdp-about-text p:first-child + p { margin-top:1.4em; }
+@media (max-width:900px) {
+  .pdp-about { grid-template-columns:1fr; gap:18px; padding-top:44px; padding-bottom:52px; }
+}
+@media (max-width:600px) {
+  .pdp-about { padding-top:36px; padding-bottom:44px; }
+  .pdp-about-head h2 { font-size:28px; }
+  .pdp-about-text p { font-size:15.5px; line-height:1.75; }
+  .pdp-about-text p:first-child { padding-left:14px; font-size:17px; line-height:1.55; }
+}
+/* Gadgets PDP: Order on WhatsApp (an enquiry link, not a website order) and delivery facts */
+.pdp-whatsapp-order { margin-top:10px; min-height:50px; display:flex; align-items:center; justify-content:center; gap:9px; border-radius:10px; background:#1FAF55; color:#FFFFFF; font:720 13px/1 Manrope,sans-serif; text-decoration:none; transition:background 180ms ease; }
+.pdp-whatsapp-order:hover { background:#178F45; }
+.pdp-whatsapp-order svg { width:19px; height:19px; fill:currentColor; }
+.pdp-delivery { margin-top:14px; padding:16px 18px 14px; border:1px solid var(--line); border-radius:12px; background:#FFFFFF; }
+.pdp-delivery h3 { margin:0 0 4px; display:flex; align-items:center; gap:9px; color:var(--ink); font:700 15px/1.3 Manrope,sans-serif; letter-spacing:-.01em; }
+.pdp-delivery h3 svg { width:18px; height:18px; flex:none; color:var(--accent); }
+.pdp-delivery dl { margin:0; }
+.pdp-delivery dl > div { display:grid; grid-template-columns:1fr auto; column-gap:14px; row-gap:3px; padding:11px 0; border-top:1px solid #E7EAE7; }
+.pdp-delivery dl > div:first-child { border-top:0; }
+.pdp-delivery dt { color:var(--ink); font:600 13.5px/1.35 Manrope,sans-serif; }
+.pdp-delivery-price { margin:0; color:var(--ink); font:700 14px/1.35 Manrope,sans-serif; text-align:right; }
+.pdp-delivery-offer { grid-column:1 / -1; margin:0; color:#17824A; font-size:12.5px; font-weight:600; line-height:1.4; }
+.pdp-delivery small { display:block; padding-top:10px; border-top:1px solid #E7EAE7; color:var(--muted); font-size:11.5px; line-height:1.45; }
+@media (max-width:600px) {
+  .pdp-delivery { padding:14px 14px 12px; }
+}
 @media (max-width:900px) {
   .pdp-showcase { grid-template-columns:1fr; gap:42px; }
   .pdp-main-image { height:650px; }
