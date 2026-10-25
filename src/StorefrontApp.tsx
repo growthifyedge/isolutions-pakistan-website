@@ -61,6 +61,7 @@ import {
 } from "./lib/catalog";
 import { initialPdpSelection, mediaForVariant, mediaIsAssignedTo, variantForMedia } from "./lib/pdpMediaSync";
 import { askSellerWhatsappUrl, isIphoneProduct, pdpProductInformation, pdpWarrantyText } from "./lib/pdpCustomerFacts";
+import { descriptionParagraphs, isGadgetProduct } from "./lib/pdpDescription";
 import { parsePkrMajorToMinor } from "./lib/money";
 import { cloudinaryDeliveryUrl } from "./lib/cloudinary";
 import { supabase } from "./lib/supabase";
@@ -3244,6 +3245,8 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
     { title: "100% Authentic", subtitle: "Official Product", animation: authenticAnimation },
     { title: "Trusted by Thousands", subtitle: "Customers across Pakistan", animation: trustedAnimation },
   ];
+  // Gadgets: the Owner's description as clean paragraphs and line breaks. Other categories keep the single paragraph.
+  const gadgetParagraphs = isGadgetProduct(product) ? descriptionParagraphs(product.content) : null;
   const addSelectionToCart = (buyNow = false) => {
     if (!variant || variant.quantity <= 0) return;
     addStorefrontCartItem({
@@ -3559,10 +3562,21 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
             </div>
           </section>
         )}
-        {product.content && (
+        {(gadgetParagraphs ? gadgetParagraphs.length > 0 : product.content) && (
           <section className="pdp-story container">
             <div><span className="eyebrow accent">PRODUCT INFORMATION</span><h2>Made to fit<br />your everyday.</h2></div>
-            <div><h3>{product.title}</h3><p>{product.content}</p></div>
+            <div>
+              <h3>{product.title}</h3>
+              {gadgetParagraphs ? (
+                <div className="pdp-story-text">
+                  {gadgetParagraphs.map((lines, index) => (
+                    <p key={index}>{lines.map((line, lineIndex) => (lineIndex ? [<br key={`br${lineIndex}`} />, line] : line))}</p>
+                  ))}
+                </div>
+              ) : (
+                <p>{product.content}</p>
+              )}
+            </div>
           </section>
         )}
       </div>

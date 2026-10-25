@@ -1873,6 +1873,8 @@ body:has(.home-page) footer { padding-top:96px; }
 .pdp-story h2 { font:600 clamp(44px,4vw,60px)/.98 Manrope,sans-serif; letter-spacing:-.06em; margin:24px 0 0; }
 .pdp-story h3 { font:600 22px Manrope,sans-serif; letter-spacing:-.03em; margin:0 0 24px; }
 .pdp-story p { color:#5d675f; font-size:16px; line-height:1.75; margin:0; }
+.pdp-story-text p { overflow-wrap:anywhere; }
+.pdp-story-text p + p { margin-top:1em; }
 @media (max-width:900px) {
   .pdp-showcase { grid-template-columns:1fr; gap:42px; }
   .pdp-main-image { height:650px; }
