@@ -48,45 +48,95 @@ export type GadgetListLine = { lineNumber: number; name: string; priceMinor: num
 export type GadgetUnreadLine = { lineNumber: number; line: string; reason: string };
 export type ParsedGadgetList = { lines: GadgetListLine[]; unread: GadgetUnreadLine[] };
 
-export const NO_PRICE_REASON = "No price found. Write it as: Product Name @ 4,500 (or Rs 4,500, or a tab before the price).";
+export const NO_PRICE_REASON = "No price found. Put the price on the next line (Rs 4,500) or on the same line (Product Name - Rs 4,500).";
+export const ORPHAN_PRICE_REASON = "Price without a product name before it.";
+export const BARE_NUMBER_REASON = "A price on its own line needs Rs or PKR (e.g. Rs 4,500); this number was not used.";
+const INVALID_PRICE_REASON = "The price is not a valid amount in rupees.";
+
+/** A line that is only a price: "Rs 750", "Rs. 1,200/-", "PKR 450" (optionally after "Price:"). Rs or PKR is required. */
+const PRICE_ONLY = /^(?:price\s*[:=-]?\s*)?(?:rs\.?|pkr)\s*(\d[\d,]*)(?:\.0+)?\s*(?:\/-)?$/i;
+
+type SameLine = { kind: "product"; name: string; priceMinor: number } | { kind: "malformed"; reason: string } | { kind: "name" };
 
 /**
- * One product per line: the name, then the price at the end after "@", "=", ":", " - ", "Rs"/"PKR" or a tab
- * (pasted from Excel). A number at the end without one of these is NOT read as a price (it may be part of the name,
- * e.g. "Power Bank 10000"), so the line is listed as not understood instead of guessed.
+ * Same-line format: the name, then the price at the end after "@", "=", ":", " - ", "Rs"/"PKR" or a tab (pasted
+ * from Excel). A number at the end without one of these is NOT a price (it may be part of the name, e.g.
+ * "Power Bank 10000" or "Mini Fan Y05"), so the line is treated as a name only.
+ */
+function readSameLine(raw: string): SameLine {
+  const tail = raw.replace(/\s*\/-\s*$/, "").match(/^(.*?)(\d[\d,]*)(?:\.0+)?\s*$/);
+  if (!tail) return { kind: "name" };
+  let marked = /\t\s*$/.test(tail[1]);
+  let rest = tail[1].trimEnd();
+  const currency = rest.match(/(?:^|[^a-z0-9])(rs\.?|pkr)$/i);
+  if (currency) {
+    marked = true;
+    rest = rest.slice(0, rest.length - currency[1].length).trimEnd();
+  }
+  const separator = rest.match(/(?:[@=:]|\s[-–])$/);
+  if (separator) {
+    marked = true;
+    rest = rest.slice(0, rest.length - separator[0].length);
+  }
+  if (!marked) return { kind: "name" };
+  const name = rest.trim();
+  const priceMinor = rupeesToMinor(tail[2]);
+  if (!name) return { kind: "malformed", reason: "No product name before the price." };
+  if (priceMinor === null) return { kind: "malformed", reason: INVALID_PRICE_REASON };
+  return { kind: "product", name, priceMinor };
+}
+
+/**
+ * Two formats, mixed freely; blank lines are ignored:
+ *   A. separate lines — "Mini Fan Y05" then "Rs 750" (the price line must say Rs or PKR);
+ *   B. same line      — "Mini Fan Y05 - Rs 750".
+ * A name is paired only with the price line right after it (blank lines between are fine). Nothing is guessed: a name
+ * followed by another name, a same-line product or a malformed line, a name at the end, a price with no name before
+ * it, and a bare number are all listed as not understood. Names are kept exactly as written.
  */
 export function parseGadgetList(text: string): ParsedGadgetList {
   const lines: GadgetListLine[] = [];
   const unread: GadgetUnreadLine[] = [];
+  let pending: { lineNumber: number; line: string } | null = null;
+  const flushPending = () => {
+    if (pending) unread.push({ ...pending, reason: NO_PRICE_REASON });
+    pending = null;
+  };
   text.replace(/\r\n?/g, "\n").split("\n").forEach((raw, index) => {
     const lineNumber = index + 1;
     const line = raw.trim();
     if (!line) return;
     if (/^product\s*name\b/i.test(line) && /\bprice\b/i.test(line)) return; // header pasted with the list
-    const tail = raw.replace(/\s*\/-\s*$/, "").match(/^(.*?)(\d[\d,]*)(?:\.0+)?\s*$/);
-    if (!tail) {
-      unread.push({ lineNumber, line, reason: NO_PRICE_REASON });
+    const priceOnly = line.match(PRICE_ONLY);
+    if (priceOnly) {
+      const priceMinor = rupeesToMinor(priceOnly[1]);
+      if (!pending) unread.push({ lineNumber, line, reason: ORPHAN_PRICE_REASON });
+      else if (priceMinor === null) {
+        unread.push({ lineNumber, line, reason: INVALID_PRICE_REASON });
+        flushPending();
+      } else {
+        lines.push({ lineNumber: pending.lineNumber, name: pending.line, priceMinor });
+        pending = null;
+      }
       return;
     }
-    let marked = /\t\s*$/.test(tail[1]);
-    let rest = tail[1].trimEnd();
-    const currency = rest.match(/(?:^|[^a-z0-9])(rs\.?|pkr)$/i);
-    if (currency) {
-      marked = true;
-      rest = rest.slice(0, rest.length - currency[1].length).trimEnd();
+    if (/^\d[\d,]*(?:\.\d+)?\s*(?:\/-)?$/.test(line)) {
+      flushPending();
+      unread.push({ lineNumber, line, reason: BARE_NUMBER_REASON });
+      return;
     }
-    const separator = rest.match(/(?:[@=:]|\s[-–])$/);
-    if (separator) {
-      marked = true;
-      rest = rest.slice(0, rest.length - separator[0].length);
+    const same = readSameLine(raw);
+    if (same.kind === "name") {
+      flushPending();
+      pending = { lineNumber, line };
+      return;
     }
-    const name = rest.trim();
-    const priceMinor = rupeesToMinor(tail[2]);
-    if (!marked) unread.push({ lineNumber, line, reason: NO_PRICE_REASON });
-    else if (!name) unread.push({ lineNumber, line, reason: "No product name before the price." });
-    else if (priceMinor === null) unread.push({ lineNumber, line, reason: "The price is not a valid amount in rupees." });
-    else lines.push({ lineNumber, name, priceMinor });
+    flushPending();
+    if (same.kind === "malformed") unread.push({ lineNumber, line, reason: same.reason });
+    else lines.push({ lineNumber, name: same.name, priceMinor: same.priceMinor });
   });
+  flushPending();
+  unread.sort((a, b) => a.lineNumber - b.lineNumber);
   return { lines, unread };
 }
 

@@ -5,7 +5,9 @@ import ExcelJS from "exceljs";
 import {
   GADGET_EXCEL_HEADERS,
   GADGET_NEW_PRODUCT_STOCK,
+  BARE_NUMBER_REASON,
   NO_PRICE_REASON,
+  ORPHAN_PRICE_REASON,
   buildGadgetPlan,
   buildGadgetWorkbook,
   compareGadgetSheet,
@@ -60,14 +62,76 @@ test("Paste List: name and price after @, Rs, PKR, dash, colon, equals or a tab;
 });
 
 test("Paste List: a number at the end without @ / Rs / dash / tab is never guessed as a price", () => {
-  const parsed = parseGadgetList("Power Bank 10000\nUSB-C Hub 4500.50\nRs 4,500\nCharger @ 0\nSpeaker @ abc");
+  const parsed = parseGadgetList("Power Bank 10000\nUSB-C Hub 4500.50\nCharger @ 0\nSpeaker @ abc\n: 4500");
   assert.equal(parsed.lines.length, 0);
   assert.deepEqual(parsed.unread.map((line) => [line.lineNumber, line.reason]), [
     [1, NO_PRICE_REASON],
     [2, NO_PRICE_REASON],
-    [3, "No product name before the price."],
-    [4, "The price is not a valid amount in rupees."],
-    [5, NO_PRICE_REASON],
+    [3, "The price is not a valid amount in rupees."],
+    [4, NO_PRICE_REASON],
+    [5, "No product name before the price."],
+  ]);
+});
+
+test("Paste List: the Owner's list with the price on its own line (blank lines between)", () => {
+  const parsed = parseGadgetList("Tumbler Stopper\r\n\r\nRs 70\r\n\r\nMini Fan Y05\r\n\r\nRs 750\r\n\r\nCrank Chop Blade Chopper (Box Packing)\r\n\r\nRs 450\r\n");
+  assert.deepEqual(parsed.unread, []);
+  assert.deepEqual(parsed.lines.map((line) => [line.lineNumber, line.name, line.priceMinor]), [
+    [1, "Tumbler Stopper", 7000],
+    [5, "Mini Fan Y05", 75000],
+    [9, "Crank Chop Blade Chopper (Box Packing)", 45000],
+  ]);
+});
+
+test("Paste List: separate-line and same-line formats mixed; Rs. / PKR / /- price lines", () => {
+  const parsed = parseGadgetList([
+    "Mini Fan Y05",
+    "Rs. 1,250/-",
+    "Desk Lamp X2 - Rs 2,100",
+    "Power Bank 10000",
+    "",
+    "PKR 4500",
+    "Neck Fan 3 @ 1,800",
+    "Price: Rs 999",
+  ].join("\n"));
+  assert.deepEqual(parsed.lines.map((line) => [line.lineNumber, line.name, line.priceMinor]), [
+    [1, "Mini Fan Y05", 125000],
+    [3, "Desk Lamp X2", 210000],
+    [4, "Power Bank 10000", 450000],
+    [7, "Neck Fan 3", 180000],
+  ]);
+  assert.deepEqual(parsed.unread.map((line) => [line.lineNumber, line.reason]), [[8, ORPHAN_PRICE_REASON]]);
+});
+
+test("Paste List: missing, orphan and ambiguous entries are reported, never paired or guessed", () => {
+  const parsed = parseGadgetList([
+    "Rs 300", //             1 orphan price at the start
+    "Tumbler Stopper", //    2 followed by another name: no price
+    "Mini Fan Y05", //       3 paired with line 4
+    "Rs 750",
+    "Rs 800", //             5 second price in a row: orphan
+    "Desk Lamp", //          6 followed by a same-line product: no price
+    "Hub - Rs 1,000",
+    "Clip Light", //         8 followed by a bare number: no price
+    "450", //                9 bare number is never a price
+    "Cable Tidy", //        10 followed by a zero price
+    "Rs 0",
+    "Stand", //             12 last line: no price
+  ].join("\n"));
+  assert.deepEqual(parsed.lines.map((line) => [line.lineNumber, line.name, line.priceMinor]), [
+    [3, "Mini Fan Y05", 75000],
+    [7, "Hub", 100000],
+  ]);
+  assert.deepEqual(parsed.unread.map((line) => [line.lineNumber, line.line, line.reason]), [
+    [1, "Rs 300", ORPHAN_PRICE_REASON],
+    [2, "Tumbler Stopper", NO_PRICE_REASON],
+    [5, "Rs 800", ORPHAN_PRICE_REASON],
+    [6, "Desk Lamp", NO_PRICE_REASON],
+    [8, "Clip Light", NO_PRICE_REASON],
+    [9, "450", BARE_NUMBER_REASON],
+    [10, "Cable Tidy", NO_PRICE_REASON],
+    [11, "Rs 0", "The price is not a valid amount in rupees."],
+    [12, "Stand", NO_PRICE_REASON],
   ]);
 });
 
@@ -83,6 +147,18 @@ async function roundTrip(lines, fill = () => {}) {
   await again.xlsx.load(await workbook.xlsx.writeBuffer());
   return { table: gadgetTableFromWorksheet(again.worksheets[0]), read: readGadgetSheet(gadgetTableFromWorksheet(again.worksheets[0])) };
 }
+
+test("Excel: the Owner's separate-line list becomes Product Name / Price / blank Description rows", async () => {
+  const { lines } = parseGadgetList("Tumbler Stopper\n\nRs 70\n\nMini Fan Y05\n\nRs 750\n\nCrank Chop Blade Chopper (Box Packing)\n\nRs 450");
+  const { table, read } = await roundTrip(lines);
+  assert.deepEqual(table[0], [...GADGET_EXCEL_HEADERS]);
+  assert.deepEqual(table.slice(1).map((cells) => [cells[0], cells[1], cells[2] ?? ""]), [
+    ["Tumbler Stopper", "70", ""],
+    ["Mini Fan Y05", "750", ""],
+    ["Crank Chop Blade Chopper (Box Packing)", "450", ""],
+  ]);
+  assert.equal(read.ok, true);
+});
 
 test("Excel: Generate Excel writes Product Name, Price and a blank Description; the filled sheet reads back unchanged", async () => {
   const { lines } = parseGadgetList("Apple AirPods Pro 2 @ 58,000\nBaseus  Cable\t1,200");
