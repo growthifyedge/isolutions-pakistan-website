@@ -45,7 +45,7 @@ type SectionId = "new_product" | "price" | "description" | "review";
 
 const SECTIONS: { id: SectionId; title: string; help: string; pick: (entry: GadgetEntry) => boolean }[] = [
   { id: "review", title: "Needs review", help: "Nothing is written for these. Fix the sheet or the product in Catalog, then upload again.", pick: (entry) => entry.kind === "review" },
-  { id: "new_product", title: "New products", help: `Created as drafts (not on the storefront until you add Condition, PTA, Warranty and images, and publish). Stock starts at ${GADGET_NEW_PRODUCT_STOCK}.`, pick: (entry) => entry.kind === "new_product" },
+  { id: "new_product", title: "New products", help: `Created as drafts. Add a primary image, then validate and publish when ready. Stock starts at ${GADGET_NEW_PRODUCT_STOCK}.`, pick: (entry) => entry.kind === "new_product" },
   { id: "price", title: "Price updates", help: "Only the price changes. Stock stays exactly as it is.", pick: (entry) => entry.kind === "update" && Boolean(entry.priceChange) },
   { id: "description", title: "Description updates", help: "Your text from the sheet replaces the saved description. A blank description in the sheet keeps the saved one.", pick: (entry) => entry.kind === "update" && Boolean(entry.descriptionChange) },
 ];

@@ -139,7 +139,7 @@ function topLevelCollection(
     "home-gadgets": {
       title: "Home Gadgets",
       description: "Explore practical technology for modern homes.",
-      aliases: ["home-gadgets", "home gadgets", "smart-home", "home-technology"],
+      aliases: ["home-gadgets", "home gadgets", "smart-home", "home-technology", "gadgets"],
     },
   } as const;
   const definition =
