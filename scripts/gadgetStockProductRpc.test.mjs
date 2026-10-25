@@ -279,7 +279,7 @@ test("gadget keeps the other blockers: image, price, delivery, active variant, i
   assert.deepEqual((await env.validate(dev)).errors, ["real_catalog_classification_required", COMMERCIAL], "the gadget exemption is for real products only");
 });
 
-test("every other category keeps its rules: Android, New / Used iPhone, accessories, tablets and laptops (Gadgets children)", async () => {
+test("every other category keeps its rules: Android, New / Used iPhone, accessories; tablets and Apple laptops follow 202610270001", async () => {
   const env = await makeDb();
   const listing = async (title, category, brand, facts) => {
     const id = await env.product(title, { category, brand });
@@ -292,12 +292,15 @@ test("every other category keeps its rules: Android, New / Used iPhone, accessor
     ["Samsung A57", "mobile-phones", "Samsung", "karachi_only"],
     ["Apple iPhone 16", "mobile-phones", "Apple", "karachi_only"],
     ["Apple 20W Charger", "mobile-accessories", "Apple", "nationwide"],
-    ["Apple iPad Air", "tablets", "Apple", "nationwide"],
-    ["Apple MacBook Air", "laptops", "Apple", "nationwide"],
   ]) {
     assert.deepEqual((await env.validate(await listing(title, category, brand, { ...unset, scope }))).errors, [COMMERCIAL], `${title}: unset facts still block`);
     assert.deepEqual((await env.validate(await listing(`${title} W`, category, brand, { pta: "approved", condition: "brand_new", scope }))).errors, [COMMERCIAL], `${title}: warranty still required`);
     assert.deepEqual((await env.validate(await listing(`${title} OK`, category, brand, { pta: "approved", condition: "brand_new", scope, warranty: "1 Year" }))).errors, [], `${title}: complete facts publish`);
+  }
+  // Tablets & MacBooks (Gadgets children, migration 202610270001): warranty optional; unset PTA / condition still block.
+  for (const [title, category] of [["Apple iPad Air", "tablets"], ["Apple MacBook Air", "laptops"]]) {
+    assert.deepEqual((await env.validate(await listing(title, category, "Apple", unset))).errors, [COMMERCIAL], `${title}: unset facts still block`);
+    assert.deepEqual((await env.validate(await listing(`${title} W`, category, "Apple", { pta: "not_applicable", condition: "brand_new", scope: "karachi_only" }))).errors, [], `${title}: no warranty needed`);
   }
   const used = await env.product("Apple iPhone 13 (Used)", { category: "mobile-phones", brand: "Apple" });
   await env.variant(used, { pta: "approved", condition: "used", scope: "karachi_only" });

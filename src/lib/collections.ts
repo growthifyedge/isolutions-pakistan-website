@@ -246,7 +246,7 @@ export function resolveCollection(
     const apple = appleBrand(taxonomy);
     const common = {
       slug: collectionSlug,
-      breadcrumbs: [{ label: "Home", href: "/" }, { label: "Laptops & Tablets" }],
+      breadcrumbs: [{ label: "Home", href: "/" }, { label: "Tablets & MacBooks" }],
       condition: undefined,
       mobilePhones: false,
       activeBrand: undefined,
@@ -255,8 +255,8 @@ export function resolveCollection(
       const categories = [tabletCategory, laptopCategory].filter((value): value is string => Boolean(value));
       return {
         ...common,
-        title: "Laptops & Tablets",
-        description: "Explore published laptops and tablets.",
+        title: "Tablets & MacBooks",
+        description: "Explore published iPads, tablets and Apple MacBooks.",
         filters: { categories, brands: [] },
         available: categories.length > 0,
       };
@@ -280,13 +280,14 @@ export function resolveCollection(
         available: Boolean(tabletCategory && (!brandParam || brand)),
       };
     }
-    if (type === "laptops") {
+    // MacBooks are the only laptops sold (Apple only). The older "?type=laptops" link shows the same MacBooks.
+    if (type === "macbooks" || type === "laptops") {
       return {
         ...common,
-        title: "Laptops",
-        description: "Explore published laptop models.",
-        filters: { categories: laptopCategory ? [laptopCategory] : [], brands: brand ? [brand] : [] },
-        available: Boolean(laptopCategory && (!brandParam || brand)),
+        title: "MacBooks",
+        description: "Explore published Apple MacBook models.",
+        filters: { categories: laptopCategory ? [laptopCategory] : [], brands: apple ? [apple] : [] },
+        available: Boolean(laptopCategory && apple && (!brandParam || brand === apple)),
       };
     }
     return null;

@@ -100,7 +100,8 @@ test("mixed, unknown, open-box or refurbished conditions, a plain title or anoth
   await blocked("Apple iPhone 12 Pro (Used)", [{ condition: "open_box" }]);
   await blocked("Apple iPhone 12 Mini (Used)", [{ condition: "refurbished" }]);
   await blocked("Apple iPhone 15 Pro", [{}]);
-  await blocked("Apple iPhone 11 (Used)", [{}], { category: "tablets" });
+  // Another category (tablets have their own no-warranty rule since 202610270001, so accessories are used here).
+  await blocked("Apple iPhone 11 (Used)", [{}], { category: "mobile-accessories" });
   // An unknown-condition active variant is blocked by the condition check itself.
   await blocked("Apple iPhone 11 Pro (Used)", [{ condition: "unknown" }]);
 });

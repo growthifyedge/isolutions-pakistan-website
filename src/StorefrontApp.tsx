@@ -901,9 +901,9 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
             showHeading={false}
           />
           <NavbarMegaMenu
-            label="Laptops & Tablets"
+            label="Tablets & MacBooks"
             href="/collections/laptops-tablets"
-            heading="Laptops & Tablets"
+            heading="Tablets & MacBooks"
             groups={[
               { heading: "iPad", href: "/collections/laptops-tablets?type=ipad", links: canonicalMenuLinks("ipad", [
                 { label: "Apple", slug: "apple", aliases: ["apple", "iphone"] },
@@ -912,12 +912,8 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
                 { label: "Samsung", slug: "samsung" },
                 { label: "Xiaomi", slug: "xiaomi" },
               ]) },
-              { heading: "Laptops", href: "/collections/laptops-tablets?type=laptops", links: canonicalMenuLinks("laptops", [
+              { heading: "MacBooks", href: "/collections/laptops-tablets?type=macbooks", links: canonicalMenuLinks("macbooks", [
                 { label: "Apple", slug: "apple", aliases: ["apple", "iphone"] },
-                { label: "Acer", slug: "acer" },
-                { label: "HP", slug: "hp" },
-                { label: "Dell", slug: "dell" },
-                { label: "Lenovo", slug: "lenovo" },
               ]) },
             ]}
             promoImage="/assets/studio-laptop.jpg"
@@ -1057,11 +1053,11 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
                   <a href="/collections/mobile-accessories?type=audio">Audio</a>
                   <a href="/collections/mobile-accessories?type=pc-gadgets">PC Gadgets</a>
                 </DrawerCategory>
-                <DrawerCategory label="Laptops &amp; Tablets" icon={Laptop}>
-                  <a href="/collections/laptops-tablets">All laptops &amp; tablets</a>
+                <DrawerCategory label="Tablets &amp; MacBooks" icon={Laptop}>
+                  <a href="/collections/laptops-tablets">All tablets &amp; MacBooks</a>
                   <a href="/collections/laptops-tablets?type=ipad">iPad</a>
                   <a href="/collections/laptops-tablets?type=android-tablets">Android Tablets</a>
-                  <a href="/collections/laptops-tablets?type=laptops">Laptops</a>
+                  <a href="/collections/laptops-tablets?type=macbooks">MacBooks</a>
                 </DrawerCategory>
                 <DrawerCategory label="Home Gadgets" icon={House}>
                   <a href="/collections/home-gadgets">All home gadgets</a>
