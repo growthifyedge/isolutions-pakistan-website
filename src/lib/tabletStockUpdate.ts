@@ -21,6 +21,11 @@
  *   Macbook Air M5 Now Available              a model heading, then a price line and a configuration line (either order)
  *   420500
  *   16-512Gb Midnight
+ *   Macbook Air M5 16-256Gb                   model + configuration without a price, then one colour + price per line
+ *   SkyBlue 397,000
+ *   Silver @402,000
+ *   Samsung Tab S10 Lite 6-128Gb@98,500       one-line entry, then more configurations of the same model with their price
+ *   6-256Gb @115,000
  */
 import { normalizeColor } from "./catalogColors.ts";
 import { normalizeStockLines, type BrandReference } from "./catalogSheet.ts";
@@ -118,8 +123,11 @@ function splitPrice(line: string): { text: string; digits: string } | null {
   return null;
 }
 
-/** "16-512Gb" -> "16/512Gb" (RAM-storage written with a dash). Only RAM of 1–2 digits followed by a GB/TB storage. */
-const dashToSlash = (text: string) => text.replace(/\b(\d{1,2})\s*-\s*(\d{1,4})\s*(gb|tb)\b/gi, "$1/$2$3");
+/** "16-512Gb" / "16GB-512GB" -> "16/512Gb" (RAM-storage written with a dash). Only RAM of 1–2 digits followed by a GB/TB storage. */
+const dashToSlash = (text: string) => text.replace(/\b(\d{1,2})\s*(?:gb)?\s*-\s*(\d{1,4})\s*(gb|tb)\b/gi, "$1/$2$3");
+
+/** Words that belong to model names, never read as a colour on a colour + price line. */
+const NOT_A_COLOUR = /^(?:ipad|macbook|tab|tablet|pad|galaxy|air|pro|mini|max|ultra|lite|plus|fe|m\d+)$/i;
 
 type Tags = { condition: TabletCondition | null; pta: "approved" | "not_approved" | null; problems: string[]; rest: string };
 
@@ -179,6 +187,20 @@ function readConfig(text: string): Config | null {
   return { ram: null, storage: capacityLabel(match[4], match[5]), colors: readColors(rest) };
 }
 
+/**
+ * The text of a "colour + price" line ("SkyBlue", "Silver -", "Blue/Grey"), or null when it is not only colours. A known
+ * colour, or one plain word that is not a brand or a model word (an unknown colour, which waits for the Owner's "Keep").
+ */
+function readColorOnly(text: string, brands: BrandReference[]): { written: string; known: boolean }[] | null {
+  const clean = text.replace(/[\s;:,=\-–]+$/, "").trim();
+  if (!clean || /\d/.test(clean) || WIFI_WORD.test(clean) || CELLULAR_WORD.test(clean)) return null;
+  const brandNames = new Set(brands.flatMap((brand) => [brand.name, ...(brand.aliases ?? [])]).map((name) => name.toLowerCase()));
+  const segments = clean.split(/\s*[/,]\s*/).filter(Boolean);
+  const plainWord = (segment: string) => /^[a-z]+$/i.test(segment) && !NOT_A_COLOUR.test(segment) && !brandNames.has(segment.toLowerCase());
+  if (!segments.every((segment) => normalizeColor(segment).known || plainWord(segment))) return null;
+  return readColors(clean);
+}
+
 type Model = { lineNumber: number; baseTitle: string; brand: string | null; condition: TabletCondition | null; pta: "approved" | "not_approved" | null; connectivityText: string; notes: string[]; problems: string[] };
 
 type Pending =
@@ -211,12 +233,17 @@ export function parseTabletList(text: string, brands: BrandReference[]): ParsedT
     pending = null;
   };
 
-  const emit = (model: Model, config: Config, digits: string, tags: Tags, lineNumbers: number[], sourceLines: string[]) => {
+  /** A configuration (without colour) that colour + price lines below it belong to, and the latest one-line entry. */
+  type ColorGroup = { model: Model; config: Config; tags: Tags; lineNumber: number; line: string };
+  let colorGroup: ColorGroup | null = null;
+  let lastOneLine: { model: Model; lineNumber: number } | null = null;
+
+  const emit = (model: Model, config: Config, digits: string, tags: Tags, lineNumbers: number[], sourceLines: string[], at?: number) => {
     const problems = [...model.problems, ...tags.problems];
     const priceMinor = priceToMinor(digits);
     if (priceMinor === null) problems.push("The price could not be read");
     if (!config.storage) problems.push("No storage is written (for example 256GB)");
-    const lineNumber = Math.min(...lineNumbers);
+    const lineNumber = at ?? Math.min(...lineNumbers);
     const sourceLine = sourceLines.length > 1 ? `${sourceLines.join(" · ")} (lines ${lineNumbers.join(", ")})` : sourceLines[0];
     const shared = {
       lineNumber,
@@ -271,6 +298,8 @@ export function parseTabletList(text: string, brands: BrandReference[]): ParsedT
 
       const bare = line.match(PRICE_ONLY);
       if (bare) {
+        colorGroup = null;
+        lastOneLine = null;
         const waiting = pending as Pending | null;
         if (waiting?.kind === "config") {
           if (heading && blockOrder === "price_first") {
@@ -295,11 +324,62 @@ export function parseTabletList(text: string, brands: BrandReference[]): ParsedT
       const price = splitPrice(line);
       const tags = liftTags(dashToSlash(price ? price.text : line));
       const config = readConfig(tags.rest);
+      const colors = config ? null : readColorOnly(tags.rest, brands);
+      const waitingNow = pending as Pending | null;
+
+      // "SkyBlue 397,000" / "Silver @402,000": one colour + price under the configuration above it.
+      if (colors && (price || waitingNow?.kind === "config" || colorGroup)) {
+        if (!price) {
+          flush();
+          colorGroup = null;
+          unread.push({ lineNumber, line, reason: "A colour without a price — not used; write the price on the same line (for example “Silver 402,000”)" });
+          return;
+        }
+        if (waitingNow?.kind === "config") {
+          if (waitingNow.config.colors.length) {
+            flush("This configuration already has a colour, and colour + price lines follow it — which price is for which colour is unclear");
+          } else {
+            colorGroup = { model: waitingNow.model, config: waitingNow.config, tags: waitingNow.tags, lineNumber: waitingNow.lineNumber, line: waitingNow.line };
+            pending = null;
+          }
+        } else flush();
+        const group = colorGroup as ColorGroup | null;
+        if (!group) {
+          unread.push({
+            lineNumber,
+            line,
+            reason: heading
+              ? `A colour and price under “${heading.baseTitle}”, but no RAM/storage is written above it — write it with the model (for example “Macbook Air M5 16-256Gb”)`
+              : "A colour and price without a model and RAM/storage above it — not used",
+          });
+          return;
+        }
+        const problems = [...group.tags.problems, ...tags.problems];
+        if (tags.condition && group.tags.condition && tags.condition !== group.tags.condition) problems.push(`New / Used on this line differs from line ${group.lineNumber}`);
+        if (tags.pta && group.tags.pta && tags.pta !== group.tags.pta) problems.push(`PTA on this line differs from line ${group.lineNumber}`);
+        const merged: Tags = { condition: tags.condition ?? group.tags.condition, pta: tags.pta ?? group.tags.pta, problems, rest: `${group.tags.rest} ${tags.rest}` };
+        emit(group.model, { ...group.config, colors }, price.digits, merged, [group.lineNumber, lineNumber], [group.line, line], lineNumber);
+        return;
+      }
+      colorGroup = null;
 
       if (config) {
         if (!heading) {
           flush();
-          unread.push({ lineNumber, line, reason: "A configuration without a model heading above it" });
+          const above = lastOneLine as { model: Model; lineNumber: number } | null;
+          if (above && price) {
+            // "6-256Gb @115,000" right under "Samsung Tab S10 Lite 6-128Gb@98,500": another configuration of that model.
+            const model: Model = { ...above.model, notes: [...above.model.notes, `Model “${above.model.baseTitle}” read from line ${above.lineNumber} above`] };
+            emit(model, config, price.digits, tags, [lineNumber], [line]);
+            return;
+          }
+          unread.push({
+            lineNumber,
+            line,
+            reason: above
+              ? `A configuration without a price under “${above.model.baseTitle}” — write the price on the same line (for example “6-256Gb @115,000”)`
+              : "A configuration without a model heading above it",
+          });
           return;
         }
         const model: Model = heading;
@@ -325,6 +405,7 @@ export function parseTabletList(text: string, brands: BrandReference[]): ParsedT
 
       flush();
       const read = readModel(tags.rest, lineNumber, tags);
+      lastOneLine = null;
       if (!read) {
         heading = null;
         unread.push({ lineNumber, line, reason: "Not understood: write a model (for example “Galaxy Tab A8 4/64; 43,000”) or a configuration with its price" });
@@ -335,6 +416,7 @@ export function parseTabletList(text: string, brands: BrandReference[]): ParsedT
         const own: Config = { ram: read.row.ram, storage: read.row.storage, colors: read.row.color ? readColors(read.row.color) : [] };
         heading = null;
         blockOrder = null;
+        lastOneLine = { model: read.model, lineNumber };
         if (price) emit(read.model, own, price.digits, { ...tags, rest: read.model.connectivityText }, [lineNumber], [line]);
         else pending = { kind: "config", lineNumber, line, model: read.model, config: own, tags: { ...tags, rest: read.model.connectivityText } };
         return;

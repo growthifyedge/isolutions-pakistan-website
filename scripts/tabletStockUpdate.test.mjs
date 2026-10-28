@@ -335,3 +335,139 @@ test("Update Website (offline): existing product updated and verified; new produ
   assert.equal(blocked.outcome, "blocked");
   assert.match(blocked.message, /not approved.*Nothing was written/);
 });
+
+// ---------------------------------------------------------------------------
+// Smart Paste: natural supplier / WhatsApp lists (Owner examples 2026-10-28)
+// ---------------------------------------------------------------------------
+
+const OWNER_MACBOOK = "Macbook Air M5 16-256Gb\n\nSkyBlue 397,000\nSilver @402,000\nMidnight @397,000";
+const OWNER_TABLETS = "Samsung A11 8-128Gb @59,000\n\nSamsung Tab S10 Lite 6-128Gb@98,500\n6-256Gb @115,000";
+const facts = (parsed) => parsed.lines.map((line) => [line.lineNumber, line.baseTitle, line.ram, line.storage, line.colorWritten, line.priceMinor / 100]);
+
+test("Smart Paste: Owner MacBook example — model + RAM/storage heading, then one colour + price per line", () => {
+  const parsed = parseTabletList(OWNER_MACBOOK, BRANDS);
+  assert.deepEqual(parsed.unread, []);
+  assert.deepEqual(facts(parsed), [
+    [3, "Apple MacBook Air M5", "16 GB", "256 GB", "Skyblue", 397000],
+    [4, "Apple MacBook Air M5", "16 GB", "256 GB", "Silver", 402000],
+    [5, "Apple MacBook Air M5", "16 GB", "256 GB", "Midnight", 397000],
+  ]);
+  // Three distinct variants of ONE new draft product; "Skyblue" is an unknown colour and waits for the Owner's "Keep".
+  const selection = select({ productType: "macbook", connectivity: null });
+  const held = compare(OWNER_MACBOOK, [], selection);
+  assert.deepEqual(kinds(held), ["attention", "new_product", "new_product"]);
+  assert.match(held.entries[0].reasons.join(" "), /“Skyblue” is not a known colour/);
+  const kept = compare(OWNER_MACBOOK, [], selection, { colors: { [held.entries[0].line.lineKey]: "Skyblue" }, newProducts: {} });
+  assert.deepEqual(kinds(kept), ["new_product", "new_product", "new_product"]);
+  const plan = buildTabletPlan(kept, []);
+  assert.equal(plan.products.length, 1);
+  assert.deepEqual(plan.products[0].payload.variants.map((item) => [item.ram, item.storage, item.color, item.price_minor / 100, item.stock, item.pta_status, item.warranty]), [
+    ["16 GB", "256 GB", "Skyblue", 397000, 20, "not_applicable", null],
+    ["16 GB", "256 GB", "Silver", 402000, 20, "not_applicable", null],
+    ["16 GB", "256 GB", "Midnight", 397000, 20, "not_applicable", null],
+  ]);
+});
+
+test("Smart Paste: Owner tablet example — one-line entries and a second storage under the same model", () => {
+  const parsed = parseTabletList(OWNER_TABLETS, BRANDS);
+  assert.deepEqual(parsed.unread, []);
+  assert.deepEqual(facts(parsed), [
+    [1, "Samsung A11", "8 GB", "128 GB", null, 59000],
+    [3, "Samsung Tab S10 Lite", "6 GB", "128 GB", null, 98500],
+    [4, "Samsung Tab S10 Lite", "6 GB", "256 GB", null, 115000],
+  ]);
+  assert.match(parsed.lines[2].notes.join(" "), /read from line 3 above/);
+  const comparison = compare(OWNER_TABLETS);
+  assert.deepEqual(kinds(comparison), ["new_product", "new_product", "new_product"]);
+  // Nothing guessed: colour and warranty stay blank; PTA comes from the Owner's WiFi choice.
+  const plan = buildTabletPlan(comparison, []);
+  assert.deepEqual(plan.products.map((item) => [item.productTitle, item.payload.variants.length]), [["Samsung A11", 1], ["Samsung Tab S10 Lite", 2]]);
+  assert.ok(plan.products.flatMap((item) => item.payload.variants).every((item) => item.color === null && item.warranty === null && item.pta_status === "not_applicable"));
+});
+
+test("Smart Paste: several products and configurations in one list, mixed separators and spacing", () => {
+  const list = [
+    "Macbook Air M5",
+    "16-256Gb",
+    "  SkyBlue   Rs 397,000",
+    "silver - 402,000",
+    "16/512GB",
+    "Midnight: 450,000",
+    "",
+    "Galaxy Tab S9 FE 8/128 @ 95,000",
+    "8GB-256GB @105,000",
+    "Lenovo Tab 4/64; 29,800",
+  ].join("\n");
+  const parsed = parseTabletList(list, BRANDS);
+  assert.deepEqual(parsed.unread, []);
+  assert.deepEqual(facts(parsed), [
+    [3, "Apple MacBook Air M5", "16 GB", "256 GB", "Skyblue", 397000],
+    [4, "Apple MacBook Air M5", "16 GB", "256 GB", "Silver", 402000],
+    [6, "Apple MacBook Air M5", "16 GB", "512 GB", "Midnight", 450000],
+    [8, "Samsung Galaxy Tab S9 FE", "8 GB", "128 GB", null, 95000],
+    [9, "Samsung Galaxy Tab S9 FE", "8 GB", "256 GB", null, 105000],
+    [10, "Lenovo Tab", "4 GB", "64 GB", null, 29800],
+  ]);
+});
+
+test("Smart Paste: colours split on '/' share the line's price; two colours with different prices stay separate", () => {
+  const parsed = parseTabletList("iPad Air M3 8/128\nBlue/Grey 210,000\nPurple 215,000", BRANDS);
+  assert.deepEqual(parsed.unread, []);
+  assert.deepEqual(facts(parsed).map((row) => [row[4], row[5]]), [["Blue", 210000], ["Grey", 210000], ["Purple", 215000]]);
+});
+
+test("Smart Paste: missing price / storage / model and unclear grouping wait for the Owner (never guessed)", () => {
+  const reasonsOf = (text) => parseTabletList(text, BRANDS).unread.map((item) => `${item.line} => ${item.reason}`).join("\n");
+  // A colour without a price.
+  assert.match(reasonsOf("Macbook Air M5 16-256Gb\nSilver\nMidnight 397,000"), /^Silver => A colour without a price/m);
+  // A colour + price under a model heading without RAM/storage.
+  assert.match(reasonsOf("Macbook Air M5\nSilver 402,000"), /^Silver 402,000 => A colour and price under “Apple MacBook Air M5”, but no RAM\/storage/m);
+  // A colour + price with nothing above it.
+  assert.match(reasonsOf("Silver 402,000"), /^Silver 402,000 => A colour and price without a model and RAM\/storage/m);
+  // The configuration already has a colour, then colour + price lines: which price is for which colour is unclear.
+  const twice = reasonsOf("Macbook Air M5 16-256Gb Midnight\nSilver 402,000");
+  assert.match(twice, /^Macbook Air M5 16-256Gb Midnight => This configuration already has a colour/m);
+  assert.match(twice, /^Silver 402,000 => A colour and price/m);
+  // A storage line without a price under a one-line entry.
+  assert.match(reasonsOf("Samsung Tab S10 Lite 6-128Gb@98,500\n6-256Gb"), /^6-256Gb => A configuration without a price under “Samsung Tab S10 Lite”/m);
+  // A storage line with a price but no model anywhere above.
+  assert.match(reasonsOf("6-256Gb @115,000"), /^6-256Gb @115,000 => A configuration without a model heading above it/m);
+  // A new model line breaks the colour group: its price never attaches to the previous model.
+  const parsed = parseTabletList("Macbook Air M5 16-256Gb\nSilver 402,000\nGalaxy Tab A9 @45,000", BRANDS);
+  assert.deepEqual(facts(parsed), [[2, "Apple MacBook Air M5", "16 GB", "256 GB", "Silver", 402000]]);
+  assert.match(parsed.unread.map((item) => item.reason).join(" "), /A price on a model line without RAM\/storage/);
+});
+
+test("Smart Paste: model words, brands and connectivity words are never read as colours", () => {
+  const parsed = parseTabletList("Macbook Air M5 16-256Gb\nLenovo 402,000\nWiFi 402,000\nPro 402,000", BRANDS);
+  assert.deepEqual(parsed.lines, []);
+  assert.ok(parsed.unread.length >= 3);
+});
+
+test("Smart Paste: the same colour twice (with two prices) waits as a duplicate", () => {
+  const comparison = compare("Macbook Air M5 16-256Gb\nSilver 397,000\nSilver 402,000", [], select({ productType: "macbook", connectivity: null }));
+  assert.deepEqual(kinds(comparison), ["attention", "attention"]);
+  assert.match(comparison.entries[0].reasons.join(" "), /listed more than once \(lines 2, 3\)/);
+});
+
+test("Smart Paste: Used + existing product — exact title, price only, stock kept, missing variants untouched", () => {
+  const macbook = (id, extra) => variant(id, { ram: "16 GB", storage: "256 GB", ptaStatus: "not_applicable", condition: "used", stock: 3, ...extra });
+  const catalog = [
+    product("m1", "Apple MacBook Air M5 (Used)", {
+      brand: "Apple", category: "Laptops", categorySlug: "laptops",
+      variants: [macbook("m1-v001", { color: "Silver", priceMinor: 39000000 }), macbook("m1-v002", { color: "Starlight", priceMinor: 38000000 })],
+    }),
+  ];
+  const comparison = compare("Macbook Air M5 16-256Gb Used\nSilver @402,000\nMidnight 397,000", catalog, select({ productType: "macbook", condition: null, connectivity: null }));
+  assert.deepEqual(comparison.entries.map((entry) => [entry.productTitle, entry.kind, entry.stock]), [
+    ["Apple MacBook Air M5 (Used)", "price_change", 3],
+    ["Apple MacBook Air M5 (Used)", "new_variant", null],
+  ]);
+  const plan = buildTabletPlan(comparison, catalog);
+  assert.deepEqual(plan.products[0].payload.steps.map((step) => step.kind), ["price", "add_variant"]);
+  assert.ok(!plan.products[0].payload.steps.some((step) => step.variant_id === "m1-v002"));
+  // The same list as New never touches the Used product.
+  const asNew = compare("Macbook Air M5 16-256Gb\nSilver @402,000", catalog, select({ productType: "macbook", connectivity: null }));
+  assert.equal(asNew.entries[0].productTitle, "Apple MacBook Air M5");
+  assert.notEqual(asNew.entries[0].productId, "m1");
+});
