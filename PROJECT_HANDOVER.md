@@ -1,27 +1,28 @@
 # iSolutions Pakistan Website — Project Handover
 
-**Prepared:** 2026-10-19 · **Fully updated 2026-10-26** by Claude Code (Developer) for fresh Claude Code and GPT Analyzer chats.
-**Verified from:** git, the code, read-only database queries on PROD and DEV, read-only public RPC calls and HTTP/bundle checks of the live DEV and PROD sites (latest 2026-10-26).
+**Prepared:** 2026-10-19 · **Fully updated 2026-10-26** · **Updated 2026-10-29** (Smart Paste rollout, PROD tablet/MacBook uploads, next task = specifications) by Claude Code (Developer) for fresh Claude Code and GPT Analyzer chats.
+**Verified from:** git, the code, read-only database queries on PROD and DEV, read-only public RPC calls and HTTP/bundle checks of the live DEV and PROD sites (latest 2026-10-28).
 Items marked **(Owner-reported)** were done or seen by the Owner, not by Claude. No passwords, keys or secrets are in this file.
 
 **Source priority:** this file > `GPT_PROJECT_BRIEF.md` > `GPT_ANALYZER_HANDOFF.md` > `CLAUDE_HANDOFF.md` (old long history, last updated 2026-10-16). Claude's auto-memory folder also holds older project notes — they are **not** authoritative (Owner rule: no project facts in long-term memory).
 
 ---
 
-## 0. Status at a glance (2026-10-26)
+## 0. Status at a glance (2026-10-29)
 
 | Area | Status |
 |---|---|
-| Git | Branch `feature/checkout-orders-shipping`, code HEAD **`2dd05bd`** + this handover commit, pushed (remote = local, verified). Not merged to `master` |
-| Uncommitted | **36 entries** — preserve them (§3) |
+| Git | Branch `feature/checkout-orders-shipping`, code HEAD **`228553e`** (Smart Paste parser), pushed (origin = `228553e`, verified 2026-10-28). Not merged to `master`. This 2026-10-29 handover update is **local and uncommitted** until the Owner approves a commit |
+| Uncommitted | **36 original entries** — preserve them (§3) — plus the 3 edited handover docs until they are committed (`git status --short` = 39 while uncommitted; 36 after a handover commit) |
 | Supabase CLI | **Linked to PROD `nlxfwppywxumymbjkvwt`.** DEV = `acwatgxkcyrdxpcljxjb` |
-| Migration history | **DEV 66 and PROD 66**, both ending at `202610270001` (verified 2026-10-26) |
-| Hosting | **PROD runs `2dd05bd`** (`index-DhIwDqh5.js`); **DEV runs `1e0add3`** (`index-DjbLI84U.js`). Both clean exports, environment guard PASS, served files byte-identical to the builds (§4) |
+| Migration history | **DEV 66 and PROD 66**, both ending at `202610270001`. PROD re-verified 2026-10-28 (`supabase migration list`, local = remote). No migration since 2026-10-26 |
+| Hosting | **DEV and PROD both run `228553e`** — DEV `index-C21Oa5e_.js`, PROD `index-DD89arGQ.js`. Clean exports, environment guard PASS, served files byte-identical to the builds (verified 2026-10-28, §4) |
 | Gadgets Stock Update | **Live DEV + PROD** with writes on DEV + PROD; Gadgets PDP V3 and Home Gadgets collection live (§5A) |
-| Tablets & MacBooks Stock Update | **Live DEV + PROD** with writes on DEV + PROD; **DEV Owner real-write QA PASS** (§5B) |
+| Tablets & MacBooks Stock Update | **Live DEV + PROD** with writes; **Smart Paste parser live (`228553e`) — CLOSED**; Owner PROD real-data QA PASS for MacBook and Tablets (Owner-reported) (§5B) |
+| PROD tablets / MacBooks | Owner uploaded Apple MacBook Air M5, Samsung A11, Samsung Tab S10 Lite (§4, §5B.1). MacBook storage corrected to 512 GB by the Owner — **not yet read-back verified by Claude** |
 | Used iPhones | All 9 published on PROD |
 | Android / iPhone Stock Update, images, Spec Upload, Bulk Import | Complete. Do not redo |
-| **Next step** | **Owner uploads products (gadgets, tablets, MacBooks) on PROD, adds images and publishes** (§11). Claude writes nothing on PROD without approval |
+| **Next task** | **Officially verified specifications** for MacBook Air M5 16/512, Samsung Galaxy Tab A11 8/128, Samsung Galaxy Tab S10 Lite 6/128 + 6/256 (§11 #1). No spec upload or PROD write without Owner approval |
 
 ---
 
@@ -80,12 +81,14 @@ Items marked **(Owner-reported)** were done or seen by the Owner, not by Claude.
 
 ---
 
-## 3. Git (verified 2026-10-26)
+## 3. Git (verified 2026-10-28)
 
-- **Code HEAD:** `2dd05bd` — "feat: enable Tablets & MacBooks Stock Update writes on PROD". The handover-docs commit sits on top of it (same branch, pushed). `origin/feature/checkout-orders-shipping` = local.
+- **Code HEAD:** `228553e` — "feat: support natural supplier lists in tablet and MacBook stock update" (on top of the 2026-10-26 handover-docs commit `bdc409c`). `origin/feature/checkout-orders-shipping` = `228553e`. The 2026-10-29 handover doc edits are uncommitted.
 
 | Commit | What |
 |---|---|
+| `228553e` | **Tablets & MacBooks Smart Paste parser** — only `src/lib/tabletStockUpdate.ts` + `scripts/tabletStockUpdate.test.mjs` (committed via temporary index). No migration, no RPC change |
+| `bdc409c` | Handover docs after Gadgets and Tablets & MacBooks PROD rollout |
 | `2dd05bd` | Tablets & MacBooks writes allowed on PROD (`TABLET_WRITE_ENVIRONMENTS = ["development", "production"]`) |
 | `1e0add3` | **Tablets & MacBooks Stock Update** (13 paths): `src/lib/tabletStockUpdate.ts`, `tabletStockApply.ts`, `tabletStockApplyDb.ts`, `src/admin/TabletStockUpdate.tsx`, migration `202610270001`, `src/lib/collections.ts`, `src/StorefrontApp.tsx` (menu), `src/admin/AdminApp.tsx` (tablet nav + route hunks only), 3 new tests, 2 validator tests updated to the new rule |
 | `d3dd1de` | Gadgets Stock Update writes allowed on PROD |
@@ -104,13 +107,13 @@ Items marked **(Owner-reported)** were done or seen by the Owner, not by Claude.
 | `649ba8b` / `ba6a4e1` | iPhone Stock Update (write DEV + PROD; migrations `202610210001`, `202610210002`) |
 | `5ad4a4d` | Android Stock Update (complete) |
 
-**36 uncommitted entries (verified 2026-10-26). Preserve them.**
+**36 uncommitted entries (verified 2026-10-26; still exactly these 36 after the `228553e` commit, verified 2026-10-28). Preserve them.**
 - **Modified tracked (5):**
   - `CLAUDE_HANDOFF.md`
   - `src/admin/AdminApp.tsx` — only the deprecated `/admin/specs-images` notice (+19)
   - `src/admin/admin.css` — deprecated preview / image-preview / C75x / batch / owner-decision styles
   - `scripts/specificationBulkUpload.test.mjs` — one extra check that reads the deprecated `fetch-official-sources.mjs`
-  - `scripts/securityRls.test.mjs` — one-line local change from the deprecated official-source work
+  - `scripts/securityRls.test.mjs` — one-line local change from the deprecated official-source work. **Known stale test (not a security issue):** its "authenticated" RPC list lacks `apply_gadget_stock_product` and `apply_tablet_stock_product`, so `SECURITY DEFINER RPCs callable by visitors…` fails (full suite 1097/1098). Reproduced on a clean export of `bdc409c` (before Smart Paste); the anon assertion passes. Not modified — fixing it needs its own approval
 - **Untracked (31):** deprecated official-source scraping (`src/lib/official*.ts`, `src/lib/robotsTxt.ts`, `src/admin/Official*.tsx`, `src/data/officialSourceSnapshots.json`, `scripts/fetch-official-sources.mjs` + tests); Realme C75x DEV scaffolding (`src/lib/realmeC75x*.ts`, `src/admin/RealmeC75x*.tsx`, `src/data/realmeC75xOfficialSpecs.json`, `scripts/fetch-realme-c75x-specs.mjs` + tests).
 - **Ignored local files (not counted):** `scratch/used-iphone-specs/` (excluded via `.git/info/exclude`); `.claude/launch.json` (gitignored; local preview entries).
 
@@ -126,16 +129,30 @@ Items marked **(Owner-reported)** were done or seen by the Owner, not by Claude.
 
 **PROD `nlxfwppywxumymbjkvwt`** (read-only, 2026-10-26, before and after `202610270001` — identical counts and row fingerprints): **112 products** (91 published + 17 draft phones, 4 published gadgets), **401 variants**, **285 images**, 0 orders. No tablet or laptop product yet. Since 2026-10-24 the only PROD catalog changes were the Owner's (Used iPhones published; 4 gadgets added and published — Owner-reported). Claude has made **no PROD product write**.
 
+**PROD tablets / MacBooks (2026-10-28 onward):**
+- **Apple MacBook Air M5** — **Claude-verified (read-only PROD query, 2026-10-28, before the Owner's correction):** product `721cab16-78cf-4894-b4d6-f96f6a49e8d3`, slug `apple-macbook-air-m5`, category `laptops`, brand Apple, **published**, 1 primary product-level image (no variant images), 0 specs, 0 order items (PROD orders 0). Three variants, each 16 GB / **256 GB**, New, PTA Not Applicable, Karachi only, warranty NULL, active, stock 20 (one +20 movement each):
+
+  | SKU | Colour | Variant ID | Price |
+  |---|---|---|---|
+  | MC001 | Skyblue | `0929db0c-e1eb-4104-b89a-337ffef8c5d4` | Rs 397,000 |
+  | MC002 | Silver | `805104e2-10e6-42b0-b994-1ce59466a134` | Rs 402,000 |
+  | MC003 | Midnight | `e4c0a104-0f50-4fd6-add8-1a08cd339df4` | Rs 397,000 |
+
+  No 512 GB variant existed. **Owner-reported (2026-10-28):** the 256 GB storage was wrong; the Owner corrected all three variants in PROD Admin (variant edit → Storage) to **16 GB / 512 GB** — "Done". Claude's recommended method was this in-place Admin edit (same IDs/SKUs; the Admin save sends no price or stock). **The correction has not yet been read-back verified by Claude** — verify read-only before relying on it.
+- **Samsung A11** — Owner-reported: created via Tablets & MacBooks Stock Update; 8 GB / 128 GB, Rs 59,000, Cellular — PTA Approved. Not verified by Claude (title, SKU, publication status, stock unknown to Claude).
+- **Samsung Tab S10 Lite** — Owner-reported: created; 6 GB / 128 GB Rs 98,500 and 6 GB / 256 GB Rs 115,000, Cellular — PTA Approved. Not verified by Claude.
+- PROD public REST counts (anon, 2026-10-28, after the deploy): 98 visible products, 306 visible variants. No full read-only snapshot was taken this session — do not compare with the 2026-10-26 totals above as if they were the same measure.
+
 **DEV `acwatgxkcyrdxpcljxjb`** (read-only, 2026-10-26, before `202610270001`): 142 products (4 published gadgets + 1 draft gadget "Tecno Watch 3"; 133 phones, 3 published; 4 tablet drafts with condition `unknown`), 446 variants, 220 images, 8 orders. **After that: the Owner created "Apple MacBook Air M5" through Tablets & MacBooks Stock Update — draft, SKU MC001, stock 20, Rs 420,500 (Owner-reported DEV QA PASS).** DEV keeps 3 old Apple test drafts (MB003, MB311, MB312) — leave them.
 
-**Hosting (clean exports, guard PASS, served files byte-identical to the builds):**
+**Hosting (deployed 2026-10-28 from clean `git archive 228553e` exports, guard PASS, HTML + all 19 top-level asset files byte-identical to the builds):**
 
 | | Commit | Entry bundle | Admin chunk | Supabase in bundle |
 |---|---|---|---|---|
-| DEV | `1e0add3` | `index-DjbLI84U.js` | `AdminApp-C2lAm0hM.js` | DEV only |
-| PROD | `2dd05bd` | `index-DhIwDqh5.js` | `AdminApp-dMbswHlJ.js` | PROD only |
+| DEV | `228553e` | `index-C21Oa5e_.js` | `AdminApp-D6-Ah9Pr.js` | DEV only (the PROD ref appears only in the environment-table constant, no PROD URL) |
+| PROD | `228553e` | `index-DD89arGQ.js` | `AdminApp-Cq8oyAGO.js` | PROD only (0 DEV refs) |
 
-DEV is one commit behind PROD only by `2dd05bd` (adds `production` to the tablet write list — no effect on DEV). Live PROD admin chunk: iPhone, Gadgets and Tablets write lists all `["development","production"]`.
+DEV and PROD now run the same commit. iPhone, Gadgets and Tablets write lists are all `["development","production"]`. Previous builds: DEV `1e0add3` (`index-DjbLI84U.js`), PROD `2dd05bd` (`index-DhIwDqh5.js`).
 
 **Public catalog note:** `search_public_catalog` lists only products with an active brand, active category and at least one active variant; category filters match the slug exactly (children are not included). Pre-existing; unchanged.
 
@@ -194,12 +211,16 @@ DEV is one commit behind PROD only by `2dd05bd` (adds `production` to the tablet
 - **Page** `/admin/tablet-stock-update` (nav "Tablets & MacBooks"): choose **Product Type** (iPad / Tablet / MacBook), **Condition** (New / Used) and, for iPad/Tablet, **Connectivity** (WiFi Only / Cellular — PTA Approved / Cellular — Non-PTA) → Paste List → Check Changes → preview (New Products / New Variants / Price Updates / Show Again / Needs Review) → Update Website (confirm names the website). Writes allowed DEV + PROD.
 - **Category mapping (existing categories, no new ones):** iPad → `tablets` + Apple; other tablets → `tablets` (any brand except Apple); MacBook → `laptops` + Apple. **Windows laptops are never added.**
 - **List formats:** one line `Galaxy Tab A8 4/64; 43,000` (RAM/storage, optional colour, price after `;`, `@`, or a comma-grouped amount); or a block — model heading, then a price line and a configuration line in either order (Owner-confirmed: `Macbook Air M5 Now Available` / `420500` / `16-512Gb Midnight` = MacBook Air M5, 16 GB, 512 GB, Midnight, Rs 420,500). "Now Available" is the only announcement phrase removed. `16-512Gb` = 16 GB RAM / 512 GB.
+- **Smart Paste (`228553e`, live DEV + PROD — CLOSED):** natural supplier/WhatsApp lists are read as written: (a) model + RAM/storage heading without a price (`Macbook Air M5 16-256Gb`), then one **colour + price per line** (`SkyBlue 397,000`, `Silver @402,000`, `silver - 402,000`, `Midnight: 450,000`, `Rs …`; `Blue/Grey 210,000` = both colours one price); (b) one-line entries followed by **more storage lines of the same model with their own price** (`Samsung Tab S10 Lite 6-128Gb@98,500` / `6-256Gb @115,000`, noted "Model … read from line N above"); (c) config line under a model heading, then colour + price lines; `8GB-256GB` dash form; blank lines don't break a group. Needs Review (never guessed): colour without price; colour + price with no RAM/storage above; a configuration that already has a colour followed by colour lines; storage line without price; config with no model; brand/model/WiFi words never read as colours; duplicate colour lines; New/Used or PTA differing from the heading. Unknown colours (e.g. "Skyblue") still need the Owner's **Keep**. Compare/plan/write rules unchanged. Unit-less dash config (`8-128` without Gb) and typo units (`Gbb`) are not read — optional future work.
 - **Nothing guessed — Needs Review:** unknown brand (e.g. Docomo), two prices or configurations in a row, a block whose price/config order changes, a configuration without a model, missing storage, unclear connectivity (or WiFi vs Cellular conflict), product type mismatch (Apple on Tablet, non-Apple on iPad/MacBook, laptop words on Tablet), duplicate titles/lines, product in another category, a website variant that differs only by a blank RAM/colour, other-condition variants, look-alike new products (Owner confirms "This is a new product"), unknown colour (Owner "Keep").
 - **Rules:** New and Used separate products (Used title ends " (Used)"); exact-title matching only. Existing listed variant: price only, stock kept; hidden listed variant: shown again with the list price; missing variants/products untouched. New variant / new product: **draft**, stock **20**, **Karachi only**, warranty/grade/battery/cycles/SIM NULL, colour NULL when not written. PTA: WiFi → Not Applicable; Cellular → Owner-chosen Approved / Non-PTA; MacBook → Not Applicable. Variant identity = RAM + storage + colour + PTA + condition.
 - **Server:** `apply_tablet_stock_product` (migration `202610270001`) — one product per call, all or nothing; scope `tablets` or Apple `laptops` only; MacBook PTA must be Not Applicable; SKUs `IP###` (tablets) / `MC###` (MacBooks); read-back inside the transaction. New products via `apply_catalog_bulk_import_v2` (Create, draft). iPhone RPC untouched.
 - **Publishing:** warranty optional for tablets and Apple MacBooks (New + Used); PTA/condition/image still required; non-Apple laptops blocked.
 - **Storefront:** `/collections/laptops-tablets` (same URL) is now **"Tablets & MacBooks"**: iPad, Android Tablets, **MacBooks** (`?type=macbooks` = `laptops` + Apple; old `?type=laptops` shows the same MacBooks; a non-Apple brand link shows nothing). Menu and drawer renamed; Acer/HP/Dell/Lenovo laptop links removed. `/collections/macbook` and homepage cards unchanged.
-- **QA:** localhost (parser/plan 18 tests, RPC + validator on real migrations in PGlite 7 tests, collections 4 tests, Admin harness desktop/mobile); DEV migration + deploy verified; **Owner DEV real-write QA PASS** (MacBook Air M5, draft, MC001, stock 20, Rs 420,500 — Owner-reported).
+- **QA:** localhost (parser/plan 18 tests, RPC + validator on real migrations in PGlite 7 tests, collections 4 tests, Admin harness desktop/mobile); DEV migration + deploy verified; **Owner DEV real-write QA PASS** (MacBook Air M5, draft, MC001, stock 20, Rs 420,500 — Owner-reported). **Smart Paste:** tablet + RPC tests 33/33 PASS on a clean export of `228553e`; `build:dev` + `build:prod` PASS; DEV + PROD deployed and byte-verified 2026-10-28; **Owner PROD real-data QA PASS for MacBook and Tablets (Owner-reported).**
+
+### 5B.1 PROD products uploaded via this page
+See §4 (Apple MacBook Air M5 MC001–MC003, Samsung A11, Samsung Tab S10 Lite). Only the MacBook was read by Claude; the Samsung products are Owner-reported.
 
 ---
 
@@ -214,7 +235,8 @@ DEV is one commit behind PROD only by `2dd05bd` (adds `production` to the tablet
 7. **Bulk Import simplification** (`7968015`).
 8. **Gadgets Stock Update** + parser fix + Home Gadgets collection + **Gadgets PDP V3** — DEV + PROD (`1463f8d` … `d3dd1de`, migration `202610260001`).
 9. **Tablets & MacBooks Stock Update** + storefront collection — DEV + PROD (`1e0add3`, `2dd05bd`, migration `202610270001`), Owner DEV QA PASS.
-10. Audits done — don't repeat: all Android audits; iPhone DEV/PROD verifications; image architecture review; specification workflow audit; Used iPhone readiness/spec verification; iPhone PDP verification; PDP colour-image audit; image-sizing analysis; Bulk Import necessity review; Gadgets DEV/PROD migration snapshots; Tablets & MacBooks read-only review, DEV/PROD migration snapshots and targeted tests (47/47).
+10. **Tablets & MacBooks Smart Paste parser** — DEV + PROD (`228553e`), Owner PROD QA PASS. CLOSED.
+11. Audits done — don't repeat: Smart Paste localhost/DEV/PROD verification and the `securityRls` failure classification (2026-10-28); all Android audits; iPhone DEV/PROD verifications; image architecture review; specification workflow audit; Used iPhone readiness/spec verification; iPhone PDP verification; PDP colour-image audit; image-sizing analysis; Bulk Import necessity review; Gadgets DEV/PROD migration snapshots; Tablets & MacBooks read-only review, DEV/PROD migration snapshots and targeted tests (47/47).
 
 ---
 
@@ -239,7 +261,8 @@ DEV is one commit behind PROD only by `2dd05bd` (adds `production` to the tablet
 - **Storage:** `product_specifications` (section, label, value, sort_order; unique per product + section + label). Customers see specs only on published products.
 - **Spec Upload (`/admin/spec-upload`, all categories):** Download Template → fill → upload (checked, nothing saved) → **Save Specifications**. Columns: Product Name · Product Slug or Product ID · Section · Label · Value. Exact matching only. Per-product all-or-nothing save via `apply_product_specifications`. PROD needs the typed phrase `APPLY <n> SPECS`.
 - **Stock Updates never create specifications.** Tablet/MacBook specs only from exact verified official sources with Owner approval, through Spec Upload.
-- **PROD status:** 943 Android + 105 Used iPhone = **1,048** (verified 2026-10-24).
+- **PROD status:** 943 Android + 105 Used iPhone = **1,048** (verified 2026-10-24). Apple MacBook Air M5 had **0 specs** (verified 2026-10-28); Samsung A11 / Tab S10 Lite specs not checked by Claude (none were uploaded by Claude).
+- **Next spec task:** §11 #1.
 
 ---
 
@@ -268,11 +291,17 @@ See §5A. Gadgets only; uses `src/lib/pdpDescription.ts` (`descriptionParagraphs
 
 ## 11. Pending work (each step needs separate Owner approval)
 
-1. **Owner: upload products on PROD** through the Stock Update pages — gadgets (Gadgets Stock), iPads/tablets/MacBooks (Tablets & MacBooks) — then add primary images (Admin Media) and publish. Claude does no PROD product write.
-2. **Owner: specifications** for tablets/MacBooks only from verified official sources, via Spec Upload (separate approval).
+1. **NEXT TASK — officially verified specifications** (prepare only; upload needs separate Owner approval):
+   1. Apple MacBook Air M5 — 16 GB / 512 GB.
+   2. Samsung Galaxy Tab A11 — 8 GB / 128 GB.
+   3. Samsung Galaxy Tab S10 Lite — 6 GB / 128 GB and 6 GB / 256 GB.
+   - Verify the exact model and configuration on the official manufacturer source. Earlier research flagged configuration mismatches, **especially Tab S10 Lite 6 GB / 256 GB** — never substitute another configuration; report a mismatch to the Owner.
+   - Missing or unverified facts stay blank. Use the existing combined Excel **Spec Upload** workflow (§8). No spec upload or PROD write without explicit Owner approval.
+   - First, read-only: confirm the exact PROD titles/slugs/variants of these products (the Samsung products and the MacBook 512 GB correction are Owner-reported, not yet verified by Claude).
+2. **Owner:** continue PROD uploads through the Stock Update pages, add primary images (Admin Media) and publish. Claude does no PROD product write.
 3. Owner visual checks on live PROD (Claude's browser is blocked on live hosts): Gadgets PDP V3 and Tablets & MacBooks pages/collection with real data; iPhone Product Information block; colour ↔ image alignment.
 4. Optional, Owner: iPhone 13 "pink" image association; verified SIM / Battery Health in Admin; replace low-resolution iPhone images.
-5. Later: DEV tablet drafts with `unknown` condition (held by the Stock Update; no automatic cleanup), Android drafts (17 on PROD without images/specs), image type/rights/labels, A57 naming, Edge 50 Ultra colours, removal of unmounted legacy Bulk Import files and the deprecated code in the 36 entries, optionally retire `CLAUDE_HANDOFF.md`, optionally redeploy DEV from `2dd05bd` (no functional difference on DEV).
+5. Later: DEV tablet drafts with `unknown` condition (held by the Stock Update; no automatic cleanup), Android drafts (17 on PROD without images/specs), image type/rights/labels, A57 naming, Edge 50 Ultra colours, removal of unmounted legacy Bulk Import files and the deprecated code in the 36 entries, optionally retire `CLAUDE_HANDOFF.md`; fix the stale `securityRls.test.mjs` RPC list (separate approval); optional Smart Paste typo handling (e.g. `Gbb`) — not a blocker.
 
 ---
 
@@ -307,18 +336,22 @@ The Owner chose **per-category Stock Update pages** in Admin Studio so the websi
 | 19 | Bulk Import can create a non-Apple Laptop draft | Cannot be published (validator); Stock Update refuses it |
 | 20 | DEV has 4 tablet drafts with condition `unknown` | Held by Tablets & MacBooks Stock Update; no automatic cleanup |
 | 21 | Tablet titles get the shared reader's brand prefix ("Samsung Galaxy Tab A8") | An existing product titled differently is not an exact match → new product / look-alike confirmation |
+| 22 | `securityRls.test.mjs` authenticated RPC list is stale (lacks gadget + tablet RPCs) | Pre-existing (reproduced on `bdc409c`); not a security regression; anon list passes. Fix only with approval |
+| 23 | Smart Paste does not read typo units (`Gbb`) or unit-less dash configs (`8-128`) | Such lines go to Needs Review; optional future work |
+| 24 | MacBook Air M5 512 GB correction and Samsung A11 / Tab S10 Lite facts are Owner-reported | Verify read-only before using them in specs |
+| 25 | The PROD Samsung titles may be "Samsung A11" (as pasted) rather than "Samsung Galaxy Tab A11" | Unverified — check the exact title before spec matching (Spec Upload matches exactly) |
 
 ---
 
 ## 14. How to start a fresh Claude Code chat
 
-First commands (read-only): `git status --short` (expect **36**), `git log --oneline -3` (expect the handover-docs commit on top of **`2dd05bd`**), `cat supabase/.temp/project-ref` (expect PROD **`nlxfwppywxumymbjkvwt`**). If anything differs, report it to the Owner before doing anything.
+First commands (read-only): `git status --short` (expect **36**, or **39** if the 2026-10-29 handover doc edits are still uncommitted), `git log --oneline -3` (expect **`228553e`**, or a handover-docs commit on top of it), `cat supabase/.temp/project-ref` (expect PROD **`nlxfwppywxumymbjkvwt`**). If anything differs, report it to the Owner before doing anything.
 
 ```text
-Continue the iSolutions Pakistan Website project. First read PROJECT_HANDOVER.md (updated 2026-10-26), then AGENTS.md.
+Continue the iSolutions Pakistan Website project. First read PROJECT_HANDOVER.md (updated 2026-10-29), then AGENTS.md.
 Roles: I am the Owner (final authority), you are the sole Developer, ChatGPT is the Analyzer/QA.
 Rules: short Roman Urdu, one step at a time; no coding without my approval; localhost → my approval → DEV → PROD; every DB write, migration, commit, push and deploy needs my explicit approval in that message; never guess product facts; preserve uncommitted changes; don't repeat completed work or audits; never bypass a safety block; don't save project information to long-term memory.
-Complete on DEV + PROD — do not redo: Android + iPhone Stock Update, manual image upload, Spec Upload, iPhone PDP, 9 Used iPhones published, PDP image fixes, Bulk Import Create-only, Gadgets Stock Update + Gadgets PDP V3 + Home Gadgets, Tablets & MacBooks Stock Update + collection (migrations 202610260001 and 202610270001; history 66 on DEV and PROD).
-Start with read-only checks only: git status (expect 36 entries), HEAD = handover commit on top of 2dd05bd, supabase/.temp/project-ref (PROD nlxfwppywxumymbjkvwt).
-Next: I upload products on PROD and publish them. Wait for my instruction.
+Complete on DEV + PROD — do not redo: Android + iPhone Stock Update, manual image upload, Spec Upload, iPhone PDP, 9 Used iPhones published, PDP image fixes, Bulk Import Create-only, Gadgets Stock Update + Gadgets PDP V3 + Home Gadgets, Tablets & MacBooks Stock Update + collection + Smart Paste parser (228553e, DEV + PROD) (migrations 202610260001 and 202610270001; history 66 on DEV and PROD).
+Start with read-only checks only: git status (expect 36 entries, or 39 if the handover docs are uncommitted), HEAD = 228553e (or a handover-docs commit on top), supabase/.temp/project-ref (PROD nlxfwppywxumymbjkvwt).
+Next task: officially verified specifications for MacBook Air M5 16/512, Samsung Galaxy Tab A11 8/128, Samsung Galaxy Tab S10 Lite 6/128 + 6/256 (PROJECT_HANDOVER.md §11 #1). Verify exact configurations; blank stays blank; no upload without my approval. Wait for my instruction.
 ```
