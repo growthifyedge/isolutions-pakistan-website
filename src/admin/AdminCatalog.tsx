@@ -29,6 +29,8 @@ import {
 import { MediaManager } from "./MediaManager";
 import { commercialDbDeps } from "../lib/commercialDefaultsDb";
 import { commercialWriteTarget, planCommercialDefaults, runCommercialDefaults, type CommercialVariant } from "../lib/commercialDefaults";
+import { isDraft, pruneSelection, selectAllDrafts, toggleSelection } from "../lib/catalogBulkPublish";
+import { CatalogBulkPublish } from "./CatalogBulkPublish";
 
 type Option = {
   id: string;
@@ -142,22 +144,33 @@ export function Phase4ProductList() {
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
-  useEffect(() => {
+  // Draft products ticked for Bulk publish (ids; across categories).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const loadProducts = useCallback(async () => {
     if (!supabase) {
       setError("Supabase is not configured.");
       return;
     }
-    supabase
+    const { data, error } = await supabase
       .from("products")
       .select(
         "id,title,slug,publication_status,data_class,brand:brands(name),category:categories(name),product_variants(id,sku,storage_display,color_finish),product_media(is_primary,cloudinary_public_id)",
       )
-      .order("updated_at", { ascending: false })
-      .then(({ data, error }) => {
-        if (error) setError(error.message);
-        else setProducts((data ?? []) as unknown as ProductRow[]);
-      });
+      .order("updated_at", { ascending: false });
+    if (error) setError(error.message);
+    else {
+      const rows = (data ?? []) as unknown as ProductRow[];
+      setProducts(rows);
+      setSelected((current) => pruneSelection(current, rows));
+    }
   }, []);
+  useEffect(() => {
+    void loadProducts();
+  }, [loadProducts]);
+  const afterBulkPublish = useCallback(async () => {
+    setSelected(new Set());
+    await loadProducts();
+  }, [loadProducts]);
   // /admin/products?missing=images (linked after a Bulk Upload v2 import) lists products
   // that still need their primary image before they can be published.
   const missingImagesOnly =
@@ -168,6 +181,8 @@ export function Phase4ProductList() {
       (!missingImagesOnly ||
         !p.product_media.some((media) => media.is_primary && media.cloudinary_public_id)),
   );
+  const shownDrafts = shown.filter(isDraft);
+  const allShownDraftsSelected = shownDrafts.length > 0 && shownDrafts.every((p) => selected.has(p.id));
   return (
     <>
       <div className="admin-heading compact">
@@ -213,33 +228,73 @@ export function Phase4ProductList() {
           </div>
         </div>
       )}
+      <div className="catalog-bulk-bar">
+        <label>
+          <input
+            type="checkbox"
+            checked={allShownDraftsSelected}
+            disabled={shownDrafts.length === 0}
+            onChange={(e) =>
+              setSelected((current) => {
+                if (e.target.checked) return selectAllDrafts(current, shown);
+                const next = new Set(current);
+                shownDrafts.forEach((p) => next.delete(p.id));
+                return next;
+              })
+            }
+          />
+          Select all drafts ({shownDrafts.length} shown)
+        </label>
+        <span>
+          <strong>{selected.size}</strong> selected
+        </span>
+        <button type="button" className="admin-secondary" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>
+          Clear selection
+        </button>
+      </div>
+      <CatalogBulkPublish selected={selected} onPublished={afterBulkPublish} />
       <section className="product-table">
-        <div className="table-head">
-          <span>Product</span>
-          <span>Status</span>
-          <span>Variants</span>
-          <span>Class</span>
-          <span />
+        <div className="catalog-row catalog-row-head">
+          <span className="catalog-select" />
+          <div className="table-head">
+            <span>Product</span>
+            <span>Status</span>
+            <span>Variants</span>
+            <span>Class</span>
+            <span />
+          </div>
         </div>
         {shown.map((p) => (
-          <a href={`/admin/products/${p.id}`} className="table-row" key={p.id}>
-            <div className="admin-product-thumb">
-              <ShieldCheck />
-            </div>
-            <div className="table-product">
-              <strong>{p.title}</strong>
-              <span>
-                {p.brand?.name ?? "Unassigned"} ·{" "}
-                {p.category?.name ?? "Unassigned"}
-              </span>
-            </div>
-            <em className={`state ${p.publication_status}`}>
-              {p.publication_status}
-            </em>
-            <span>{p.product_variants.length} explicit</span>
-            <span>{p.data_class}</span>
-            <ChevronRight />
-          </a>
+          <div className={`catalog-row${selected.has(p.id) ? " selected" : ""}`} key={p.id}>
+            <span className="catalog-select">
+              {isDraft(p) && (
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${p.title} for bulk publish`}
+                  checked={selected.has(p.id)}
+                  onChange={(e) => setSelected((current) => toggleSelection(current, p, e.target.checked))}
+                />
+              )}
+            </span>
+            <a href={`/admin/products/${p.id}`} className="table-row">
+              <div className="admin-product-thumb">
+                <ShieldCheck />
+              </div>
+              <div className="table-product">
+                <strong>{p.title}</strong>
+                <span>
+                  {p.brand?.name ?? "Unassigned"} ·{" "}
+                  {p.category?.name ?? "Unassigned"}
+                </span>
+              </div>
+              <em className={`state ${p.publication_status}`}>
+                {p.publication_status}
+              </em>
+              <span>{p.product_variants.length} explicit</span>
+              <span>{p.data_class}</span>
+              <ChevronRight />
+            </a>
+          </div>
         ))}
       </section>
       <div className="table-foot">
