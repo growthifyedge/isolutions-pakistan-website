@@ -1,7 +1,7 @@
 # iSolutions Pakistan Website — Project Brief for ChatGPT (Analyzer)
 
-**Prepared:** 2026-10-18 · **Fully updated 2026-10-26** · **Updated 2026-10-29** by Claude Code (Developer) for the Owner.
-**Source of truth:** `PROJECT_HANDOVER.md` (updated 2026-10-29) wins on any conflict. Items marked **(Owner-reported)** were done or seen by the Owner, not by Claude.
+**Prepared:** 2026-10-18 · **Fully updated 2026-10-26** · **Updated 2026-10-29** · **Updated 2026-10-30** by Claude Code (Developer) for the Owner.
+**Source of truth:** `PROJECT_HANDOVER.md` (updated 2026-10-30) wins on any conflict. Items marked **(Owner-reported)** were done or seen by the Owner, not by Claude.
 **Purpose:** complete context for ChatGPT to act as **Analyzer / QA reviewer** in a fresh chat.
 
 ---
@@ -68,7 +68,9 @@
 | **Gadgets Stock Update + Gadgets PDP V3 + Home Gadgets collection** | **Live DEV + PROD, writes DEV + PROD** (`1463f8d` … `d3dd1de`, migration `202610260001`) |
 | **Tablets & MacBooks Stock Update + "Tablets & MacBooks" collection** | **Live DEV + PROD, writes DEV + PROD** (`1e0add3`, `2dd05bd`, migration `202610270001`); **Owner DEV real-write QA PASS** |
 | **Tablets & MacBooks Smart Paste parser** (natural supplier/WhatsApp lists) | **CLOSED — live DEV + PROD** (`228553e`, no migration); Owner PROD real-data QA PASS for MacBook and Tablets (Owner-reported) |
-| **Specifications for MacBook Air M5 16/512, Galaxy Tab A11 8/128, Galaxy Tab S10 Lite 6/128 + 6/256** | **NEXT TASK** (§7) |
+| **Tablet / MacBook specifications** (MacBook Air M5 8, Samsung A11 7, Samsung Tab S10 Lite 10 = 25 on PROD) + S10 Lite RAM correction | **CLOSED** — Claude read-only verified 2026-10-30; Owner screenshots checked (Owner-reported). No repeat research or upload |
+| **Admin Catalog Bulk Publish** (all categories) | **CLOSED — live DEV + PROD** (`704dc83`, no migration); Owner DEV + PROD QA PASS (Owner-reported) |
+| **Primary images + publishing for 5 PROD gadget drafts** (GD005–GD009) | **NEXT TASK** (§7) |
 | Customer accounts, card/installment gateways, promotions, commerce at scale, internal live chat | Not authorized |
 
 ---
@@ -90,23 +92,26 @@
 - **Gadgets PDP V3:** "About This Product" (Owner's text exactly), **Order on WhatsApp** (product, variant, quantity, price, link; no customer data, no website order), delivery card from the stored scope and checkout constants.
 - **PDP image browsing never changes storage, variant or price.**
 - **Bulk Import = Excel Create-only:** drafts; existing products never updated; PROD typed phrase `CREATE <n> PRODUCTS`.
+- **Bulk Publish (Admin → Catalog, all categories):** checkboxes on Draft rows only; Select all drafts; **Validate Selected** runs the existing server validator and never writes (Ready to Publish / Needs Review with exact reason); **Publish Selected** only Ready products, after a current validation, with a confirmation naming environment, count and products (PROD typed `PUBLISH <n>`). Each product is re-validated server-side right before its write (only `publication_status` changes; the `products_enforce_publication` trigger enforces it again); failures stay Draft and never block others. All category publishing rules come from the server validator.
 - **"100% Authentic — Official Product"** card wording stays unchanged on all products.
 
 ---
 
-## 6. Current state (2026-10-29; Claude-verified unless marked Owner-reported)
+## 6. Current state (2026-10-30; Claude-verified unless marked Owner-reported)
 
-**Git:** branch `feature/checkout-orders-shipping`, code HEAD **`228553e`** (Smart Paste parser: only `src/lib/tabletStockUpdate.ts` + its test), pushed (origin = `228553e`), not merged to `master`. **36 uncommitted entries** (deprecated official-source scraping, Realme C75x scaffolding, old `CLAUDE_HANDOFF.md`, deprecated `/admin/specs-images` notice in `AdminApp.tsx`, deprecated admin styles, two old test lines) — preserve. The 2026-10-29 handover doc edits are uncommitted until the Owner approves a commit.
-**Supabase CLI:** linked to **PROD**. **Migration history:** **DEV 66 and PROD 66** (last `202610270001`; PROD re-verified 2026-10-28). No migration for Smart Paste.
-**Hosting (2026-10-28):** **DEV and PROD both run `228553e`** — DEV `index-C21Oa5e_.js` / `AdminApp-D6-Ah9Pr.js`; PROD `index-DD89arGQ.js` / `AdminApp-Cq8oyAGO.js`. Clean exports, guard PASS, served files byte-identical; each wired only to its own Supabase. Tablet + RPC tests 33/33 PASS.
-**Known stale test:** `scripts/securityRls.test.mjs` (one of the 36) fails one assertion because its authenticated RPC list lacks the gadget + tablet RPCs; reproduced on the pre-Smart-Paste baseline `bdc409c`; not a security regression; not modified.
+**Git:** branch `feature/checkout-orders-shipping`, code HEAD **`704dc83`** (Admin Catalog Bulk Publish: `src/lib/catalogBulkPublish.ts`, `src/admin/CatalogBulkPublish.tsx`, `src/admin/AdminCatalog.tsx`, the Bulk Publish CSS block of `src/admin/admin.css`, `scripts/catalogBulkPublish.test.mjs`), pushed (origin = `704dc83`), not merged to `master`. **36 uncommitted entries** (deprecated official-source scraping, Realme C75x scaffolding, old `CLAUDE_HANDOFF.md`, deprecated `/admin/specs-images` notice in `AdminApp.tsx`, deprecated admin styles, two old test lines) — preserved through the `704dc83` commit; preserve them. The 2026-10-30 handover doc edits are uncommitted until the Owner approves a commit.
+**Supabase CLI:** linked to **PROD**. **Migration history:** **DEV 66 and PROD 66** (last `202610270001`). No migration for Smart Paste or Bulk Publish.
+**Hosting (2026-10-30):** **DEV and PROD both run `704dc83`** — DEV `index-Dy6lNz3x.js` / `AdminApp-BPbAmIRi.js`; PROD `index-BEfpA1IP.js` / `AdminApp-Ca7_0WNY.js`. Clean `git archive` exports, environment guard PASS (and BLOCKED for the wrong target), live HTML and bundles byte-identical to the tested builds; each wired only to its own Supabase. Bulk Publish tests 28/28 PASS; typecheck, lint, `build:dev`, `build:prod` PASS.
+**Known baseline test failures (outside scope, don't re-investigate):** in a clean export exactly 3 fail, identical before and after `704dc83` — the stale `securityRls.test.mjs` authenticated RPC list (lacks gadget + tablet RPCs; not a security regression) and two CRLF-only failures (`androidStockPhoneRpc.test.mjs`, `homepage_featured_products` in `phase4.test.mjs`).
 
-**PROD catalog:**
-- 2026-10-26 snapshot (Claude): 112 products, 401 variants, 285 images, 0 orders, no tablet/MacBook then.
-- **Apple MacBook Air M5** (Claude read-only, 2026-10-28): published; MC001 Skyblue Rs 397,000 · MC002 Silver Rs 402,000 · MC003 Midnight Rs 397,000; each 16 GB / 256 GB at that time, stock 20, New, PTA Not Applicable, Karachi only; 1 primary image; 0 specs; 0 orders. **Owner-reported:** all three corrected in Admin to **16 GB / 512 GB** — not yet read-back verified by Claude.
-- **Samsung A11** 8 GB / 128 GB Rs 59,000, Cellular PTA Approved — **Owner-reported** created.
-- **Samsung Tab S10 Lite** 6 GB / 128 GB Rs 98,500 and 6 GB / 256 GB Rs 115,000, Cellular PTA Approved — **Owner-reported** created.
-- Exact titles, SKUs and publication status of the Samsung products are not verified by Claude.
+**PROD catalog (Claude read-only, 2026-10-30):** 120 products = 98 published + 22 draft (17 Android + 5 gadgets); 0 orders.
+- **Apple MacBook Air M5** — published; MC001 Skyblue Rs 397,000 · MC002 Silver Rs 402,000 · MC003 Midnight Rs 397,000; all **16 GB / 512 GB** (Owner correction confirmed); stock 20 each; **8 specs**.
+- **Samsung A11** (exact PROD title) — published; IP001 8 GB / 128 GB Rs 59,000; stock 20; **7 specs**.
+- **Samsung Tab S10 Lite** (exact PROD title) — published; **IP002 6 GB / 128 GB** Rs 98,500 · **IP003 8 GB / 256 GB** Rs 115,000; stock 20 each; **10 specs**.
+- Compared with a read-only snapshot taken before the Owner's changes: prices, stock, media, SKUs and status unchanged; only the S10 Lite RAM values and the 25 specs changed. **Owner-reported:** Admin read-back and screenshots of the PROD variants and customer-facing spec sections checked. **Specifications task CLOSED.**
+- **5 new gadget drafts** (Owner-added 2026-10-29 via Gadgets Stock Update): GD005 PU Leather Passport Holder Rs 400 · GD006 Baby water play mat Rs 350 · GD007 Hair straightener Rs 900 · GD008 USB Dynamic Water Pattern Lamp 16 Colours with Remote Rs 950 · GD009 Kitchen Oil filter Pot 1.4 liter Rs 800 — each 1 variant, stock 20, nationwide, **0 images**, draft.
+
+**Bulk Publish QA (Owner-reported):** DEV — 136 Drafts selected → 55 Ready, 81 Needs Review; separate 3-product check → all 3 blocked (missing Primary Image). PROD — 3 new gadgets → 0 Ready, 3 Needs Review (missing Primary Image); Publish Selected (0) correctly disabled. No product published during QA.
 **DEV:** 4 published gadgets; 4 old tablet drafts with condition `unknown` (held, untouched); Owner QA MacBook Air M5 draft (MC001, Owner-reported).
 
 **Verification limits (be accurate):**
@@ -117,12 +122,11 @@
 
 ## 7. Pending work
 
-1. **NEXT TASK — officially verified specifications** for: Apple MacBook Air M5 16 GB / 512 GB; Samsung Galaxy Tab A11 8 GB / 128 GB; Samsung Galaxy Tab S10 Lite 6 GB / 128 GB and 6 GB / 256 GB.
-   - Exact model + configuration from the official manufacturer source. Earlier research flagged configuration mismatches, **especially Tab S10 Lite 6 GB / 256 GB** — never substitute another configuration; report mismatches to the Owner.
-   - Missing/unverified facts stay blank. Use the existing combined Excel **Spec Upload** workflow (exact title/slug matching).
-   - First a read-only check of the exact PROD titles/slugs/variants (Samsung products and the MacBook 512 GB fix are Owner-reported).
-   - No spec upload or PROD write without explicit Owner approval.
-2. Owner: further PROD uploads, primary images and publishing. No Claude PROD product write.
+1. **NEXT TASK — primary images + publishing for the 5 PROD gadget drafts** (GD005–GD009, §6):
+   - Owner uploads **actual verified primary images** (original-resolution, exact product) in **Admin → Media**. No automatic image discovery, scraping or publishing.
+   - Then Admin → Catalog → tick the drafts → **Validate Selected** → **Publish Selected** only for Ready products (PROD typed `PUBLISH <n>`). Needs Review products stay Draft.
+   - Claude: read-only checks only when the Owner asks; no PROD product write, upload or publish by Claude.
+2. Owner: further PROD uploads, primary images and publishing via Bulk Publish. No Claude PROD product write.
 3. Owner visual checks listed in §6.
 4. Optional: iPhone 13 pink image association; verified SIM / Battery Health; replace low-resolution iPhone images; fix the stale `securityRls.test.mjs` list (approval needed); Smart Paste typo handling (e.g. `Gbb`) — not a blocker.
 5. Later: DEV tablet drafts with `unknown` condition, Android drafts (17 on PROD), image type/rights/labels, A57 naming, Edge 50 Ultra colours, removal of unmounted legacy Bulk Import files and other deprecated code.
@@ -136,8 +140,9 @@
 - **Environment mix-up:** DEV and PROD SKUs differ; confirm the environment before any write.
 - **Mixed uncommitted files:** commit only approved lines through a temporary index; `AdminApp.tsx` still holds an unrelated uncommitted `/admin/specs-images` hunk.
 - **Bulk Import** can still create a non-Apple Laptop draft (it cannot be published).
-- **Titles:** Stock Updates match exact titles only; a product titled differently (e.g. without the brand prefix) is not matched. Spec Upload also matches exactly — the PROD Samsung title may be "Samsung A11" (as pasted), not "Samsung Galaxy Tab A11"; verify before preparing specs.
-- **Owner-reported vs verified:** treat the MacBook 512 GB correction and the Samsung tablet facts as Owner-reported until Claude reads them back.
+- **Titles:** Stock Updates and Spec Upload match exact titles only (e.g. the PROD titles are "Samsung A11", "Samsung Tab S10 Lite", "Kitchen Oil filter Pot 1.4 liter" — exactly as stored).
+- **Bulk Publish on DEV writes the real DEV database** (`npm run dev` and DEV hosting) — Validate Selected is always safe; Publish Selected only with Owner intent. A "Failed" result can also mean the write happened but the read-back failed — Validate again to see the true state.
+- **Owner-reported vs verified:** keep the label on every result; the Owner's Bulk Publish QA counts and screenshots are Owner-reported.
 - **Claude's safety check or browser policy may block actions** — stop and report, never bypass.
 
 ---
