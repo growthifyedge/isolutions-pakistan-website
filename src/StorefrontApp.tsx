@@ -3187,6 +3187,8 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
     : null;
   const gallery = product.media;
   const trimGallery = PDP_TRIMMED_GALLERY_SLUGS.has(product.slug);
+  // Mobile phones (Android + iPhone, New + Used) get the premium PDP styling; other categories keep theirs.
+  const isPhonePdp = product.category?.slug === "mobile-phones";
   const selectedMedia = gallery.find((item) => item.url === image) ?? gallery[0] ?? primaryMedia(product);
   const configurations = [...new Set(product.variants.map(configurationLabel))];
   const selectedConfiguration = configurationLabel(variant);
@@ -3333,9 +3335,57 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
     });
     setWishlisted(selected);
   };
+  // Phones render this after the purchase buttons (DOM order = visual and tab order); other categories keep it before them.
+  const frequentlyBoughtTogether = recommendations.length > 0 && (
+    <section className="pdp-fbt" aria-labelledby="pdp-fbt-title">
+      <h2 id="pdp-fbt-title">Frequently Bought Together</h2>
+      <div className="pdp-fbt-list">
+        {recommendations.map((item) => {
+          const itemVariant = item.variants[0];
+          const quickAddable = item.variants.length === 1 && itemVariant.quantity > 0;
+          const outOfStock = item.variants.every((candidate) => candidate.quantity <= 0);
+          const itemMedia = primaryMedia(item);
+          const itemCompareAt = itemVariant ? validCompareAt(itemVariant) : null;
+          const itemDiscount = itemVariant && itemCompareAt
+            ? Math.round(((itemCompareAt - itemVariant.priceMinor) / itemCompareAt) * 100)
+            : null;
+          const isAdded = addedRecommendationIds.includes(item.id);
+          return (
+            <article
+              className={`pdp-fbt-card${outOfStock ? " is-unavailable" : ""}${isAdded ? " is-added" : ""}`}
+              key={item.id}
+              role={quickAddable ? "button" : undefined}
+              tabIndex={quickAddable ? 0 : undefined}
+              aria-pressed={quickAddable ? isAdded : undefined}
+              aria-label={quickAddable ? (isAdded ? `Remove ${item.title} from cart` : `Add ${item.title} to cart`) : undefined}
+              onClick={quickAddable ? () => toggleRecommendationCart(item) : undefined}
+              onKeyDown={quickAddable ? (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  toggleRecommendationCart(item);
+                }
+              } : undefined}
+            >
+              <div className="pdp-fbt-image">
+                {itemMedia && <img src={cloudinaryDeliveryUrl(itemMedia.publicId, 320) || itemMedia.url} alt={itemMedia.alt} />}
+              </div>
+              {isAdded && <span className="pdp-fbt-added">Added</span>}
+              {(outOfStock || itemDiscount) && <span className="pdp-fbt-badge">{outOfStock ? "Sold Out" : `${itemDiscount}% Off`}</span>}
+              <div className="pdp-fbt-copy">
+                {item.brand && <small>{item.brand.name}</small>}
+                <span className="pdp-fbt-title">{item.title}</span>
+                {itemVariant && <div className="pdp-fbt-price"><strong>{formatPkrMinor(itemVariant.priceMinor)}</strong>{itemCompareAt && <del>{formatPkrMinor(itemCompareAt)}</del>}</div>}
+                <span className={outOfStock ? "unavailable" : ""}>{outOfStock ? "Out of stock" : "In stock"}</span>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
   return (
     <Layout taxonomy={taxonomy}>
-      <div className="pdp-page">
+      <div className={`pdp-page${isPhonePdp ? " pdp-page--phone" : ""}`}>
         <nav className="pdp-breadcrumbs container" aria-label="Breadcrumb">
           <a href="/">Home</a><ChevronRight />
           <a href={`/shop?category=${product.category.slug}`}>{product.category.name}</a><ChevronRight />
@@ -3384,7 +3434,7 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
             <div className="pdp-price">
               <strong>{formatPkrMinor(variant.priceMinor)}</strong>
               {compareAt && <del>{formatPkrMinor(compareAt)}</del>}
-              {discount !== null && <span className="pdp-discount">Save {discount}%</span>}
+              {discount !== null && (!isPhonePdp || discount > 0) && <span className="pdp-discount">Save {discount}%</span>}
             </div>
             <span className={`pdp-stock${variant.quantity > 0 ? "" : " unavailable"}`}>
               <i />{variant.quantity > 0 ? `Only ${variant.quantity} ${variant.quantity === 1 ? "unit" : "units"} left!` : "Out of stock"}
@@ -3483,53 +3533,7 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
                   <button type="button" onClick={() => setQuantity((current) => Math.min(cartLineLimit(variant.quantity), current + 1))} disabled={variant.quantity <= 0 || quantity >= cartLineLimit(variant.quantity)} aria-label="Increase quantity"><Plus /></button>
                 </div>
               </div>
-              {recommendations.length > 0 && (
-                <section className="pdp-fbt" aria-labelledby="pdp-fbt-title">
-                  <h2 id="pdp-fbt-title">Frequently Bought Together</h2>
-                  <div className="pdp-fbt-list">
-                    {recommendations.map((item) => {
-                      const itemVariant = item.variants[0];
-                      const quickAddable = item.variants.length === 1 && itemVariant.quantity > 0;
-                      const outOfStock = item.variants.every((candidate) => candidate.quantity <= 0);
-                      const itemMedia = primaryMedia(item);
-                      const itemCompareAt = itemVariant ? validCompareAt(itemVariant) : null;
-                      const itemDiscount = itemVariant && itemCompareAt
-                        ? Math.round(((itemCompareAt - itemVariant.priceMinor) / itemCompareAt) * 100)
-                        : null;
-                      const isAdded = addedRecommendationIds.includes(item.id);
-                      return (
-                        <article
-                          className={`pdp-fbt-card${outOfStock ? " is-unavailable" : ""}${isAdded ? " is-added" : ""}`}
-                          key={item.id}
-                          role={quickAddable ? "button" : undefined}
-                          tabIndex={quickAddable ? 0 : undefined}
-                          aria-pressed={quickAddable ? isAdded : undefined}
-                          aria-label={quickAddable ? (isAdded ? `Remove ${item.title} from cart` : `Add ${item.title} to cart`) : undefined}
-                          onClick={quickAddable ? () => toggleRecommendationCart(item) : undefined}
-                          onKeyDown={quickAddable ? (event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              toggleRecommendationCart(item);
-                            }
-                          } : undefined}
-                        >
-                          <div className="pdp-fbt-image">
-                            {itemMedia && <img src={cloudinaryDeliveryUrl(itemMedia.publicId, 320) || itemMedia.url} alt={itemMedia.alt} />}
-                          </div>
-                          {isAdded && <span className="pdp-fbt-added">Added</span>}
-                          {(outOfStock || itemDiscount) && <span className="pdp-fbt-badge">{outOfStock ? "Sold Out" : `${itemDiscount}% Off`}</span>}
-                          <div className="pdp-fbt-copy">
-                            {item.brand && <small>{item.brand.name}</small>}
-                            <span className="pdp-fbt-title">{item.title}</span>
-                            {itemVariant && <div className="pdp-fbt-price"><strong>{formatPkrMinor(itemVariant.priceMinor)}</strong>{itemCompareAt && <del>{formatPkrMinor(itemCompareAt)}</del>}</div>}
-                            <span className={outOfStock ? "unavailable" : ""}>{outOfStock ? "Out of stock" : "In stock"}</span>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                </section>
-              )}
+              {!isPhonePdp && frequentlyBoughtTogether}
               <div className="pdp-purchase-actions">
                 <button type="button" className="pdp-add-cart" disabled={variant.quantity <= 0} onClick={() => addSelectionToCart(false)}><ShoppingCart />Add to Cart</button>
                 <button type="button" className="pdp-buy-now" disabled={variant.quantity <= 0} onClick={() => addSelectionToCart(true)}>Buy Now</button>
@@ -3556,6 +3560,7 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
                 </section>
               )}
               <p className="pdp-purchase-feedback" role="status" aria-live="polite">{purchaseFeedback}</p>
+              {isPhonePdp && frequentlyBoughtTogether}
             </div>
           </div>
         </section>
