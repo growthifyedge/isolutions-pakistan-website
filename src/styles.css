@@ -4815,9 +4815,16 @@ body:has(.home-page) footer.storefront-footer {
   .storefront-footer-grid { padding-block:34px; gap:32px 20px; }
   .storefront-footer-brand .wordmark { width:72px; height:72px; }
   .storefront-footer-connect { grid-template-columns:1fr; gap:25px; }
-  .storefront-footer-payments > div { max-width:360px; }
+  /* Policies spans the row so its longest link stays on one line instead of leaving an empty half-row. */
+  .storefront-footer-links:has(#footer-policies-title) { grid-column:1 / -1; }
+  /* Fixed card height and artwork height: a percentage height on the image does not resolve in the auto-sized
+     grid row, so the 120x44 artwork scaled from its width and spilled past the card edges. */
+  .storefront-footer-payments > div { max-width:none; }
+  .storefront-payment-badge { height:52px; padding:0 10px; display:flex; align-items:center; justify-content:center; }
+  .storefront-payment-badge img { width:auto; height:40px; max-width:100%; }
   .storefront-footer-about { padding:23px 0; }
-  .storefront-footer-bottom { min-height:0; padding:18px 0 80px; flex-direction:column; align-items:center; gap:7px; text-align:center; }
+  /* Bottom space keeps the copyright lines clear of the floating WhatsApp button, including the device safe area. */
+  .storefront-footer-bottom { min-height:0; padding:18px 0 calc(84px + env(safe-area-inset-bottom)); flex-direction:column; align-items:center; gap:7px; text-align:center; text-wrap:balance; }
 }
 
 /* Contact page */
@@ -6289,7 +6296,7 @@ body:has(.home-page) .trustbar {
 
 @media (max-width: 600px) {
   .storefront-whatsapp-contact {
-    right: 16px;
+    right: max(16px, calc(12px + env(safe-area-inset-right)));
     bottom: max(16px, calc(12px + env(safe-area-inset-bottom)));
     width: 50px;
     height: 50px;

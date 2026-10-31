@@ -1156,7 +1156,7 @@ function Footer() {
                   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4.1" /><circle cx="17.4" cy="6.7" r="1" className="is-filled" /></svg>
                 </a>
                 <a href="https://www.youtube.com/@iSolutionOfficial" target="_blank" rel="noopener noreferrer" aria-label="YouTube">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8.1a3 3 0 0 0-2.1-2.2C17 5.4 12 5.4 12 5.4s-5 0-6.9.5A3 3 0 0 0 3 8.1a31 31 0 0 0-.5 3.9 31 31 0 0 0 .5 3.9 3 3 0 0 0 2.1 2.2c1.9.5 6.9.5 6.9.5s5 0 6.9-.5a3 3 0 0 0 2.1-2.2 31 31 0 0 0 .5-3.9 31 31 0 0 0-.5-3.9Z" /><path d="m10 15.2 5-3.2-5-3.2v6.4Z" className="is-filled" /></svg>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8.1a3 3 0 0 0-2.1-2.2C17 5.4 12 5.4 12 5.4s-5 0-6.9.5A3 3 0 0 0 3 8.1a31 31 0 0 0-.5 3.9 31 31 0 0 0 .5 3.9 3 3 0 0 0 2.1 2.2c1.9.5 6.9.5 6.9.5s5 0 6.9-.5a3 3 0 0 0 2.1-2.2 31 31 0 0 0 .5-3.9 31 31 0 0 0-.5-3.9ZM10 15.2l5-3.2-5-3.2v6.4Z" fillRule="evenodd" /></svg>
                 </a>
                 <a href="https://www.tiktok.com/@isolution_pakistan" target="_blank" rel="noopener noreferrer" aria-label="TikTok">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3c.4 2.2 1.7 3.6 4 4v3.5a8.3 8.3 0 0 1-4-1.3V16a6 6 0 1 1-5-5.9v3.7a2.5 2.5 0 1 0 1.5 2.2V3H15Z" /></svg>
