@@ -1,33 +1,34 @@
 # iSolutions Pakistan Website — Project Handover
 
-**Prepared:** 2026-10-19 · **Fully updated 2026-10-26** · **Updated 2026-10-29** (Smart Paste rollout, PROD tablet/MacBook uploads) · **Updated 2026-10-30** (tablet/MacBook specifications CLOSED, Admin Catalog Bulk Publish `704dc83` live DEV + PROD and CLOSED, 5 new PROD gadget drafts; next task = gadget primary images + Bulk Publish) · **Updated 2026-10-31** (Premium Mobile PDP `e63e639` live DEV + PROD and CLOSED; GD005–GD009 images + publishing CLOSED (Owner-reported); domain connection in progress; Owner catalog workflow decision) by Claude Code (Developer) for fresh Claude Code and GPT Analyzer chats.
-**Verified from:** git, the code, read-only database queries on PROD and DEV, read-only public RPC calls and HTTP/bundle checks of the live DEV and PROD sites (latest 2026-10-31: `e63e639` commit/push + live DEV and PROD bundle comparison; no database query on 2026-10-31).
+**Prepared:** 2026-10-19 · **Fully updated 2026-10-26** · **Updated 2026-10-29** (Smart Paste rollout, PROD tablet/MacBook uploads) · **Updated 2026-10-30** (tablet/MacBook specifications CLOSED, Admin Catalog Bulk Publish `704dc83` live DEV + PROD and CLOSED, 5 new PROD gadget drafts; next task = gadget primary images + Bulk Publish) · **Updated 2026-10-31** (Premium Mobile PDP `e63e639` live DEV + PROD and CLOSED; GD005–GD009 images + publishing CLOSED (Owner-reported); domain connection in progress; Owner catalog workflow decision) · **Updated 2026-11-01** (Mobile footer + YouTube icon + Feedback-4 `5b32024` live DEV + PROD and CLOSED; root domain `isolutionspakistan.com` connected to Firebase PROD; next task = Mobile Phones Brand Collections, paused on an Owner decision) by Claude Code (Developer) for fresh Claude Code and GPT Analyzer chats.
+**Verified from:** git, the code, read-only database queries on PROD and DEV, read-only public RPC calls and HTTP/bundle checks of the live DEV and PROD sites (latest 2026-11-01: `5b32024` commit/push, clean-export DEV + PROD deploys, live file checks on DEV, PROD and `isolutionspakistan.com`, public DNS lookups via 8.8.8.8; no database query since 2026-10-30).
 Items marked **(Owner-reported)** were done or seen by the Owner, not by Claude. No passwords, keys or secrets are in this file.
 
 **Source priority:** this file > `GPT_PROJECT_BRIEF.md` > `GPT_ANALYZER_HANDOFF.md` > `CLAUDE_HANDOFF.md` (old long history, last updated 2026-10-16). Claude's auto-memory folder also holds older project notes — they are **not** authoritative (Owner rule: no project facts in long-term memory).
 
 ---
 
-## 0. Status at a glance (2026-10-31)
+## 0. Status at a glance (2026-11-01)
 
 | Area | Status |
 |---|---|
-| Git | Branch `feature/checkout-orders-shipping`, HEAD **`e63e639`** (Premium Mobile PDP) on top of the handover-docs commit `c7e63da`; pushed — local and origin both `e63e639` (verified 2026-10-31), no staged changes. Not merged to `master`. This 2026-10-31 handover update is **local and uncommitted** until the Owner approves a commit |
-| Uncommitted | **36 original entries** — preserve them (§3); identical list and contents before and after the `e63e639` commit (verified 2026-10-31) — plus the 3 edited handover docs until they are committed (`git status --short` = 39 while uncommitted; 36 after a handover commit) |
-| Supabase CLI | **Linked to PROD `nlxfwppywxumymbjkvwt`.** DEV = `acwatgxkcyrdxpcljxjb` |
-| Migration history | **DEV 66 and PROD 66**, both ending at `202610270001`. No migration since 2026-10-26 (Bulk Publish and Premium Mobile PDP needed none) |
-| Hosting | **DEV and PROD both run `e63e639`** — DEV `index-DY8QjrMA.js`, PROD `index-DBftZIJ4.js` / `AdminApp-XQ8ljvx-.js`. Clean `git archive` exports, environment guard PASS, served files byte-identical to the builds (verified 2026-10-31, §4). **No pending application deployment** |
+| Git | Branch `feature/checkout-orders-shipping`, HEAD **`5b32024`** (mobile footer, YouTube icon, Feedback-4) on top of the handover-docs commit `0813fc5`; pushed — local and origin both `5b32024` (verified 2026-11-01), no staged changes. Not merged to `master`. This 2026-11-01 handover update is **local and uncommitted** until the Owner approves a commit |
+| Uncommitted | **36 original entries** — preserve them (§3); identical list before and after the `5b32024` commit (verified 2026-11-01) — plus the 3 edited handover docs until they are committed (`git status --short` = 39 while uncommitted; 36 after a handover commit) |
+| Supabase CLI | **Linked to PROD `nlxfwppywxumymbjkvwt`** (`supabase/.temp/project-ref`, verified 2026-11-01). DEV = `acwatgxkcyrdxpcljxjb` |
+| Migration history | **DEV 66 and PROD 66**, both ending at `202610270001`. No migration since 2026-10-26 (Bulk Publish, Premium Mobile PDP and the footer fix needed none). Last queried 2026-10-30 |
+| Hosting | **DEV and PROD both run `5b32024`** — DEV `index-Df-LmKmr.js` / `AdminApp-bByDaa3O.js`, PROD `index-CKMM72rE.js` / `AdminApp-ItkWqdLa.js`, same CSS `index-DB5UrX-t.css`. Clean `git archive` exports, environment guard PASS (verified 2026-11-01, §4). **No pending application deployment** |
+| **Mobile footer + YouTube icon + Feedback-4** | **Live DEV + PROD (`5b32024`) — CLOSED** (§9.5). Owner real Android footer QA PASS and Owner confirmed everything looks good (Owner-reported). Do not reopen or repeat its QA |
 | **Premium Mobile PDP** | **Live DEV + PROD (`e63e639`) — CLOSED** (§9.4). Android, New iPhone, Used iPhone. Owner desktop + real Android mobile review PASS; Owner confirmed the real PROD Android mobile PDP is OK (Owner-reported) |
 | **Admin Catalog Bulk Publish** | **Live DEV + PROD (`704dc83`, still in `e63e639`) — CLOSED** (§5C). Owner DEV + PROD QA PASS (Owner-reported) |
 | **Tablet / MacBook specifications** | **CLOSED.** 25 specs on PROD (MacBook Air M5 8, Samsung A11 7, Samsung Tab S10 Lite 10); S10 Lite RAM corrected (IP002 6/128, IP003 8/256). Claude read-only verified 2026-10-30 (§4, §8) |
 | Gadgets Stock Update | **Live DEV + PROD** with writes on DEV + PROD; Gadgets PDP V3 and Home Gadgets collection live (§5A). **GD005–GD009 primary images + publishing — CLOSED** (5/5 published, Owner-reported 2026-10-31, §5A) |
-| **Domain `isolutionspakistan.com`** | **IN PROGRESS (Owner, GoDaddy DNS).** Added to Firebase PROD Hosting (Advanced Setup); TXT `hosting-site=isolutions-pakistan-production` saved; Firebase ownership verification pending; SSL and hosting switch not done; Shopify A record and `www` CNAME unchanged (Owner-reported, §11 #1) |
+| **Domain `isolutionspakistan.com`** | **Root domain CONNECTED** to Firebase PROD `isolutions-pakistan-production` (GoDaddy DNS). Root A = `199.36.158.100`; HTTPS works and serves the `5b32024` PROD build (Claude-verified 2026-11-01); Firebase status Connected and SSL issued (Owner-reported). **`www` CNAME still → `shops.myshopify.com`** (separate pending Owner decision); `portal` A = `76.76.21.21` unchanged (§4, §11) |
 | Catalog operations | **Owner-run through Admin Studio** (uploads, stock, specs, images, publishing) — not development tasks (§2) |
 | Tablets & MacBooks Stock Update | **Live DEV + PROD** with writes; **Smart Paste parser live (`228553e`) — CLOSED**; Owner PROD real-data QA PASS for MacBook and Tablets (Owner-reported) (§5B) |
 | PROD tablets / MacBooks | Apple MacBook Air M5 (16/512), Samsung A11, Samsung Tab S10 Lite — all published, specs complete (§4) |
 | Used iPhones | All 9 published on PROD |
 | Android / iPhone Stock Update, images, Spec Upload, Bulk Import | Complete. Do not redo |
-| **Next step** | **Domain connection** (Owner-led): retry Firebase Advanced Setup ownership verification → confirm SSL ready → only then an Owner-approved DNS cutover plan (§11 #1). No automatic DNS changes. Minor UI item awaiting approval: Gadgets PDP mobile WhatsApp overlap (§11 #2) |
+| **Next step** | **Mobile Phones Brand Collections — IN PROGRESS, paused.** First ask the Owner the open decision: **Option A** (only brands with published products) or **Option B** (all brands). Nothing is implemented until the Owner answers (§11 #1). Other pending items: `www` decision, image-loading diagnostic, Gadgets PDP mobile WhatsApp overlap (§11) |
 
 ---
 
@@ -83,16 +84,18 @@ Items marked **(Owner-reported)** were done or seen by the Owner, not by Claude.
 - **PDP image browsing never changes storage, variant or price** (Owner decision 2026-10-25, §9.2).
 - **Colours:** Gray stored as Grey. ZTE = "ZTE Focus Pro 5G". A57 blue differs by environment (§13 #1).
 - **Not authorized:** customer accounts, card/installment gateways, promotions engine, production commerce at scale, internal live chat.
-- **Catalog operations are the Owner's (Owner decision 2026-10-31):** routine product uploads, stock updates, specifications, images and publishing are done by the Owner through the existing Admin Studio workflows (Stock Update pages, Media, Spec Upload, Bulk Publish). They are **not** pending development tasks; those modules stay CLOSED.
+- **Catalog operations are the Owner's (Owner decision 2026-10-31):** routine product uploads, stock updates, specifications, images and publishing are done by the Owner through the existing Admin Studio workflows (Stock Update pages, Media, Spec Upload, Bulk Publish). They are **not** pending development tasks; those modules stay CLOSED. **Android Mobiles is the first category the Owner selected for product uploading** (Owner decision 2026-11-01). Product information is never guessed; missing information stays NULL.
 
 ---
 
-## 3. Git (verified 2026-10-31)
+## 3. Git (verified 2026-11-01)
 
-- **HEAD:** `e63e639` — "feat: premium Mobile Phones PDP (Android, New and Used iPhone)" (on top of the 2026-10-30 handover-docs commit `c7e63da`). `origin/feature/checkout-orders-shipping` = `e63e639`. No staged changes. The 2026-10-31 handover doc edits are uncommitted.
+- **HEAD:** `5b32024` — "fix: mobile footer layout, YouTube icon and Feedback-4 branding" (on top of the 2026-10-31 handover-docs commit `0813fc5`). `origin/feature/checkout-orders-shipping` = `5b32024`. No staged changes. The 2026-11-01 handover doc edits are uncommitted.
 
 | Commit | What |
 |---|---|
+| `5b32024` | **Mobile footer + YouTube icon + Feedback-4** (3 paths, via temporary index): `src/styles.css` (mobile footer rules only), `src/StorefrontApp.tsx` (YouTube icon path, 1 line), `public/assets/feedback/Feedback-4.png` (Owner-supplied image). Frontend only (§9.5) |
+| `0813fc5` | Handover docs after Premium Mobile PDP rollout |
 | `e63e639` | **Premium Mobile PDP** (2 paths, via temporary index): `src/StorefrontApp.tsx`, `src/styles.css`. Frontend only — no migration, RPC, data or business-logic change (§9.4) |
 | `c7e63da` | Handover docs after specifications and Bulk Publish rollout |
 | `704dc83` | **Admin Catalog Bulk Publish** (5 paths, via temporary index): `src/lib/catalogBulkPublish.ts`, `src/admin/CatalogBulkPublish.tsx` (new), `src/admin/AdminCatalog.tsx`, `src/admin/admin.css` (only the 29 appended Bulk Publish lines; the Owner's other uncommitted `admin.css` lines stay uncommitted), `scripts/catalogBulkPublish.test.mjs`. No migration, no RPC change (§5C) |
@@ -117,7 +120,7 @@ Items marked **(Owner-reported)** were done or seen by the Owner, not by Claude.
 | `649ba8b` / `ba6a4e1` | iPhone Stock Update (write DEV + PROD; migrations `202610210001`, `202610210002`) |
 | `5ad4a4d` | Android Stock Update (complete) |
 
-**36 uncommitted entries (verified 2026-10-26; still exactly these 36 after the `228553e`, `704dc83` and `e63e639` commits — list and file contents compared before/after `e63e639`, verified 2026-10-31). Preserve them.**
+**36 uncommitted entries (verified 2026-10-26; still exactly these 36 after the `228553e`, `704dc83`, `e63e639` and `5b32024` commits — verified 2026-11-01). Preserve them.**
 - **Modified tracked (5):**
   - `CLAUDE_HANDOFF.md`
   - `src/admin/AdminApp.tsx` — only the deprecated `/admin/specs-images` notice (+19)
@@ -155,16 +158,20 @@ Items marked **(Owner-reported)** were done or seen by the Owner, not by Claude.
 
 **DEV `acwatgxkcyrdxpcljxjb`** (read-only, 2026-10-26, before `202610270001`): 142 products (4 published gadgets + 1 draft gadget "Tecno Watch 3"; 133 phones, 3 published; 4 tablet drafts with condition `unknown`), 446 variants, 220 images, 8 orders. **After that: the Owner created "Apple MacBook Air M5" through Tablets & MacBooks Stock Update — draft, SKU MC001, stock 20, Rs 420,500 (Owner-reported DEV QA PASS).** DEV keeps 3 old Apple test drafts (MB003, MB311, MB312) — leave them.
 
-**Hosting (deployed 2026-10-31 from clean `git archive e63e639` exports; only the needed env file copied — `.env.local` for DEV, `.env.production.local` for PROD; `build:dev` / `build:prod`; guard PASS for the right target and BLOCKED for the wrong one; the Firebase predeploy guard passed again during each deploy; live `index.html`, entry bundle, runtime, CSS and Admin chunk byte-identical (sha256) to the builds). DEV was verified PASS before PROD was deployed. No pending application deployment.**
+**Hosting (deployed 2026-11-01 from clean `git archive 5b32024` exports; only the needed env file copied — `.env.local` for DEV, `.env.production.local` for PROD; `build:dev` / `build:prod`; manual guard run PASS for the right target and the Firebase predeploy guard passed again during each deploy; export folders and env copies deleted afterwards). DEV was verified before PROD was deployed. No pending application deployment.**
 
 | | Commit | Entry bundle | CSS | Admin chunk | Supabase URL in bundle |
 |---|---|---|---|---|---|
-| DEV `isolutions-development-cb1ea` | `e63e639` | `index-DY8QjrMA.js` | `index-B34I6U_T.css` | `AdminApp-y5OqyATb.js` | DEV `acwatgxkcyrdxpcljxjb` only |
-| PROD `isolutions-pakistan-production` | `e63e639` | `index-DBftZIJ4.js` | `index-B34I6U_T.css` | `AdminApp-XQ8ljvx-.js` | PROD `nlxfwppywxumymbjkvwt` only |
+| DEV `isolutions-development-cb1ea` | `5b32024` | `index-Df-LmKmr.js` | `index-DB5UrX-t.css` | `AdminApp-bByDaa3O.js` | DEV `acwatgxkcyrdxpcljxjb` only |
+| PROD `isolutions-pakistan-production` | `5b32024` | `index-CKMM72rE.js` | `index-DB5UrX-t.css` | `AdminApp-ItkWqdLa.js` | PROD `nlxfwppywxumymbjkvwt` only |
 
-DEV and PROD run the same commit; the CSS file is identical in both and contains the `pdp-page--phone` rules. iPhone, Gadgets and Tablets write lists are all `["development","production"]`. Previous builds: both `704dc83` (DEV `index-Dy6lNz3x.js` / `AdminApp-BPbAmIRi.js`, PROD `index-BEfpA1IP.js` / `AdminApp-Ca7_0WNY.js`, 2026-10-30).
+Live checks (Claude, 2026-11-01): on DEV, PROD and `isolutionspakistan.com` the served `Feedback-4.png` is byte-identical (sha256) to the committed file, the entry bundle contains the YouTube icon fix, and the CSS contains the 52 px payment-card and WhatsApp safe-area rules; the custom domain serves the same PROD files. Claude could not render the live pages at phone widths (in-app browser "policy check temporarily unavailable", §13 #15); the Owner checked visually (Owner-reported). iPhone, Gadgets and Tablets write lists are all `["development","production"]`. Previous builds: both `e63e639` (DEV `index-DY8QjrMA.js` / `AdminApp-y5OqyATb.js`, PROD `index-DBftZIJ4.js` / `AdminApp-XQ8ljvx-.js`, CSS `index-B34I6U_T.css`, 2026-10-31).
 
-**Custom domain (Owner-reported 2026-10-31, IN PROGRESS):** `isolutionspakistan.com` (DNS at GoDaddy) added to Firebase PROD Hosting `isolutions-pakistan-production` via Advanced Setup. GoDaddy TXT record saved — Type `TXT`, Host `@`, Value `hosting-site=isolutions-pakistan-production`. Firebase ownership verification still waiting for DNS detection; SSL certificate and the final hosting switch not done. The existing Shopify A record and `www` CNAME were **not** changed. Claude has made no DNS change (§11 #1).
+**Custom domain — root CONNECTED (2026-11-01):** `isolutionspakistan.com`, registrar/DNS GoDaddy, Firebase PROD Hosting `isolutions-pakistan-production`.
+- **Claude-verified 2026-11-01 (public DNS 8.8.8.8, HTTPS fetches):** root A = `199.36.158.100`; `https://isolutionspakistan.com` loads over HTTPS and serves the `5b32024` PROD build (same entry bundle, CSS and Admin chunk as `isolutions-pakistan-production.web.app`; Supabase PROD only); `www.isolutionspakistan.com` is a CNAME to `shops.myshopify.com` (still Shopify); `portal` A = `76.76.21.21`.
+- **Owner-reported:** Firebase Hosting shows the domain as Connected; SSL issued.
+- History: TXT `@` = `hosting-site=isolutions-pakistan-production` was added for ownership; the earlier read-only diagnostic that found the Shopify A record (`23.227.38.65`) on the root is outdated.
+- **`www` migration is a separate pending Owner decision. Never change DNS without explicit Owner approval.** Claude has made no DNS change.
 
 **Public catalog note:** `search_public_catalog` lists only products with an active brand, active category and at least one active variant; category filters match the slug exactly (children are not included). Pre-existing; unchanged.
 
@@ -275,7 +282,8 @@ See §4 (Apple MacBook Air M5 MC001–MC003, Samsung A11 IP001, Samsung Tab S10 
 12. **Admin Catalog Bulk Publish** — DEV + PROD (`704dc83`), Owner DEV + PROD QA PASS. CLOSED (§5C).
 13. **GD005–GD009 primary images + publishing** — 5/5 images uploaded and verified on PROD, 5/5 Ready, 5/5 published, 0 failed; Home Gadgets collection and images checked (Owner-reported 2026-10-31). CLOSED (§5A).
 14. **Premium Mobile PDP** — Android, New iPhone, Used iPhone; DEV + PROD (`e63e639`); Owner desktop + real Android mobile review PASS, real PROD Android mobile PDP OK (Owner-reported). CLOSED — no repeat development, audit or deployment (§9.4).
-15. Audits done — don't repeat: Premium Mobile PDP localhost visual/keyboard/overlap QA, targeted tests 127/127, DEV + PROD bundle verification (2026-10-31); Bulk Publish localhost/DEV/PROD verification and PROD tablet/MacBook spec read-back (2026-10-30); Specifications CSV product matching (2026-10-29); Smart Paste localhost/DEV/PROD verification and the `securityRls` failure classification (2026-10-28); all Android audits; iPhone DEV/PROD verifications; image architecture review; specification workflow audit; Used iPhone readiness/spec verification; iPhone PDP verification; PDP colour-image audit; image-sizing analysis; Bulk Import necessity review; Gadgets DEV/PROD migration snapshots; Tablets & MacBooks read-only review, DEV/PROD migration snapshots and targeted tests (47/47).
+15. **Mobile footer + YouTube icon + Feedback-4** — DEV + PROD (`5b32024`); localhost QA, Owner real Android footer QA PASS, Owner confirmed everything looks good (Owner-reported). CLOSED — do not reopen or repeat its QA (§9.5).
+16. Audits done — don't repeat: footer/YouTube/Feedback-4 localhost QA at 320–1440 px, targeted tests 127/127, typecheck, `build:dev`, DEV + PROD live file checks, custom-domain check (2026-11-01); Premium Mobile PDP localhost visual/keyboard/overlap QA, targeted tests 127/127, DEV + PROD bundle verification (2026-10-31); Bulk Publish localhost/DEV/PROD verification and PROD tablet/MacBook spec read-back (2026-10-30); Specifications CSV product matching (2026-10-29); Smart Paste localhost/DEV/PROD verification and the `securityRls` failure classification (2026-10-28); all Android audits; iPhone DEV/PROD verifications; image architecture review; specification workflow audit; Used iPhone readiness/spec verification; iPhone PDP verification; PDP colour-image audit; image-sizing analysis; Bulk Import necessity review; Gadgets DEV/PROD migration snapshots; Tablets & MacBooks read-only review, DEV/PROD migration snapshots and targeted tests (47/47).
 
 ---
 
@@ -328,6 +336,13 @@ See §5A. Gadgets only; uses `src/lib/pdpDescription.ts` (`descriptionParagraphs
 - **Unchanged:** prices, stock, variants, storage/colour selection, colour ↔ image alignment (§9.2), image sizing/fallback, cart, Buy Now/checkout, warranty/PTA/condition/SIM/battery logic, specification data, WhatsApp links, URLs, Supabase queries/RPCs/schema.
 - **QA:** localhost harness with a mocked Supabase client (no DEV/PROD connection, no env files; files lived only in the session scratchpad, not in the repo) — desktop/tablet/mobile visual checks, Tab order, discount cases, overlap scan; real Android phone review over LAN (Owner-reported PASS); targeted tests 127/127, typecheck, `build:dev`, `build:prod` PASS; DEV + PROD deploy byte-verified (§4).
 
+### 9.5 Mobile footer, YouTube icon, Feedback-4 (`5b32024`, live DEV + PROD — CLOSED, do not redo)
+Storefront-wide (not a PDP change), recorded here with the other storefront UI work.
+- **Mobile footer (`src/styles.css`, only inside `@media (max-width:600px)`):** Bank Transfer / Cash on Delivery cards fixed 52 px high with 40 px artwork (a percentage image height did not resolve in the auto-sized grid row, so the 120×44 artwork overflowed the card); cards stretch to the content edges; Policies column spans the full row so its longest link stays on one line; footer bottom padding `84px + env(safe-area-inset-bottom)` keeps the copyright / "Powered by GrowthifyEdge" lines clear of the floating WhatsApp button; `text-wrap:balance` on the copyright. Floating WhatsApp button `right: max(16px, 12px + env(safe-area-inset-right))`. The phone-PDP WhatsApp edge tab (§9.4) is unchanged. Desktop unchanged.
+- **YouTube icon (`src/StorefrontApp.tsx` Footer):** the rounded rectangle and the play triangle were two paths filled with the same colour, so the triangle was invisible. Now one path with `fillRule="evenodd"` — the triangle is cut out and shows the button background (white; light orange on hover). Link `https://www.youtube.com/@iSolutionOfficial` and label "YouTube" unchanged; other icons unchanged.
+- **Feedback-4 (`public/assets/feedback/Feedback-4.png`, homepage reviews, referenced in `StorefrontApp.tsx`):** served from the repo (not Cloudinary). Replaced by the Owner's corrected image (official iSolutions Pakistan logo on the bag, box and Thank You card), 1122×1402, unchanged by Claude. Other feedback images untouched. Firebase uses its default 1-hour browser cache for it (no custom headers).
+- **QA:** localhost 320/360/375/390/430/1440 px (equal 52 px cards, no horizontal overflow, WhatsApp fully in view, Feedback-4 same frame as Feedback-3); Owner real Android QA over LAN PASS (Owner-reported); targeted tests 127/127, typecheck, `build:dev` PASS; DEV + PROD live file checks (§4).
+
 ---
 
 ## 10. Bulk Import — current design (`7968015`, live DEV + PROD)
@@ -339,15 +354,17 @@ See §5A. Gadgets only; uses `src/lib/pdpDescription.ts` (`descriptionParagraphs
 
 ## 11. Pending work (each step needs separate Owner approval)
 
-1. **IN PROGRESS — domain connection `isolutionspakistan.com`** (GoDaddy DNS → Firebase PROD `isolutions-pakistan-production`, §4):
-   - Next: retry ownership verification in Firebase Advanced Setup (TXT `hosting-site=isolutions-pakistan-production` on `@` is saved).
-   - Then confirm the SSL certificate is ready; only after that follow an **Owner-approved DNS cutover plan** (the Shopify A record and `www` CNAME stay as they are until then).
-   - **No automatic DNS changes.** Claude may help with read-only checks (e.g. DNS lookups) only when the Owner asks.
-2. **Minor UI maintenance (needs Owner approval):** on the **Gadgets PDP** at mobile width the round floating WhatsApp button can overlap the quantity control / Buy Now (seen during Premium Mobile PDP QA; outside the phone-only scope, not changed).
-3. Owner visual checks on live PROD (Claude's browser is blocked on live hosts), optional: Tablets & MacBooks pages/collection with real data; iPhone Product Information block; colour ↔ image alignment.
-4. Later (development, each needs approval): image type/rights/labels, A57 naming, Edge 50 Ultra colours, removal of unmounted legacy Bulk Import files and the deprecated code in the 36 entries, optionally retire `CLAUDE_HANDOFF.md`; fix the stale `securityRls.test.mjs` RPC list (separate approval); optional Smart Paste typo handling (e.g. `Gbb`) — not a blocker.
+1. **IN PROGRESS (paused until the next session) — Mobile Phones Brand Collections.** The Owner wants better Mobile Phones brand navigation and collections.
+   - **Owner-reported screenshot findings (not yet verified by Claude):** the Mobile Phones dropdown lists brands including Samsung, Infinix, Oppo, Vivo, Tecno and iPhone; selecting `Nothing` opened `/shop?brand=nothing`, which showed 0 products and "Try a broader selection". Some brand collection/navigation paths may not be configured yet.
+   - **OPEN OWNER DECISION — ask first in the new chat:** should Mobile Phones navigation show **Option A** — only brands with currently published products, or **Option B** — all brands, including those without published products? Not yet chosen.
+   - **Do not implement anything until the Owner answers.** Do not assume every brand needs its own collection page; inspect the existing `/shop?brand=…` filtering and brand-navigation code only after the Owner's instruction. Never invent product availability or brand mappings. Then one step at a time (localhost → approval → DEV → PROD).
+2. **Pending Owner decision — `www.isolutionspakistan.com`:** still a CNAME to `shops.myshopify.com`. Moving it to Firebase is a separate DNS change that needs explicit Owner approval. **Never change DNS without it.**
+3. **Separate, non-blocking diagnostic (not approved for work):** the Owner reported slow banner and product-image loading. Root cause not established. No optimization, image replacement or new module is approved; a read-only diagnosis needs the Owner's go-ahead.
+4. **Minor UI maintenance (needs Owner approval):** on the **Gadgets PDP** at mobile width the round floating WhatsApp button can overlap the quantity control / Buy Now (seen during Premium Mobile PDP QA; not changed by `5b32024`).
+5. Owner visual checks on live PROD (Claude's browser is blocked on live hosts), optional: Tablets & MacBooks pages/collection with real data; iPhone Product Information block; colour ↔ image alignment.
+6. Later (development, each needs approval): image type/rights/labels, A57 naming, Edge 50 Ultra colours, removal of unmounted legacy Bulk Import files and the deprecated code in the 36 entries, optionally retire `CLAUDE_HANDOFF.md`; fix the stale `securityRls.test.mjs` RPC list (separate approval); optional Smart Paste typo handling (e.g. `Gbb`) — not a blocker.
 
-**Not development tasks (Owner decision 2026-10-31):** routine product uploads, stock updates, specifications, images and publishing — the Owner does these in Admin Studio (§2). Catalog data items in that category (the Owner's, whenever the Owner chooses): 17 PROD Android drafts without images/specs; iPhone 13 "pink" image association; verified SIM / Battery Health; replacing low-resolution iPhone images; DEV tablet drafts with `unknown` condition (held; no automatic cleanup).
+**Not development tasks (Owner decision 2026-10-31):** routine product uploads, stock updates, specifications, images and publishing — the Owner does these in Admin Studio (§2); **Android Mobiles first** (Owner decision 2026-11-01). Catalog data items in that category (the Owner's, whenever the Owner chooses): 17 PROD Android drafts without images/specs; iPhone 13 "pink" image association; verified SIM / Battery Health; replacing low-resolution iPhone images; DEV tablet drafts with `unknown` condition (held; no automatic cleanup).
 
 ---
 
@@ -375,7 +392,7 @@ The Owner chose **per-category Stock Update pages** in Admin Studio so the websi
 | 12 | 36 uncommitted entries | Preserve; deprecated official-source + Realme C75x code, `CLAUDE_HANDOFF.md`, deprecated `AdminApp.tsx` / `admin.css` hunks, two test lines |
 | 13 | Header comments of several applied migrations say "NOT YET APPLIED" (incl. `202610260001`, `202610270001`) | Cosmetic; all applied on DEV + PROD — never edit an applied migration |
 | 14 | No `.gitattributes`; working-tree `dist/` is not a release build | Always deploy from clean exports |
-| 15 | Claude's in-app browser returns "policy check temporarily unavailable" on the live `web.app` hosts | Not bypassed. Live checks = byte-identical bundle comparison, public RPC/HTTP checks, local harness/previews; visual live checks are the Owner's |
+| 15 | Claude's in-app browser returns "policy check temporarily unavailable" on the live `web.app` hosts and `isolutionspakistan.com` (again 2026-11-01) | Not bypassed. Live checks = byte-identical bundle comparison, public RPC/HTTP checks, local harness/previews; visual live checks are the Owner's |
 | 16 | PROD public catalog lists 74 of 82 published Android products | Pre-existing RPC eligibility |
 | 17 | DEV has no published iPhone | Real-data iPhone PDP checks only on PROD |
 | 18 | Unmounted legacy Bulk Import files remain | Dead code by design until the Owner decides |
@@ -389,21 +406,24 @@ The Owner chose **per-category Stock Update pages** in Admin Studio so the websi
 | 26 | Bulk Publish on `npm run dev` / DEV hosting writes to the real DEV database | Use Validate Selected freely; Publish Selected only with Owner intent. Localhost review of Admin code uses a mocked-database harness |
 | 27 | Bulk Publish publishes one product after another | Large batches take a little time; the page warns before leaving mid-run. A "Failed" result can also mean the publish write happened but the read-back check failed — run Validate Selected again to see the true state |
 | 28 | 5 PROD gadget drafts had no images | **Resolved 2026-10-31** — images uploaded and 5/5 published (Owner-reported, §5A) |
-| 29 | Gadgets PDP mobile: floating WhatsApp button can overlap quantity / Buy Now | Open — minor UI item, needs Owner approval (§11 #2). Phone PDPs fixed in `e63e639` |
-| 30 | Custom domain not live yet | Firebase ownership verification pending; SSL/cutover not done; Shopify DNS records unchanged (§11 #1) |
+| 29 | Gadgets PDP mobile: floating WhatsApp button can overlap quantity / Buy Now | Open — minor UI item, needs Owner approval (§11 #4). Phone PDPs fixed in `e63e639` |
+| 30 | Custom domain not live yet | **Resolved 2026-11-01 for the root domain** — A `199.36.158.100`, HTTPS serves the PROD build (§4) |
 | 31 | 2026-10-31 PROD counts (103 published + 17 draft) are derived from the Owner's report | Claude has not re-queried PROD since 2026-10-30 |
+| 32 | `www.isolutionspakistan.com` still points to Shopify (`shops.myshopify.com`) | Open — Owner decision; DNS change only with explicit approval (§11 #2) |
+| 33 | Slow banner / product-image loading (Owner-reported) | Open — root cause unknown; non-blocking diagnostic, nothing approved (§11 #3) |
+| 34 | `/shop?brand=nothing` showed 0 products (Owner-reported screenshot) | Part of Mobile Phones Brand Collections; waits for the Option A / B decision (§11 #1) |
 
 ---
 
 ## 14. How to start a fresh Claude Code chat
 
-First commands (read-only): `git status --short` (expect **36**, or **39** if the 2026-10-31 handover doc edits are still uncommitted), `git log --oneline -3` (expect **`e63e639`**, or a handover-docs commit on top of it), `cat supabase/.temp/project-ref` (expect PROD **`nlxfwppywxumymbjkvwt`**). If anything differs, report it to the Owner before doing anything.
+First commands (read-only): `git status --short` (expect **36**, or **39** if the 2026-11-01 handover doc edits are still uncommitted), `git log --oneline -3` (expect **`5b32024`**, or a handover-docs commit on top of it), `cat supabase/.temp/project-ref` (expect PROD **`nlxfwppywxumymbjkvwt`**). If anything differs, report it to the Owner before doing anything. Then acknowledge the HEAD and deployments, keep completed work CLOSED, resume **Mobile Phones Brand Collections** by asking the Owner **Option A or Option B** (§11 #1), and start no coding, audit or deployment automatically.
 
 ```text
-Continue the iSolutions Pakistan Website project. First read PROJECT_HANDOVER.md (updated 2026-10-31), then AGENTS.md.
+Continue the iSolutions Pakistan Website project. First read PROJECT_HANDOVER.md (updated 2026-11-01), then AGENTS.md.
 Roles: I am the Owner (final authority), you are the sole Developer, ChatGPT is the Analyzer/QA.
 Rules: short Roman Urdu, one step at a time; no coding without my approval; localhost → my approval → DEV → PROD; every DB write, migration, upload, commit, push and deploy needs my explicit approval in that message; never guess product facts (missing = NULL); preserve the 36 unrelated uncommitted entries; don't repeat completed work or audits; no unrelated cleanup; never bypass a tool or safety block; don't save project information to long-term memory.
-Complete on DEV + PROD — do not redo: Android + iPhone Stock Update, manual image upload, Spec Upload, iPhone PDP, 9 Used iPhones published, PDP image fixes, Bulk Import Create-only, Gadgets Stock Update + Gadgets PDP V3 + Home Gadgets, Tablets & MacBooks Stock Update + collection + Smart Paste (228553e), tablet/MacBook specifications (25 on PROD, CLOSED), Admin Catalog Bulk Publish (704dc83, CLOSED), GD005–GD009 images + publishing (CLOSED), Premium Mobile PDP (e63e639, DEV + PROD, CLOSED). Migrations: history 66 on DEV and PROD. No pending application deployment. Routine uploads, stock, specs, images and publishing are mine in Admin Studio — not development tasks.
-Start with read-only checks only: git status (expect 36 entries, or 39 if the handover docs are uncommitted), HEAD = e63e639 (or a handover-docs commit on top), supabase/.temp/project-ref (PROD nlxfwppywxumymbjkvwt).
-In progress (mine): domain isolutionspakistan.com — Firebase ownership verification retry, then SSL, then an approved DNS cutover plan; no automatic DNS changes. Minor item awaiting my approval: Gadgets PDP mobile WhatsApp overlap. Wait for my instruction.
+Complete on DEV + PROD — do not redo: Android + iPhone Stock Update, manual image upload, Spec Upload, iPhone PDP, 9 Used iPhones published, PDP image fixes, Bulk Import Create-only, Gadgets Stock Update + Gadgets PDP V3 + Home Gadgets, Tablets & MacBooks Stock Update + collection + Smart Paste (228553e), tablet/MacBook specifications (25 on PROD, CLOSED), Admin Catalog Bulk Publish (704dc83, CLOSED), GD005–GD009 images + publishing (CLOSED), Premium Mobile PDP (e63e639, DEV + PROD, CLOSED), Mobile footer + YouTube icon + Feedback-4 (5b32024, DEV + PROD, CLOSED). Migrations: history 66 on DEV and PROD. No pending application deployment. Root domain isolutionspakistan.com is connected to Firebase PROD and serves 5b32024; www still points to Shopify (my decision later; never change DNS without my approval). Routine uploads, stock, specs, images and publishing are mine in Admin Studio — not development tasks; Android Mobiles first.
+Start with read-only checks only: git status (expect 36 entries, or 39 if the handover docs are uncommitted), HEAD = 5b32024 (or a handover-docs commit on top), supabase/.temp/project-ref (PROD nlxfwppywxumymbjkvwt).
+Current task: Mobile Phones Brand Collections (paused). First ask me: Option A — only brands with published products, or Option B — all brands? Implement nothing until I answer; do not invent brand mappings or product availability. Other pending items (only on my instruction): www decision, slow image-loading diagnostic, Gadgets PDP mobile WhatsApp overlap. Wait for my instruction.
 ```
