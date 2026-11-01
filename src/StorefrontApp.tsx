@@ -837,7 +837,7 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
       </div>
       <header className="storefront-navbar">
         <a className="wordmark" href="/" aria-label="iSolutions Pakistan home">
-          <img className="storefront-brand-logo" src="/assets/branding/isolutions-pakistan-logo-v2.png" alt="" />
+          <img className="storefront-brand-logo" src="/assets/branding/isolutions-pakistan-logo-v2-256.webp" alt="" />
           <span className="storefront-brand-name">
             <strong>iSolutions</strong> <span>Pakistan</span>
           </span>
@@ -1000,7 +1000,7 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
         <aside className={`drawer${open ? " is-open" : ""}`} role="dialog" aria-modal="true" aria-hidden={!open} aria-label="Storefront navigation">
           <div className="drawer-head">
             <span className="wordmark">
-              <img className="storefront-brand-logo" src="/assets/branding/isolutions-pakistan-logo-v2.png" alt="iSolutions Pakistan" />
+              <img className="storefront-brand-logo" src="/assets/branding/isolutions-pakistan-logo-v2-256.webp" alt="iSolutions Pakistan" />
               <span className="storefront-brand-name">
                 <strong>iSolutions</strong> <span>Pakistan</span>
               </span>
@@ -1111,7 +1111,7 @@ function Footer() {
         <div className="storefront-footer-grid">
           <section className="storefront-footer-brand" aria-label="iSolutions Pakistan">
             <a className="wordmark" href="/" aria-label="iSolutions Pakistan home">
-              <img className="storefront-brand-logo" src="/assets/branding/isolutions-pakistan-logo-v2.png" alt="" />
+              <img className="storefront-brand-logo" src="/assets/branding/isolutions-pakistan-logo-v2-256.webp" alt="" />
             </a>
             <address>Karachi, Pakistan</address>
             <a className="storefront-footer-contact" href={storefrontContact.whatsappUrl} target="_blank" rel="noopener noreferrer">WhatsApp: {storefrontContact.phoneDisplay}</a>
@@ -1288,61 +1288,120 @@ type HomeHeroSlide = {
 
 const homeHeroSlides: readonly HomeHeroSlide[] = [
   {
-    desktopSrc: "/assets/banners/banner-apple-01-desktop.png",
-    mobileSrc: "/assets/banners/banner-apple-01-mobile.png",
+    desktopSrc: "/assets/banners/banner-apple-01-desktop.webp",
+    mobileSrc: "/assets/banners/banner-apple-01-mobile.webp",
     alt: "Apple products banner",
   },
   {
-    desktopSrc: "/assets/banners/banner-redmi-note-15-pro-desktop.png",
-    mobileSrc: "/assets/banners/banner-redmi-note-15-pro-mobile.png",
+    desktopSrc: "/assets/banners/banner-redmi-note-15-pro-desktop.webp",
+    mobileSrc: "/assets/banners/banner-redmi-note-15-pro-mobile.webp",
     alt: "Redmi Note 15 Pro banner",
   },
   {
-    desktopSrc: "/assets/banners/banner-tecno-camon-50-pro-desktop-v2.png",
-    mobileSrc: "/assets/banners/banner-tecno-camon-50-pro-mobile.png",
+    desktopSrc: "/assets/banners/banner-tecno-camon-50-pro-desktop-v2.webp",
+    mobileSrc: "/assets/banners/banner-tecno-camon-50-pro-mobile.webp",
     alt: "Tecno Camon 50 Pro banner",
   },
   {
-    desktopSrc: "/assets/banners/banner-samsung-galaxy-s26-ultra-desktop.png",
-    mobileSrc: "/assets/banners/banner-samsung-galaxy-s26-ultra-mobile.png",
+    desktopSrc: "/assets/banners/banner-samsung-galaxy-s26-ultra-desktop.webp",
+    mobileSrc: "/assets/banners/banner-samsung-galaxy-s26-ultra-mobile.webp",
     alt: "Samsung Galaxy S26 Ultra banner",
   },
   {
-    desktopSrc: "/assets/banners/banner-xiaomi-tv-a-series-2026-desktop.png",
-    mobileSrc: "/assets/banners/banner-xiaomi-tv-a-series-2026-mobile.png",
+    desktopSrc: "/assets/banners/banner-xiaomi-tv-a-series-2026-desktop.webp",
+    mobileSrc: "/assets/banners/banner-xiaomi-tv-a-series-2026-mobile.webp",
     alt: "Xiaomi TV A Series 2026 banner",
   },
   {
-    desktopSrc: "/assets/banners/banner-xiaomi-eco-accessories-desktop.png",
-    mobileSrc: "/assets/banners/banner-xiaomi-eco-accessories-mobile.png",
+    desktopSrc: "/assets/banners/banner-xiaomi-eco-accessories-desktop.webp",
+    mobileSrc: "/assets/banners/banner-xiaomi-eco-accessories-mobile.webp",
     alt: "Xiaomi ecosystem accessories banner",
   },
   {
-    desktopSrc: "/assets/banners/banner-iphone-18-pro-max-desktop.png",
-    mobileSrc: "/assets/banners/banner-iphone-18-pro-max-mobile.png",
+    desktopSrc: "/assets/banners/banner-iphone-18-pro-max-desktop.webp",
+    mobileSrc: "/assets/banners/banner-iphone-18-pro-max-mobile.webp",
     alt: "iPhone 18 Pro Max banner",
   },
 ] as const;
 
+const HOME_BANNER_MOBILE_QUERY = "(max-width: 600px)";
+
 function HomeHeroCarousel() {
+  // activeSlide is the banner on screen; targetSlide is where navigation wants to go. The two differ only while the
+  // target banner is still loading, so the visible banner stays until its replacement is ready (never a blank slide).
   const [activeSlide, setActiveSlide] = useState(0);
+  const [targetSlide, setTargetSlide] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const pointerStartX = useRef<number | null>(null);
+  // One banner variant per device: choosing the source here (rather than <picture>/<source>) keeps the browser from
+  // also fetching the desktop file on phones.
+  const [isMobileBanner, setIsMobileBanner] = useState(() => window.matchMedia(HOME_BANNER_MOBILE_QUERY).matches);
+  // Only slides in this set render an <img>: the first banner up front, its neighbours once the visible banner has loaded.
+  const [requestedSlides, setRequestedSlides] = useState<ReadonlySet<number>>(() => new Set([0]));
+  // Tracked by URL, so a load that finishes after a desktop/mobile switch cannot mark the other variant ready.
+  const [readySources, setReadySources] = useState<ReadonlySet<string>>(() => new Set());
+  const [failedSources, setFailedSources] = useState<ReadonlySet<string>>(() => new Set());
+  const count = homeHeroSlides.length;
+  const slideSource = (index: number) => {
+    const slide = homeHeroSlides[index];
+    return isMobileBanner && slide.mobileSrc ? slide.mobileSrc : slide.desktopSrc;
+  };
+  const isReady = (index: number) => readySources.has(slideSource(index));
+  const hasFailed = (index: number) => failedSources.has(slideSource(index));
+  const requestSlides = (indices: number[]) =>
+    setRequestedSlides((current) =>
+      indices.every((index) => current.has(index)) ? current : new Set([...current, ...indices]),
+    );
+  const addSource = (setter: typeof setReadySources, source: string) =>
+    setter((current) => (current.has(source) ? current : new Set([...current, source])));
 
   useEffect(() => {
-    if (isPaused || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const query = window.matchMedia(HOME_BANNER_MOBILE_QUERY);
+    const update = () => setIsMobileBanner(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    requestSlides(
+      isReady(activeSlide)
+        ? [activeSlide, targetSlide, (activeSlide + 1) % count, (activeSlide - 1 + count) % count]
+        : [activeSlide, targetSlide],
+    );
+  }, [activeSlide, targetSlide, readySources, isMobileBanner]);
+
+  // Show the target only once its image has loaded and decoded; a failed target leaves the current banner in place.
+  // Only the latest target is ever applied, so an older request finishing late cannot override a newer selection.
+  useEffect(() => {
+    if (targetSlide === activeSlide) return;
+    if (isReady(targetSlide)) setActiveSlide(targetSlide);
+    else if (hasFailed(targetSlide)) setTargetSlide(activeSlide);
+  }, [targetSlide, activeSlide, readySources, failedSources, isMobileBanner]);
+
+  // 4-second auto-rotation, paused while a navigation is still waiting for its banner; it skips banners that failed.
+  useEffect(() => {
+    if (isPaused || targetSlide !== activeSlide || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const timer = window.setTimeout(() => {
-      setActiveSlide((current) => (current + 1) % homeHeroSlides.length);
+      for (let step = 1; step < count; step += 1) {
+        const next = (activeSlide + step) % count;
+        if (!hasFailed(next)) {
+          setTargetSlide(next);
+          return;
+        }
+      }
     }, 4000);
     return () => window.clearTimeout(timer);
-  }, [activeSlide, isPaused]);
+  }, [activeSlide, targetSlide, isPaused, failedSources, isMobileBanner]);
 
-  const showPrevious = () => {
-    setActiveSlide((current) => (current - 1 + homeHeroSlides.length) % homeHeroSlides.length);
+  const goTo = (index: number) => {
+    requestSlides([index]);
+    setTargetSlide(index);
   };
-  const showNext = () => {
-    setActiveSlide((current) => (current + 1) % homeHeroSlides.length);
-  };
+  // Steps from the latest selection (functional update), so quick repeated clicks move one banner per click even
+  // before React re-renders; the request effect fetches whichever slide ends up as the target.
+  const step = (delta: number) => setTargetSlide((current) => (current + delta + count) % count);
+  const showPrevious = () => step(-1);
+  const showNext = () => step(1);
   const finishSwipe = (clientX: number) => {
     if (pointerStartX.current === null) return;
     const distance = clientX - pointerStartX.current;
@@ -1368,20 +1427,35 @@ function HomeHeroCarousel() {
       onPointerCancel={() => { pointerStartX.current = null; }}
     >
       <div className="home-banner-track">
-        {homeHeroSlides.map((slide, index) => (
-          <div
-            className={`home-banner-slide${index === activeSlide ? " is-active" : ""}`}
-            aria-hidden={index !== activeSlide}
-            aria-roledescription="slide"
-            aria-label={`${index + 1} of ${homeHeroSlides.length}`}
-            key={`${slide.desktopSrc}-${index}`}
-          >
-            <picture>
-              {slide.mobileSrc ? <source media="(max-width: 600px)" srcSet={slide.mobileSrc} /> : null}
-              <img src={slide.desktopSrc} alt={index === activeSlide ? slide.alt : ""} loading={index === 0 ? "eager" : "lazy"} draggable="false" />
-            </picture>
-          </div>
-        ))}
+        {homeHeroSlides.map((slide, index) => {
+          const source = slideSource(index);
+          return (
+            <div
+              className={`home-banner-slide${index === activeSlide ? " is-active" : ""}`}
+              aria-hidden={index !== activeSlide}
+              aria-roledescription="slide"
+              aria-label={`${index + 1} of ${homeHeroSlides.length}`}
+              key={`${slide.desktopSrc}-${index}`}
+            >
+              <picture>
+                {requestedSlides.has(index) && !failedSources.has(source) && (
+                  <img
+                    // No key: on a desktop/mobile switch the browser keeps painting the old file until the new one loads.
+                    src={source}
+                    alt={index === activeSlide ? slide.alt : ""}
+                    fetchPriority={index === 0 ? "high" : "auto"}
+                    onLoad={(event) => {
+                      // Decoded before it counts as ready, so the transition never shows a half-painted banner.
+                      event.currentTarget.decode().catch(() => undefined).then(() => addSource(setReadySources, source));
+                    }}
+                    onError={() => addSource(setFailedSources, source)}
+                    draggable="false"
+                  />
+                )}
+              </picture>
+            </div>
+          );
+        })}
       </div>
       <button className="home-banner-arrow is-previous" type="button" onClick={showPrevious} aria-label="Previous banner">
         <ChevronLeft aria-hidden="true" />
@@ -1389,12 +1463,18 @@ function HomeHeroCarousel() {
       <button className="home-banner-arrow is-next" type="button" onClick={showNext} aria-label="Next banner">
         <ChevronRight aria-hidden="true" />
       </button>
-      <div className="home-banner-dots" aria-label="Choose banner slide">
+      <div
+        className="home-banner-dots"
+        aria-label="Choose banner slide"
+        // A dot can jump to any slide, so pointing at or focusing the dots fetches the remaining banners first.
+        onPointerEnter={() => requestSlides(homeHeroSlides.map((_, index) => index))}
+        onFocusCapture={() => requestSlides(homeHeroSlides.map((_, index) => index))}
+      >
         {homeHeroSlides.map((slide, index) => (
           <button
             className={index === activeSlide ? "is-active" : ""}
             type="button"
-            onClick={() => setActiveSlide(index)}
+            onClick={() => goTo(index)}
             aria-label={`Show banner ${index + 1}`}
             aria-current={index === activeSlide ? "true" : undefined}
             key={`${slide.mobileSrc ?? slide.desktopSrc}-${index}`}
@@ -1490,18 +1570,18 @@ function Home({ taxonomy }: { taxonomy: Taxonomy }) {
   );
 }
 const homepageCategories: ReadonlyArray<{ label: string; href: string; image?: string }> = [
-  { label: "iPhone New", href: "/collections/mobile-phones/iphone/new", image: "/assets/categories/iphone-new-v2.png" },
-  { label: "iPhone Used", href: "/collections/mobile-phones/iphone/used", image: "/assets/categories/iphone-used-v2.png" },
-  { label: "Android Phones", href: "/collections/mobile-phones/android", image: "/assets/categories/android-phones-v2.png" },
-  { label: "MacBook", href: "/collections/macbook", image: "/assets/categories/macbook-v2.png" },
-  { label: "iPad & Tablets", href: "/collections/laptops-tablets", image: "/assets/categories/ipad-tablets-v2.png" },
-  { label: "Mobile Cases", href: "/collections/mobile-accessories?type=mobile-cases", image: "/assets/categories/mobile-cases-v2.png" },
-  { label: "Chargers", href: "/collections/mobile-accessories?type=chargers", image: "/assets/categories/chargers-v2.png" },
-  { label: "Cables", href: "/collections/mobile-accessories?type=cables", image: "/assets/categories/cables-v2.png" },
-  { label: "Power Banks", href: "/collections/mobile-accessories?type=power-banks", image: "/assets/categories/power-banks-v2.png" },
-  { label: "Audio & Earbuds", href: "/collections/mobile-accessories?type=audio", image: "/assets/categories/audio-earbuds-v2.png" },
-  { label: "Smart Watches & Bands", href: "/collections/home-gadgets?type=smart-watches-bands", image: "/assets/categories/smart-watches-bands-v2.png" },
-  { label: "Home Gadgets", href: "/collections/home-gadgets", image: "/assets/categories/home-gadgets.png" },
+  { label: "iPhone New", href: "/collections/mobile-phones/iphone/new", image: "/assets/categories/iphone-new-v2-400.webp" },
+  { label: "iPhone Used", href: "/collections/mobile-phones/iphone/used", image: "/assets/categories/iphone-used-v2-400.webp" },
+  { label: "Android Phones", href: "/collections/mobile-phones/android", image: "/assets/categories/android-phones-v2-400.webp" },
+  { label: "MacBook", href: "/collections/macbook", image: "/assets/categories/macbook-v2-400.webp" },
+  { label: "iPad & Tablets", href: "/collections/laptops-tablets", image: "/assets/categories/ipad-tablets-v2-400.webp" },
+  { label: "Mobile Cases", href: "/collections/mobile-accessories?type=mobile-cases", image: "/assets/categories/mobile-cases-v2-400.webp" },
+  { label: "Chargers", href: "/collections/mobile-accessories?type=chargers", image: "/assets/categories/chargers-v2-400.webp" },
+  { label: "Cables", href: "/collections/mobile-accessories?type=cables", image: "/assets/categories/cables-v2-400.webp" },
+  { label: "Power Banks", href: "/collections/mobile-accessories?type=power-banks", image: "/assets/categories/power-banks-v2-400.webp" },
+  { label: "Audio & Earbuds", href: "/collections/mobile-accessories?type=audio", image: "/assets/categories/audio-earbuds-v2-400.webp" },
+  { label: "Smart Watches & Bands", href: "/collections/home-gadgets?type=smart-watches-bands", image: "/assets/categories/smart-watches-bands-v2-400.webp" },
+  { label: "Home Gadgets", href: "/collections/home-gadgets", image: "/assets/categories/home-gadgets-400.webp" },
 ] as const;
 
 function HomepageProductActions({ product }: { product: CatalogProduct }) {
