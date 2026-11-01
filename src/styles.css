@@ -7210,3 +7210,52 @@ body:has(.pdp-page) header.storefront-navbar {
   .pdp-page--phone .pdp-story p { font-size:14.5px; line-height:1.7; }
   .pdp-page--phone .pdp-specifications { padding-bottom:32px; }
 }
+
+/* Premium collection header (collection pages and Mobile Phones brand pages): breadcrumb, title and count. */
+.collection-breadcrumbs { min-height:48px; }
+.collection-breadcrumbs span:last-child { color:#111614; font-weight:600; }
+.collection-heading {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:14px 28px;
+  padding-top:40px;
+  padding-bottom:28px;
+}
+.collection-heading h1 {
+  min-width:0;
+  margin:0;
+  font:700 clamp(34px,3vw,44px)/1.05 Manrope,sans-serif;
+  letter-spacing:-.045em;
+}
+.collection-count {
+  flex:none;
+  padding:7px 12px;
+  border:1px solid #D9DEDA;
+  background:#F5F7F6;
+  color:#55605B;
+  font:600 11px/1 Manrope,sans-serif;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+}
+.collection-subcollections { padding-top:0; padding-bottom:26px; }
+.collection-products { padding-top:36px; border-top:1px solid #D9DEDA; }
+.shop-page-brand .collection-heading { border-bottom:1px solid #D9DEDA; }
+.shop-page-brand .shop-results-bar { display:none; }
+.shop-page-brand .shop-catalog { padding-top:36px; }
+
+@media (max-width:900px) {
+  .collection-heading { padding-top:32px; padding-bottom:24px; }
+  .collection-products { padding-top:30px; }
+}
+@media (max-width:600px) {
+  .collection-breadcrumbs { min-height:42px; }
+  .collection-heading { flex-direction:column; align-items:flex-start; gap:12px; padding-top:24px; padding-bottom:20px; }
+  .collection-heading h1 { font-size:30px; }
+  .collection-count { padding:6px 10px; font-size:10px; }
+  .collection-subcollections { padding-bottom:20px; }
+  .collection-products { padding-top:22px; }
+  .shop-page-brand .shop-results-bar { display:flex; min-height:56px; }
+  .shop-page-brand .shop-catalog { padding-top:22px; }
+}

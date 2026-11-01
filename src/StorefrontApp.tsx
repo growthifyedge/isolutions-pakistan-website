@@ -2400,8 +2400,45 @@ function Filters({
   );
 }
 
+// Shared white collection header: compact breadcrumb, title and product count.
+function CollectionHeader({
+  breadcrumbs,
+  title,
+  loading,
+  count,
+}: {
+  breadcrumbs: { label: string; href?: string }[];
+  title: string;
+  loading: boolean;
+  count: number;
+}) {
+  return (
+    <>
+      <nav className="collection-breadcrumbs container" aria-label="Breadcrumb">
+        {breadcrumbs.map((item, index, items) => (
+          <span key={`${item.label}-${index}`}>
+            {item.href ? <a href={item.href}>{item.label}</a> : item.label}
+            {index < items.length - 1 && <ChevronRight aria-hidden="true" />}
+          </span>
+        ))}
+      </nav>
+      <section className="collection-heading container">
+        <h1>{title}</h1>
+        <span className="collection-count" aria-live="polite">
+          {loading ? "Loading" : `${count} product${count === 1 ? "" : "s"}`}
+        </span>
+      </section>
+    </>
+  );
+}
+
 function Shop({ taxonomy }: { taxonomy: Taxonomy }) {
   const params = new URLSearchParams(location.search);
+  // A Mobile Phones brand page (/shop?brand=<slug>&category=mobile-phones) uses the white collection header instead of
+  // the Shop hero. Decided from the address the page opened with, so changing filters does not swap the header.
+  const [mobileBrandPage] = useState(
+    () => params.get("category") === MOBILE_PHONES_CATEGORY_SLUG && Boolean(params.get("brand")),
+  );
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<ShopState>({
     search: params.get("q") ?? undefined,
@@ -2445,22 +2482,45 @@ function Shop({ taxonomy }: { taxonomy: Taxonomy }) {
     (filters.ptaStatus?.length ? 1 : 0) +
     (filters.inStock ? 1 : 0) +
     (filters.deliveryScope?.length ? 1 : 0);
+  // The heading follows the live filters: one brand within Mobile Phones reads "<Brand> Phones".
+  const singleMobileBrand =
+    filters.brands.length === 1 &&
+    filters.categories.length === 1 &&
+    filters.categories[0] === MOBILE_PHONES_CATEGORY_SLUG
+      ? brandDisplayName(filters.brands[0], taxonomy.brands)
+      : null;
   return (
     <Layout taxonomy={taxonomy}>
-      <div className="shop-page">
-        <section className="shop-hero container">
-          <div>
-            <span className="eyebrow">ISOLUTIONS / THE COLLECTION</span>
-            <h1>Shop.</h1>
-          </div>
-          <div className="shop-hero-copy">
-            <p>Premium phones, laptops and personal technology—carefully selected and clearly presented.</p>
-            <span>Verified products, ready to explore</span>
-          </div>
-        </section>
+      <div className={mobileBrandPage ? "shop-page shop-page-brand" : "shop-page"}>
+        {mobileBrandPage ? (
+          <CollectionHeader
+            breadcrumbs={[
+              { label: "Home", href: "/" },
+              ...(singleMobileBrand
+                ? [{ label: "Mobile Phones", href: "/collections/mobile-phones" }, { label: singleMobileBrand }]
+                : [{ label: "Mobile Phones" }]),
+            ]}
+            title={singleMobileBrand ? `${singleMobileBrand} Phones` : "Mobile Phones"}
+            loading={loading}
+            count={products.length}
+          />
+        ) : (
+          <section className="shop-hero container">
+            <div>
+              <span className="eyebrow">ISOLUTIONS / THE COLLECTION</span>
+              <h1>Shop.</h1>
+            </div>
+            <div className="shop-hero-copy">
+              <p>Premium phones, laptops and personal technology—carefully selected and clearly presented.</p>
+              <span>Verified products, ready to explore</span>
+            </div>
+          </section>
+        )}
         <div className="shop-results-bar container">
           <div>
-            <strong>{loading ? "Loading collection" : `${products.length} product${products.length === 1 ? "" : "s"}`}</strong>
+            {!mobileBrandPage && (
+              <strong>{loading ? "Loading collection" : `${products.length} product${products.length === 1 ? "" : "s"}`}</strong>
+            )}
             <span>{activeFilterCount ? `${activeFilterCount} active filter${activeFilterCount === 1 ? "" : "s"}` : "Showing the complete collection"}</span>
           </div>
           <button className="filter-trigger" onClick={() => setFiltersOpen(true)}>
@@ -3066,26 +3126,12 @@ function CollectionPage({
   return (
     <Layout taxonomy={taxonomy}>
       <div className="shop-page collection-page">
-        <nav className="collection-breadcrumbs container" aria-label="Breadcrumb">
-          {(collection?.breadcrumbs ?? [
-            { label: "Home", href: "/" },
-            { label: "Collection" },
-          ]).map((item, index, items) => (
-            <span key={`${item.label}-${index}`}>
-              {item.href ? <a href={item.href}>{item.label}</a> : item.label}
-              {index < items.length - 1 && <ChevronRight aria-hidden="true" />}
-            </span>
-          ))}
-        </nav>
-
-        <section className="collection-heading container">
-          <div>
-            <span className="eyebrow accent">THE COLLECTION</span>
-            <h1>{title}</h1>
-          </div>
-          <p>{collection?.description ?? "Explore our published catalog."}</p>
-        </section>
-
+        <CollectionHeader
+          breadcrumbs={collection?.breadcrumbs ?? [{ label: "Home", href: "/" }, { label: "Collection" }]}
+          title={title}
+          loading={loading}
+          count={products.length}
+        />
 
         {collection?.activeBrand === "iphone" && (
           <nav className="collection-subcollections container" aria-label="iPhone condition">
@@ -3103,15 +3149,6 @@ function CollectionPage({
             </a>
           </nav>
         )}
-
-        <div className="collection-results container">
-          <strong>
-            {loading
-              ? "Loading collection"
-              : `${products.length} product${products.length === 1 ? "" : "s"}`}
-          </strong>
-          <span>Published products</span>
-        </div>
 
         <section className="collection-products container" aria-label={`${title} products`}>
           {!loading && !error && products.length > 0 && (
