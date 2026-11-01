@@ -14,14 +14,51 @@ export const collectionNavigation = [
   { label: "Home Gadgets", href: "/collections/home-gadgets" },
 ] as const;
 
-export const primaryMobileBrands = [
+/**
+ * The 14 configured Mobile Phones brands (Owner decision: Option B — every brand stays visible,
+ * with or without published products). Shared by the desktop dropdown and the mobile drawer.
+ * iPhone uses the canonical brand slug `apple`.
+ */
+export const mobilePhoneBrands = [
   { label: "Samsung", slug: "samsung" },
   { label: "Infinix", slug: "infinix" },
   { label: "Oppo", slug: "oppo" },
   { label: "Vivo", slug: "vivo" },
   { label: "Tecno", slug: "tecno" },
-  { label: "iPhone", slug: "iphone" },
+  { label: "iPhone", name: "Apple", slug: "apple" },
+  { label: "Xiaomi", slug: "xiaomi" },
+  { label: "Motorola", slug: "motorola" },
+  { label: "Honor", slug: "honor" },
+  { label: "Nothing", slug: "nothing" },
+  { label: "Google", slug: "google" },
+  { label: "Realme", slug: "realme" },
+  { label: "itel", slug: "itel" },
+  { label: "OnePlus", slug: "oneplus" },
 ] as const;
+
+/** The Mobile Phones category slug used by search_public_catalog's p_category_slugs (via /shop?category=). */
+export const MOBILE_PHONES_CATEGORY_SLUG = "mobile-phones";
+
+/**
+ * Existing /shop workflow: brand + Mobile Phones category, so only phones of that brand are returned.
+ * iPhone (apple) keeps its existing collection with the New / Used tabs (Owner decision).
+ */
+export const mobilePhoneBrandHref = (slug: string) =>
+  slug === "apple"
+    ? "/collections/mobile-phones/iphone"
+    : `/shop?brand=${encodeURIComponent(slug)}&category=${MOBILE_PHONES_CATEGORY_SLUG}`;
+
+/**
+ * Readable brand name for a /shop brand slug: the published taxonomy name first, then the configured
+ * Mobile Phones brand name (brands with no published products are not in the taxonomy), else the slug as given.
+ */
+export function brandDisplayName(slug: string, brands: PublicTaxonomy["brands"]) {
+  const published = brands.find((brand) => brand.slug === slug);
+  if (published) return published.name;
+  const configured = mobilePhoneBrands.find((brand) => brand.slug === slug);
+  if (configured) return "name" in configured ? configured.name : configured.label;
+  return slug;
+}
 
 export type ResolvedCollection = {
   slug: string;

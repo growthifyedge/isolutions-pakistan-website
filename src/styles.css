@@ -1685,6 +1685,12 @@ body:has(.home-page) footer { padding-top:96px; }
 .shop-empty { min-height:480px; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; padding:70px clamp(28px,8vw,100px); background:#ebe7de; border-top:3px solid #173226; }
 .shop-empty h2 { font:600 clamp(38px,4vw,58px)/1 Manrope,sans-serif; letter-spacing:-.055em; margin:18px 0; }
 .shop-empty p { color:#677068; line-height:1.65; max-width:500px; }
+.shop-empty-filters { display:flex; flex-wrap:wrap; gap:10px; margin:22px 0 26px; }
+.shop-empty-filters button { display:inline-flex; align-items:center; gap:8px; min-height:40px; padding:0 14px; border:1px solid #101A17; border-radius:999px; background:#FFFFFF; color:#101A17; font:600 13px Manrope,sans-serif; cursor:pointer; }
+.shop-empty-filters button:hover { background:#101A17; color:#FFFFFF; }
+.shop-empty-filters svg { width:15px; height:15px; }
+.shop-empty-link { display:flex; align-items:center; gap:10px; color:#101A17; font-size:13px; font-weight:700; border-bottom:1px solid #101A17; padding-bottom:5px; }
+.shop-empty-link svg { width:16px; }
 .shop-filter-sheet { display:none; }
 @media (max-width:900px) {
   .shop-hero { grid-template-columns:1fr 1fr; min-height:240px; gap:40px; }
@@ -3457,6 +3463,17 @@ body:has(.pdp-page) header.storefront-navbar {
     color:#111614;
     font:600 16px/1.2 Manrope,sans-serif;
   }
+  /* Long flat lists (Mobile Phones: 14 brands) run down two columns so they fit the fixed-height panel. */
+  .navbar-mega-links:has(> a:nth-of-type(8)) {
+    display:grid;
+    grid-template-rows:repeat(8,auto);
+    grid-template-columns:repeat(2,max-content);
+    grid-auto-flow:column;
+    column-gap:72px;
+    row-gap:17px;
+    justify-content:start;
+  }
+  .navbar-mega-links:has(> a:nth-of-type(8)) h2 { grid-column:1 / -1; grid-row:1; }
   .navbar-mega-groups {
     width:100%;
     display:grid;

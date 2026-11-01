@@ -96,7 +96,10 @@ import warrantyAnimation from "../public/assets/animations/warranty.json";
 import authenticAnimation from "../public/assets/animations/authentic.json";
 import trustedAnimation from "../public/assets/animations/trusted.json";
 import {
-  primaryMobileBrands,
+  MOBILE_PHONES_CATEGORY_SLUG,
+  brandDisplayName,
+  mobilePhoneBrandHref,
+  mobilePhoneBrands,
   resolveCollection,
   type ResolvedCollection,
 } from "./lib/collections";
@@ -846,14 +849,7 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
             label="Mobile Phones"
             href="/collections/mobile-phones"
             heading="Mobile Phones"
-            links={[
-              { label: "Samsung", href: "/collections/mobile-phones/samsung" },
-              { label: "Infinix", href: "/collections/mobile-phones/infinix" },
-              { label: "Oppo", href: "/collections/mobile-phones/oppo" },
-              { label: "Vivo", href: "/collections/mobile-phones/vivo" },
-              { label: "Tecno", href: "/collections/mobile-phones/tecno" },
-              { label: "iPhone", href: "/collections/mobile-phones/iphone" },
-            ]}
+            links={mobilePhoneBrands.map((brand) => ({ label: brand.label, href: mobilePhoneBrandHref(brand.slug) }))}
             promoImage="/assets/phone-main.jpg"
           />
           <NavbarMegaMenu
@@ -1039,8 +1035,8 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
               <nav className="drawer-collection-nav" aria-label="Product categories">
                 <DrawerCategory label="Mobile Phones" icon={Smartphone}>
                   <a href="/collections/mobile-phones">All mobile phones</a>
-                  {primaryMobileBrands.map((brand) => (
-                    <a href={`/collections/mobile-phones/${brand.slug}`} key={brand.slug}>{brand.label}</a>
+                  {mobilePhoneBrands.map((brand) => (
+                    <a href={mobilePhoneBrandHref(brand.slug)} key={brand.slug}>{brand.label}</a>
                   ))}
                 </DrawerCategory>
                 <DrawerCategory label="Mobile Accessories" icon={Cable}>
@@ -2430,6 +2426,14 @@ function Shop({ taxonomy }: { taxonomy: Taxonomy }) {
     }, 200);
     return () => clearTimeout(timer);
   }, [filters]);
+  // Removes the brand from the active filters and from the address bar, so a reload keeps it removed.
+  const removeBrandFilter = (slug: string) => {
+    setFilters((current) => ({ ...current, brands: current.brands.filter((item) => item !== slug) }));
+    const next = new URLSearchParams(location.search);
+    next.delete("brand");
+    const query = next.toString();
+    history.replaceState(history.state, "", `${location.pathname}${query ? `?${query}` : ""}`);
+  };
   const activeFilterCount =
     filters.categories.length +
     filters.brands.length +
@@ -2481,13 +2485,37 @@ function Shop({ taxonomy }: { taxonomy: Taxonomy }) {
                 ))}
               </div>
             )}
-            {!loading && !error && products.length === 0 && (
+            {!loading && !error && products.length === 0 && (filters.brands.length > 0 ? (
+              <div className="shop-empty shop-empty-brand">
+                <span className="eyebrow accent">NO MATCHES</span>
+                <h2>
+                  No published {filters.brands.map((slug) => brandDisplayName(slug, taxonomy.brands)).join(", ")}{" "}
+                  {filters.categories.includes(MOBILE_PHONES_CATEGORY_SLUG) ? "mobile phones" : "products"} right now.
+                </h2>
+                <p>New arrivals are added regularly. Remove the brand filter or explore all mobile phones.</p>
+                <div className="shop-empty-filters" aria-label="Active brand filter">
+                  {filters.brands.map((slug) => (
+                    <button
+                      type="button"
+                      key={slug}
+                      onClick={() => removeBrandFilter(slug)}
+                      aria-label={`Remove ${brandDisplayName(slug, taxonomy.brands)} filter`}
+                    >
+                      {brandDisplayName(slug, taxonomy.brands)} <X aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+                <a className="shop-empty-link" href="/collections/mobile-phones">
+                  View all mobile phones <ArrowRight aria-hidden="true" />
+                </a>
+              </div>
+            ) : (
               <div className="shop-empty">
                 <span className="eyebrow accent">NO MATCHES</span>
                 <h2>Try a broader selection.</h2>
                 <p>No published products match this combination of filters. Adjust one or more selections to explore the collection.</p>
               </div>
-            )}
+            ))}
             {error && <CatalogEmpty title={error} />}
           </section>
         </div>
