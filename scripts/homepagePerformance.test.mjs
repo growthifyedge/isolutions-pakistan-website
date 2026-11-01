@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync } from "node:fs";
 
-const storefront = readFileSync(new URL("../src/StorefrontApp.tsx", import.meta.url), "utf8");
+// Normalized to LF: a clean `git archive` export on Windows (core.autocrlf) writes CRLF line endings.
+const readText = (path) => readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
+const storefront = readText("../src/StorefrontApp.tsx");
 const publicFile = (path) => new URL(`../public${path}`, import.meta.url);
 const carousel = storefront.slice(storefront.indexOf("function HomeHeroCarousel("));
 const heroSource = carousel.slice(0, carousel.indexOf("\n}\n") + 2);
@@ -36,7 +38,7 @@ test("header logo and Shop By Category images use display-sized WebP copies", ()
 });
 
 test("favicon still points at the original logo", () => {
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const html = readText("../index.html");
   assert.match(html, /rel="icon" type="image\/png" href="\/assets\/branding\/isolutions-pakistan-logo-v2\.png"/);
 });
 
