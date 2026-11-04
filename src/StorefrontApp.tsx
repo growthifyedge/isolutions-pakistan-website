@@ -3536,7 +3536,7 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
   );
   return (
     <Layout taxonomy={taxonomy}>
-      <div className={`pdp-page${isPhonePdp ? " pdp-page--phone" : ""}`}>
+      <div className={`pdp-page${isPhonePdp ? " pdp-page--phone" : ""}${isGadgetProduct(product) ? " pdp-page--gadget" : ""}`}>
         <nav className="pdp-breadcrumbs container" aria-label="Breadcrumb">
           <a href="/">Home</a><ChevronRight />
           <a href={`/shop?category=${product.category.slug}`}>{product.category.name}</a><ChevronRight />

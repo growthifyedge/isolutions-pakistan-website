@@ -7259,3 +7259,32 @@ body:has(.pdp-page) header.storefront-navbar {
   .shop-page-brand .shop-results-bar { display:flex; min-height:56px; }
   .shop-page-brand .shop-catalog { padding-top:22px; }
 }
+/* Gadget PDP on mobile: the floating WhatsApp chat docks as the same slim tab used on the phone PDP, and the
+   purchase column leaves room for it, so Share/Wishlist, Quantity, Add to Cart, Buy Now and Order on WhatsApp are
+   never covered. */
+@media (max-width:600px) {
+  body:has(.pdp-page--gadget) .storefront-whatsapp-contact {
+    right:0;
+    bottom:max(88px,calc(84px + env(safe-area-inset-bottom)));
+    width:30px;
+    min-width:30px;
+    height:48px;
+    border-radius:14px 0 0 14px;
+    box-shadow:0 6px 16px rgba(18,98,53,.24);
+  }
+  body:has(.pdp-page--gadget) .storefront-whatsapp-contact::after { display:none; }
+  body:has(.pdp-page--gadget) .storefront-whatsapp-icon { width:30px; height:48px; flex-basis:30px; }
+  body:has(.pdp-page--gadget) .storefront-whatsapp-icon svg { width:20px; height:20px; }
+  body:has(.pdp-page--gadget) .storefront-whatsapp-contact:hover { transform:none; }
+  .pdp-page--gadget .pdp-purchase { padding-right:32px; }
+}
+/* Homepage Bundle Offers, two-column layout: the banner starts level with the bundle cards (not the heading) and the
+   cards fill exactly the banner's height, so their tops and bottoms line up. The banner keeps its full image. */
+@media (min-width:821px) {
+  .home-bundles { grid-template-rows:auto 1fr; row-gap:0; }
+  .home-bundles-products { display:contents; }
+  .home-bundles-head { grid-column:1; grid-row:1; }
+  .home-bundles-grid { grid-column:1; grid-row:2; grid-template-rows:repeat(2,minmax(0,1fr)); align-self:stretch; contain:size; }
+  .home-bundles-grid .home-bundle-card { aspect-ratio:auto; }
+  .home-bundles-promo { grid-column:2; grid-row:2; }
+}
