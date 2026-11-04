@@ -452,6 +452,7 @@ function StorefrontCartDrawer({
                     </div>
                     <div className="storefront-cart-item-details">
                       <h3>{item.productTitle}</h3>
+                      {item.variantLabel && <p className="storefront-cart-item-variant">{item.variantLabel}</p>}
                       {item.sku && <p>SKU: {item.sku}</p>}
                       <strong>{formatPkrMinor(item.priceMinor)}</strong>
                       <div className="storefront-cart-item-controls">
@@ -3414,7 +3415,12 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
       sku: variant.sku,
       quantity,
       priceMinor: variant.priceMinor,
-      imageUrl: selectedMedia?.url ?? null,
+      // The selected variant's own image (not whichever gallery image is being browsed).
+      imageUrl: mediaForVariant(product, variant.id)?.url ?? selectedMedia?.url ?? null,
+      variantLabel: [
+        variant.ram || variant.storage ? displayConfigurationLabel(configurationLabel(variant)) : null,
+        variant.color ? labelize(variant.color) : null,
+      ].filter(Boolean).join(" · ") || null,
     }, variant.quantity);
     setPurchaseFeedback(buyNow
       ? "Added to cart. Checkout will be available in a later phase."
@@ -3611,7 +3617,8 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
                     </div>
                   </fieldset>
                 )}
-                {colors.length > 1 && (
+                {/* A single colour is still named when a storage choice exists (e.g. 12GB/256GB → Black). */}
+                {(colors.length > 1 || (colors.length === 1 && configurations.length > 1)) && (
                   <fieldset className="pdp-option-group" data-option="color">
                     <legend className="sr-only">Color</legend>
                     <div className="pdp-color-row">

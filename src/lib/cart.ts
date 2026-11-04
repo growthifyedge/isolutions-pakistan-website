@@ -9,6 +9,8 @@ export type StorefrontCartItem = {
   quantity: number;
   priceMinor: number;
   imageUrl: string | null;
+  /** Display only, e.g. "12GB/256GB · Black". Carts saved before this field show no label. */
+  variantLabel?: string | null;
 };
 
 const CART_STORAGE_KEY = "isolutions-storefront-cart";
