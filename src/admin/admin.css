@@ -912,11 +912,13 @@
   background: #fff;
 }
 .media-grid article.primary {
+  color: var(--a-ink);
   border-color: #ed5737;
   box-shadow: inset 0 3px #ed5737;
 }
 .media-grid article > img {
   width: 100%;
+  height: auto;
   aspect-ratio: 4 / 3;
   object-fit: contain;
   background: #f2f1ed;
