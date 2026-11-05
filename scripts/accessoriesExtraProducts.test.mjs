@@ -8,6 +8,7 @@ import {
   mergeCollectionExtras,
   resolveCollection,
   shouldFetchCollectionBase,
+  withoutExcludedProducts,
 } from "../src/lib/collections.ts";
 
 const brands = [{ id: "b1", name: "Samsung", slug: "samsung" }];
@@ -76,6 +77,23 @@ test("Accessories card label for the extras; Home Gadgets has no override", () =
   const taxonomy = { brands, categories: [gadgets, phones] };
   assert.equal(resolveCollection("/collections/mobile-accessories", taxonomy)?.extraProducts?.cardCategory, "Accessories");
   assert.equal(resolveCollection("/collections/home-gadgets", taxonomy)?.extraProducts, undefined);
+});
+
+test("Home Gadgets (main and type pages) hides exactly the 16 IDs; Mobile Accessories and others do not", () => {
+  const taxonomy = { brands, categories: [gadgets, accessories, phones] };
+  for (const search of ["", "?type=smart-watches-bands", "?type=smart-home"]) {
+    const home = resolveCollection("/collections/home-gadgets", taxonomy, search);
+    assert.deepEqual(home?.filters.categories, ["gadgets"]);
+    assert.deepEqual(home?.excludeProductIds, ACCESSORIES_EXTRA_PRODUCT_IDS);
+  }
+  assert.equal(resolveCollection("/collections/mobile-accessories", taxonomy)?.excludeProductIds, undefined);
+  assert.equal(resolveCollection("/collections/mobile-phones", taxonomy)?.excludeProductIds, undefined);
+  assert.equal(resolveCollection("/collections/laptops-tablets", taxonomy)?.excludeProductIds, undefined);
+  const products = [{ id: "hair-straightener" }, { id: ACCESSORIES_EXTRA_PRODUCT_IDS[0] }, { id: "mini-fan" }];
+  assert.deepEqual(withoutExcludedProducts(products, ACCESSORIES_EXTRA_PRODUCT_IDS).map((p) => p.id), ["hair-straightener", "mini-fan"]);
+  assert.deepEqual(withoutExcludedProducts(products, undefined).map((p) => p.id), ["hair-straightener", ACCESSORIES_EXTRA_PRODUCT_IDS[0], "mini-fan"]);
+  const app = readFileSync(new URL("../src/StorefrontApp.tsx", import.meta.url), "utf8");
+  assert.match(app, /withoutExcludedProducts\(\s*extras \? mergeCollectionExtras/);
 });
 
 test("Xiaomi tab: the 4 approved Mi / Redmi products by ID only; real brands still match", () => {

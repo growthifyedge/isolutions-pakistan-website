@@ -104,6 +104,7 @@ import {
   mobilePhoneBrands,
   resolveCollection,
   shouldFetchCollectionBase,
+  withoutExcludedProducts,
   type ResolvedCollection,
 } from "./lib/collections";
 import { storefrontContact } from "./lib/storefrontContact";
@@ -3155,6 +3156,7 @@ function CollectionPage({
         collection.bestSellers ? "best-sellers" : "",
         collection.condition ?? "",
         ...(collection.extraProducts?.productIds ?? []),
+        ...(collection.excludeProductIds ?? []).map((id) => `-${id}`),
       ].join("|")
     : "invalid";
 
@@ -3175,7 +3177,10 @@ function CollectionPage({
       extras ? fetchAllPublicCatalog({ categories: extras.categories, brands: collection.filters.brands }) : Promise.resolve([]),
     ])
       .then(([baseItems, extraItems]) => {
-        const items = extras ? mergeCollectionExtras(baseItems, extraItems, extras.productIds) : baseItems;
+        const items = withoutExcludedProducts(
+          extras ? mergeCollectionExtras(baseItems, extraItems, extras.productIds) : baseItems,
+          collection.excludeProductIds,
+        );
         const collectionItems = collection.deals
           ? items.filter((product) => product.variants.some((variant) => validCompareAt(variant)))
           : items;

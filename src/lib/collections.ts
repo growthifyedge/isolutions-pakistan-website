@@ -129,6 +129,8 @@ export type ResolvedCollection = {
   bestSellers?: boolean;
   bundleTerms?: string[];
   extraProducts?: CollectionExtraProducts;
+  /** Products this collection never shows (by product ID), even though its filters return them. */
+  excludeProductIds?: readonly string[];
 };
 
 /**
@@ -261,7 +263,17 @@ function topLevelCollection(
     breadcrumbs: [...base.breadcrumbs, { label: definition.title }],
     filters: { categories: category ? [category] : [], brands: [] },
     available: Boolean(category),
+    // Owner decision 2026-11-06: the 16 watches / bands are shown only in Mobile Accessories, not in Home Gadgets
+    // (main page and its type pages). Their database category stays Gadgets; product pages are unaffected.
+    ...(slug === "home-gadgets" ? { excludeProductIds: ACCESSORIES_EXTRA_PRODUCT_IDS } : {}),
   };
+}
+
+/** The collection's products without the IDs it hides (order kept). */
+export function withoutExcludedProducts<T extends { id: string }>(products: readonly T[], excludeProductIds: readonly string[] | undefined): T[] {
+  if (!excludeProductIds?.length) return [...products];
+  const hidden = new Set(excludeProductIds);
+  return products.filter((product) => !hidden.has(product.id));
 }
 
 export function resolveCollection(
