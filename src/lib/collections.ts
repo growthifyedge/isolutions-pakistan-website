@@ -60,6 +60,60 @@ export function brandDisplayName(slug: string, brands: PublicTaxonomy["brands"])
   return slug;
 }
 
+/**
+ * Owner decision 2026-11-06: these 16 PROD watches / bands stay in the Gadgets category (database unchanged) and are
+ * ALSO shown in the Mobile Accessories collection and the homepage Accessories section. Matched by product ID only
+ * (never by title or SKU). They stay in Home Gadgets too. On DEV these IDs do not exist, so nothing extra is shown.
+ */
+export const ACCESSORIES_EXTRA_PRODUCT_IDS: readonly string[] = [
+  "e245d592-6097-44e2-86a3-e1f7afb9b055", // GD010 Samsung Watch 7 44mm
+  "6beb8e57-46af-4bc0-bca2-5293bfdf144f", // GD011, GD012 Samsung Watch 8 40mm
+  "1f3b18d9-3064-4457-b712-79c9e4aa203b", // GD013 Samsung Watch 8 44mm
+  "c8483496-686f-445d-ac4c-e7d2814704c5", // GD014, GD015 Samsung Watch 8 Classic 46mm
+  "4b8e430b-8043-489a-a11c-cacbc31a2950", // GD016 Samsung Watch 9 40mm
+  "1b81a159-b2a7-4695-9a80-b85435640b59", // GD017 Samsung Watch 9 44mm
+  "b5dfa4b2-4c45-4197-8b2e-7f18051e864d", // GD018, GD019 Huawei Band 11 Pro
+  "0a662a77-fdb0-4b1e-bfa6-4232b68664af", // GD020 Huawei Watch Fit 5
+  "ab3dabed-9603-4eb4-8b12-e949f50cea91", // GD021 Huawei Watch Gt6 Pro
+  "f383964b-5883-4603-b367-59dce354b6a9", // GD022 Kieslect Ks Mini Calling Watch
+  "957734b6-1b8c-48fa-8547-6d87e981794f", // GD023, GD024 Amazfit Bip 6
+  "6634a65b-e7cd-4e95-961f-fa219bd4001e", // GD025 Redmi Band 11 Active
+  "e2dba72b-c9f3-41b6-bd2a-cffc537798a4", // GD026 Mi Band 10 Pro
+  "c8fbdb14-3326-45dd-83e4-225c23af8ad9", // GD027, GD028, GD029 Redmi Watch 6
+  "60c95b02-1f78-41b6-95a7-f30078d7db9a", // GD030 Mi Watch S5
+  "f9337ea1-360b-446c-9046-867ec0df6186", // GD031 Cmf By Nothing Watch Pro 3
+];
+
+/**
+ * Owner decision 2026-11-06: the approved Mi / Redmi Official products among the extras have no brand in the database
+ * (left unchanged); for the homepage Accessories brand tabs only, they count as Xiaomi. Matched by product ID only.
+ */
+export const ACCESSORIES_EXTRA_DISPLAY_BRAND: Readonly<Record<string, string>> = {
+  "6634a65b-e7cd-4e95-961f-fa219bd4001e": "xiaomi", // GD025 Redmi Band 11 Active
+  "e2dba72b-c9f3-41b6-bd2a-cffc537798a4": "xiaomi", // GD026 Mi Band 10 Pro
+  "c8fbdb14-3326-45dd-83e4-225c23af8ad9": "xiaomi", // GD027-GD029 Redmi Watch 6
+  "60c95b02-1f78-41b6-95a7-f30078d7db9a": "xiaomi", // GD030 Mi Watch S5
+};
+
+/** Label shown on product cards for the extras inside the Mobile Accessories collection (Home Gadgets keeps Gadgets). */
+export const ACCESSORIES_EXTRA_CARD_CATEGORY = "Accessories";
+
+/** Homepage Accessories brand tab: the product's own brand, or (extras only) its Owner-approved display brand. */
+export function accessoryMatchesBrandTab(product: { id: string; brand: { slug: string } | null }, brandSlug: string) {
+  return product.brand?.slug === brandSlug || ACCESSORIES_EXTRA_DISPLAY_BRAND[product.id] === brandSlug;
+}
+
+/**
+ * Extra products a collection also shows: fetched from `categories`, kept only when their ID is listed.
+ * `baseCategory` false = the collection's own category is not published yet, so its own list must NOT be fetched
+ * (its category filter would be empty, which means every product). `cardCategory` = card label for the extras.
+ */
+export type CollectionExtraProducts = { categories: string[]; productIds: readonly string[]; baseCategory: boolean; cardCategory: string };
+
+/** The collection's own list is fetched only when it has its own category or is not an extras-only collection. */
+export const shouldFetchCollectionBase = (collection: Pick<ResolvedCollection, "extraProducts">) =>
+  !collection.extraProducts || collection.extraProducts.baseCategory;
+
 export type ResolvedCollection = {
   slug: string;
   title: string;
@@ -74,7 +128,24 @@ export type ResolvedCollection = {
   deals?: boolean;
   bestSellers?: boolean;
   bundleTerms?: string[];
+  extraProducts?: CollectionExtraProducts;
 };
+
+/**
+ * The collection's own products first (their order kept), then the listed extra products in their fetched order.
+ * An extra is kept only if its ID is listed; a product already in the base list is never repeated.
+ */
+export function mergeCollectionExtras<T extends { id: string }>(base: readonly T[], extras: readonly T[], productIds: readonly string[]): T[] {
+  const allowed = new Set(productIds);
+  const seen = new Set(base.map((product) => product.id));
+  const merged = [...base];
+  for (const product of extras) {
+    if (!allowed.has(product.id) || seen.has(product.id)) continue;
+    seen.add(product.id);
+    merged.push(product);
+  }
+  return merged;
+}
 
 const comparable = (value: string) =>
   value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -394,7 +465,23 @@ export function resolveCollection(
       audio: "Audio",
       "pc-gadgets": "PC Gadgets",
     };
-    if (!type) return collection;
+    if (!type) {
+      // Only the main Mobile Accessories page (not the type pages, which search by type name).
+      // When no accessory is published yet the Accessories category is not in the public taxonomy: the page then shows
+      // only the listed extras (baseCategory false = never fetch the empty, i.e. unfiltered, base list).
+      const gadgets = taxonomySlug(taxonomy.categories, ["gadgets"]);
+      if (!gadgets || !ACCESSORIES_EXTRA_PRODUCT_IDS.length) return collection;
+      return {
+        ...collection,
+        available: true,
+        extraProducts: {
+          categories: [gadgets],
+          productIds: ACCESSORIES_EXTRA_PRODUCT_IDS,
+          baseCategory: collection.available,
+          cardCategory: ACCESSORIES_EXTRA_CARD_CATEGORY,
+        },
+      };
+    }
     const typeLabel = accessoryTypes[type];
     if (!typeLabel) return null;
     const brand = brandParam

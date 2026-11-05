@@ -97,10 +97,13 @@ import authenticAnimation from "../public/assets/animations/authentic.json";
 import trustedAnimation from "../public/assets/animations/trusted.json";
 import {
   MOBILE_PHONES_CATEGORY_SLUG,
+  accessoryMatchesBrandTab,
   brandDisplayName,
   mobilePhoneBrandHref,
+  mergeCollectionExtras,
   mobilePhoneBrands,
   resolveCollection,
+  shouldFetchCollectionBase,
   type ResolvedCollection,
 } from "./lib/collections";
 import { storefrontContact } from "./lib/storefrontContact";
@@ -1233,7 +1236,7 @@ function CatalogEmpty({
   );
 }
 
-function ProductCard({ product }: { product: CatalogProduct }) {
+function ProductCard({ product, categoryLabel }: { product: CatalogProduct; categoryLabel?: string }) {
   const media = primaryMedia(product);
   const pricedVariant = [...product.variants]
     .sort((left, right) => left.priceMinor - right.priceMinor)[0];
@@ -1256,7 +1259,7 @@ function ProductCard({ product }: { product: CatalogProduct }) {
       </a>
       <div className="product-copy">
         <span className="eyebrow">
-          {product.brand ? `${product.brand.name} · ` : ""}{product.category.name}
+          {product.brand ? `${product.brand.name} · ` : ""}{categoryLabel ?? product.category.name}
         </span>
         <h3>
           <a href={`/product/${product.slug}`}>{product.title}</a>
@@ -1888,20 +1891,27 @@ function AccessoriesSection({ taxonomy }: { taxonomy: Taxonomy }) {
     const brand = activeTab === "all"
       ? undefined
       : taxonomy.brands.find((item) => item.slug === activeTab || item.name.toLowerCase() === activeTab);
-    if (activeTab !== "all" && !brand) {
+    const extras = collection.extraProducts;
+    if (activeTab !== "all" && !brand && !extras) {
       setAccessories([]);
       setLoading(false);
       return;
     }
     let current = true;
     setLoading(true);
-    fetchPublicCatalog({
-      ...collection.filters,
-      brands: brand ? [brand.slug] : [],
-      limit: 4,
-    })
-      .then((items) => {
-        if (current) setAccessories(items);
+    const brands = brand ? [brand.slug] : [];
+    const tabSlug = brand?.slug ?? activeTab;
+    const fetchBase = shouldFetchCollectionBase(collection) && (activeTab === "all" || Boolean(brand));
+    Promise.all([
+      fetchBase ? fetchPublicCatalog({ ...collection.filters, brands, limit: 4 }) : Promise.resolve([]),
+      // Extras are fetched without the brand filter: Mi / Redmi have no database brand but count as Xiaomi here.
+      extras ? fetchAllPublicCatalog({ categories: extras.categories }) : Promise.resolve([]),
+    ])
+      .then(([base, extraItems]) => {
+        if (!current) return;
+        if (!extras) return setAccessories(base);
+        const tabExtras = activeTab === "all" ? extraItems : extraItems.filter((product) => accessoryMatchesBrandTab(product, tabSlug));
+        setAccessories(mergeCollectionExtras(base, tabExtras, extras.productIds).slice(0, 4));
       })
       .catch(() => {
         if (current) setAccessories([]);
@@ -3144,6 +3154,7 @@ function CollectionPage({
         collection.deals ? "deals" : "",
         collection.bestSellers ? "best-sellers" : "",
         collection.condition ?? "",
+        ...(collection.extraProducts?.productIds ?? []),
       ].join("|")
     : "invalid";
 
@@ -3158,8 +3169,13 @@ function CollectionPage({
 
     setLoading(true);
     setError("");
-    fetchAllPublicCatalog(collection.filters)
-      .then((items) => {
+    const extras = collection.extraProducts;
+    Promise.all([
+      shouldFetchCollectionBase(collection) ? fetchAllPublicCatalog(collection.filters) : Promise.resolve([]),
+      extras ? fetchAllPublicCatalog({ categories: extras.categories, brands: collection.filters.brands }) : Promise.resolve([]),
+    ])
+      .then(([baseItems, extraItems]) => {
+        const items = extras ? mergeCollectionExtras(baseItems, extraItems, extras.productIds) : baseItems;
         const collectionItems = collection.deals
           ? items.filter((product) => product.variants.some((variant) => validCompareAt(variant)))
           : items;
@@ -3235,7 +3251,11 @@ function CollectionPage({
           {!loading && !error && products.length > 0 && (
             <div className="product-grid shop-product-grid">
               {products.map((product) => (
-                <ProductCard product={product} key={product.id} />
+                <ProductCard
+                  product={product}
+                  categoryLabel={collection?.extraProducts?.productIds.includes(product.id) ? collection.extraProducts.cardCategory : undefined}
+                  key={product.id}
+                />
               ))}
             </div>
           )}
