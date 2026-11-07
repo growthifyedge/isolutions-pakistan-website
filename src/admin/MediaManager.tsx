@@ -18,6 +18,14 @@ import {
   requestProductUploadSignature,
   uploadToCloudinary,
 } from "../lib/productMediaUpload";
+import {
+  BatchItem,
+  altTextFromFileName,
+  batchSummary,
+  planMediaBatch,
+  runMediaBatch,
+  sha256Hex,
+} from "../lib/productMediaBatch";
 
 const cloudinaryConfigured = Boolean(
   import.meta.env.VITE_CLOUDINARY_CLOUD_NAME,
@@ -28,10 +36,18 @@ export function MediaManager({ productId }: { productId: string | null }) {
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [replacementId, setReplacementId] = useState<string | null>(null);
+  const [pendingReplacementId, setReplacementId] = useState<string | null>(null);
   const [variants, setVariants] = useState<{ id: string; sku: string; color_finish: string | null }[]>([]);
   const [colorAssignments, setColorAssignments] = useState<Record<string, string[]>>({});
   const input = useRef<HTMLInputElement>(null);
+  const multiInput = useRef<HTMLInputElement>(null);
+  const [batch, setBatch] = useState<BatchItem[]>([]);
+  // Content hashes uploaded to this product in this session (batch duplicate guard).
+  const uploadedHashes = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    uploadedHashes.current = new Set();
+    setBatch([]);
+  }, [productId]);
 
   const loadMedia = useCallback(async () => {
     if (!supabase || !productId) return;
@@ -69,7 +85,9 @@ export function MediaManager({ productId }: { productId: string | null }) {
     void loadMedia();
   }, [loadMedia]);
 
-  async function upload(file: File) {
+  /** `addOnly` (multiple-upload button) ignores a pending Replace click. */
+  async function upload(file: File, addOnly = false) {
+    const replacementId = addOnly ? null : pendingReplacementId;
     const validation = await validateSourceImage(file);
     if (validation) {
       setMessage(validation);
@@ -100,7 +118,7 @@ export function MediaManager({ productId }: { productId: string | null }) {
         height: result.height,
         bytes: result.bytes,
         format: result.format,
-        alt_text: file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " "),
+        alt_text: altTextFromFileName(file.name),
         sort_order: media.length,
         is_primary: media.length === 0,
       };
@@ -197,6 +215,94 @@ export function MediaManager({ productId }: { productId: string | null }) {
     if (file) void upload(file);
   }
 
+  /**
+   * "Upload images" never replaces: a pending Replace click is cleared first.
+   * One file keeps the existing single-upload path; several files run as a batch.
+   */
+  async function chooseMultiple(event: ChangeEvent<HTMLInputElement>) {
+    const files = [...(event.target.files ?? [])];
+    if (multiInput.current) multiInput.current.value = "";
+    setReplacementId(null);
+    if (files.length === 0) return;
+    if (files.length === 1) {
+      void upload(files[0], true);
+      return;
+    }
+    const hashed = await Promise.all(
+      files.map(async (file) => ({ file, hash: await sha256Hex(file) })),
+    );
+    const planned = planMediaBatch(
+      hashed,
+      media.map((item) => item.alt_text),
+      uploadedHashes.current,
+    );
+    setBatch(planned);
+    await startBatch(planned);
+  }
+
+  function patchBatch(key: string, patch: Partial<BatchItem>) {
+    setBatch((current) =>
+      current.map((item) => (item.key === key ? { ...item, ...patch } : item)),
+    );
+  }
+
+  /** Uploads queued/failed items one at a time; successes are kept on failure. */
+  async function startBatch(items: BatchItem[]) {
+    if (!supabase || !productId || !cloudinaryConfigured) {
+      setMessage(
+        "Cloudinary connection and a saved development product are required before upload.",
+      );
+      return;
+    }
+    const client = supabase;
+    const targetProduct = productId;
+    let count = media.length;
+    setBusy(true);
+    setMessage("");
+    const result = await runMediaBatch(
+      items,
+      async (item, onProgress) => {
+        const validation = await validateSourceImage(item.file);
+        if (validation) return validation;
+        const data = await requestProductUploadSignature(client, targetProduct);
+        const uploaded = await uploadToCloudinary(data, item.file, { onProgress });
+        const metadata = {
+          product_id: targetProduct,
+          variant_id: null,
+          cloudinary_public_id: uploaded.public_id,
+          cloudinary_asset_id: uploaded.asset_id,
+          cloudinary_version: uploaded.version,
+          secure_url: uploaded.secure_url,
+          width: uploaded.width,
+          height: uploaded.height,
+          bytes: uploaded.bytes,
+          format: uploaded.format,
+          alt_text: altTextFromFileName(item.file.name),
+          sort_order: count,
+          is_primary: count === 0,
+        };
+        if (containsBinaryMediaData(metadata))
+          return "Binary image data cannot be stored as metadata.";
+        const { error: insertError } = await client
+          .from("product_media")
+          .insert(metadata);
+        if (insertError)
+          return `Uploaded to Cloudinary, but metadata was not saved: ${insertError.message}`;
+        count += 1;
+        uploadedHashes.current.add(item.hash);
+        return null;
+      },
+      patchBatch,
+    );
+    setBusy(false);
+    setMessage(
+      result.failed
+        ? `${result.done} image(s) uploaded, ${result.failed} failed. Successful uploads were kept; retry the failed images.`
+        : `${result.done} image(s) uploaded and metadata saved.`,
+    );
+    await loadMedia();
+  }
+
   const ready = cloudinaryConfigured && Boolean(productId);
   const colors = [...new Set(variants.map((variant) => variant.color_finish).filter(Boolean))] as string[];
   const colorForMedia = (mediaId: string) => {
@@ -221,9 +327,9 @@ export function MediaManager({ productId }: { productId: string | null }) {
         <button
           className="admin-primary"
           disabled={!ready || busy}
-          onClick={() => input.current?.click()}
+          onClick={() => multiInput.current?.click()}
         >
-          <UploadCloud /> Upload image
+          <UploadCloud /> Upload images
         </button>
         <input
           ref={input}
@@ -231,6 +337,15 @@ export function MediaManager({ productId }: { productId: string | null }) {
           type="file"
           accept="image/jpeg,image/png,image/webp,image/avif"
           onChange={choose}
+        />
+        <input
+          ref={multiInput}
+          hidden
+          multiple
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/avif"
+          onChange={(event) => void chooseMultiple(event)}
+          data-testid="media-multi-input"
         />
       </div>
       {!ready && (
@@ -250,7 +365,15 @@ export function MediaManager({ productId }: { productId: string | null }) {
           </div>
         </div>
       )}
-      {busy && (
+      {batch.length > 0 && (
+        <BatchList
+          items={batch}
+          busy={busy}
+          onRetry={() => void startBatch(batch)}
+          onClear={() => setBatch([])}
+        />
+      )}
+      {busy && batch.length === 0 && (
         <div className="media-progress">
           <span style={{ width: `${Math.max(progress, 8)}%` }} />
           <p>{progress ? `Uploading ${progress}%` : message}</p>
@@ -362,6 +485,62 @@ export function MediaManager({ productId }: { productId: string | null }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function BatchList({
+  items,
+  busy,
+  onRetry,
+  onClear,
+}: {
+  items: BatchItem[];
+  busy: boolean;
+  onRetry: () => void;
+  onClear: () => void;
+}) {
+  const summary = batchSummary(items);
+  return (
+    <div className="media-batch" aria-live="polite">
+      <div className="media-batch-head">
+        <strong>
+          {summary.done}/{summary.total - summary.skipped} uploaded
+          {summary.failed ? ` · ${summary.failed} failed` : ""}
+          {summary.skipped ? ` · ${summary.skipped} skipped` : ""}
+        </strong>
+        <div>
+          {summary.failed > 0 && (
+            <button disabled={busy} onClick={onRetry}>
+              <RefreshCw /> Retry failed ({summary.failed})
+            </button>
+          )}
+          <button disabled={busy} onClick={onClear}>
+            Clear list
+          </button>
+        </div>
+      </div>
+      <ul>
+        {items.map((item) => (
+          <li key={item.key} className={`batch-${item.status}`}>
+            <span className="batch-name" title={item.name}>
+              {item.name}
+            </span>
+            <span className="batch-bar">
+              <span
+                style={{
+                  width: `${item.status === "done" ? 100 : item.progress}%`,
+                }}
+              />
+            </span>
+            <span className="batch-msg">
+              {item.status === "uploading" && item.progress
+                ? `Uploading ${item.progress}%`
+                : item.message}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

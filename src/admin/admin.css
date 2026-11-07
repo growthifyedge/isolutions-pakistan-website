@@ -2469,3 +2469,18 @@ p.bulk-images-error { padding-left: 14px; }
   .catalog-bulk { padding: 14px; }
   .catalog-bulk-preview li > span { display: block; min-width: 0; }
 }
+/* Admin Media: multiple image upload batch list */
+.media-batch{border:1px solid #e3e3e3;border-radius:10px;padding:10px 12px;margin:10px 0;background:#fff}
+.media-batch-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.media-batch-head button{margin-left:6px;display:inline-flex;align-items:center;gap:4px}
+.media-batch-head button svg{width:14px;height:14px}
+.media-batch ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
+.media-batch li{display:grid;grid-template-columns:minmax(0,1.4fr) 120px minmax(0,1.6fr);gap:8px;align-items:center;font-size:13px}
+.media-batch .batch-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.media-batch .batch-bar{height:6px;background:#eee;border-radius:3px;overflow:hidden}
+.media-batch .batch-bar span{display:block;height:100%;background:#2563eb}
+.media-batch .batch-done .batch-bar span{background:#16a34a}
+.media-batch .batch-done .batch-msg{color:#15803d}
+.media-batch .batch-failed .batch-msg{color:#b91c1c}
+.media-batch .batch-skipped{opacity:.7}
+.media-batch .batch-skipped .batch-msg{color:#92400e}
