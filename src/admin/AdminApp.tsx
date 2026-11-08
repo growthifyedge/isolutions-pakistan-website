@@ -11,6 +11,7 @@ import {
   Menu,
   MessageSquareText,
   PackageCheck,
+  PackagePlus,
   Smartphone,
   Tablet,
   ClipboardCheck,
@@ -52,6 +53,7 @@ import { GadgetStockUpdate } from "./GadgetStockUpdate";
 import { TabletStockUpdate } from "./TabletStockUpdate";
 import { SpecificationBulkUpload } from "./SpecificationBulkUpload";
 import { DescriptionBulkUpload } from "./DescriptionBulkUpload";
+import { AddProduct } from "./AddProduct";
 import { CatalogReadiness } from "./CatalogReadiness";
 import { ContactEnquiries } from "./ContactEnquiries";
 import { BundleManager } from "./BundleManager";
@@ -63,6 +65,7 @@ import "./admin.css";
 const nav: ReadonlyArray<readonly [string, string, LucideIcon]> = [
   ["Dashboard", "/admin", LayoutDashboard],
   ["Catalog", "/admin/products", Boxes],
+  ["Add Product", "/admin/products/add", PackagePlus],
   ["Media", "/admin/media", Image],
   ["Bulk Import", "/admin/bulk-import", ListPlus],
   ["Stock Update", "/admin/stock-update", PackageCheck],
@@ -694,6 +697,12 @@ export function AdminApp() {
     page = (
       <AdminLayout section="Catalog">
         <TaxonomyManager />
+      </AdminLayout>
+    );
+  else if (path === "/admin/products/add")
+    page = (
+      <AdminLayout section="Add Product">
+        <AddProduct />
       </AdminLayout>
     );
   else if (path.startsWith("/admin/products/")) page = <ProductEditor />;

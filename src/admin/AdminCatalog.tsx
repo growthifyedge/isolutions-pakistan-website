@@ -32,6 +32,7 @@ import { commercialWriteTarget, planCommercialDefaults, runCommercialDefaults, t
 import { isDraft, pruneSelection, selectAllDrafts, toggleSelection } from "../lib/catalogBulkPublish";
 import { CatalogBulkPublish } from "./CatalogBulkPublish";
 import { productDescriptionPatch, type ProductDescriptionFields } from "../lib/productDescriptionEdit";
+import { checkSpecEdit, isManualCategory, liveProductProblems, safeProductPatch, stockMovementTo, withVariant, type LiveProductState } from "../lib/manualProduct";
 
 type Option = {
   id: string;
@@ -197,9 +198,14 @@ export function Phase4ProductList() {
             published real products can reach the storefront.
           </p>
         </div>
-        <a href="/admin/products/new" className="admin-primary">
-          <Plus /> New product
-        </a>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <a href="/admin/products/add" className="admin-primary">
+            <Plus /> Add Gadget / Accessory
+          </a>
+          <a href="/admin/products/new" className="admin-secondary">
+            <Plus /> New product (advanced)
+          </a>
+        </div>
       </div>
       <div className="catalog-tools">
         <div>
@@ -444,6 +450,10 @@ export function Phase4ProductEditor() {
   // Description as last loaded from the database: "Save description" sends only the fields that differ from it.
   const [loadedDescription, setLoadedDescription] = useState<ProductDescriptionFields>({ short_description: "", content: "" });
   const [savingDescription, setSavingDescription] = useState(false);
+  // Manual Add / Edit (Gadgets + Mobile Accessories): category as loaded, the spec row being edited, "set stock" inputs.
+  const [loadedCategoryId, setLoadedCategoryId] = useState("");
+  const [specEditing, setSpecEditing] = useState<{ id: string; section: string; label: string; value: string } | null>(null);
+  const [stockTarget, setStockTarget] = useState<Record<string, string>>({});
   const [brands, setBrands] = useState<Option[]>([]);
   const [categories, setCategories] = useState<Option[]>([]);
   const [variants, setVariants] = useState<Variant[]>([]);
@@ -469,6 +479,7 @@ export function Phase4ProductEditor() {
     battery_cycle_count: "",
     sim_configuration: "",
     delivery_scope: "",
+    warranty_override: "",
   });
   const [stock, setStock] = useState<Record<string, string>>({});
   const [newSpec, setNewSpec] = useState({
@@ -547,6 +558,7 @@ export function Phase4ProductEditor() {
       seo_description: p.data.seo_description ?? "",
     });
     setLoadedDescription({ short_description: p.data.short_description ?? "", content: p.data.content ?? "" });
+    setLoadedCategoryId(p.data.category_id ?? "");
     const quantities = new Map(
       (i.data ?? []).map((x) => [x.variant_id, Number(x.quantity_on_hand)]),
     );
@@ -581,6 +593,47 @@ export function Phase4ProductEditor() {
   useEffect(() => {
     load();
   }, [load]);
+  // Gadgets / Mobile Accessories get the simplified, category-aware editor. A LIVE one keeps its status: every change is
+  // checked against the publish rules BEFORE it is saved, using fresh database state.
+  const loadedCategorySlug = categories.find((item) => item.id === loadedCategoryId)?.slug ?? null;
+  const manualMode = Boolean(productId) && isManualCategory(loadedCategorySlug);
+  const liveGuard = manualMode && draft.publication_status === "published";
+  const phoneOnly = manualMode ? { display: "none" } : undefined;
+  const liveProblemsAfter = async (
+    change: (state: LiveProductState) => LiveProductState,
+    title: string = draft.title,
+    brandId: string | null = draft.brand_id || null,
+  ): Promise<string[]> => {
+    if (!supabase || !productId) return ["Supabase is not configured."];
+    const [variantRows, primary] = await Promise.all([
+      supabase.from("product_variants").select("id,is_active,price_minor,delivery_scope,pta_status,condition").eq("product_id", productId),
+      supabase.from("product_media").select("id", { count: "exact", head: true }).eq("product_id", productId).eq("is_primary", true).not("cloudinary_public_id", "is", null),
+    ]);
+    if (variantRows.error) return [variantRows.error.message];
+    if (primary.error) return [primary.error.message];
+    return liveProductProblems(change({
+      categorySlug: loadedCategorySlug,
+      title,
+      brandId,
+      activeRealBrandIds: brands.filter((item) => item.data_class === "real" && item.is_active).map((item) => item.id),
+      variants: (variantRows.data ?? []) as LiveProductState["variants"],
+      hasPrimaryImage: (primary.count ?? 0) > 0,
+    }));
+  };
+  const blockedMessage = (problems: string[]) =>
+    `Not saved — this product is live, and the change would break its publish rules: ${problems.join(" ")}`;
+  const withProposedPrices = (state: LiveProductState): LiveProductState => ({
+    ...state,
+    variants: state.variants.map((item) => {
+      const text = variantPrices[item.id];
+      if (text === undefined) return item;
+      try {
+        return { ...item, price_minor: parsePkrMajorToMinor(text) };
+      } catch {
+        return item;
+      }
+    }),
+  });
   const persistChangedVariantPricing = async () => {
     if (!supabase) return "Supabase is not configured.";
 
@@ -650,6 +703,38 @@ export function Phase4ProductEditor() {
         is_active: true,
       })));
     return insertError?.message ?? null;
+  };
+  /** Live Gadget / Accessory: checked first, then saved without touching publication status, category, slug or data class. */
+  const saveChanges = async () => {
+    if (!supabase || !productId) return;
+    const problems = await liveProblemsAfter(withProposedPrices);
+    if (problems.length) {
+      setMessage(blockedMessage(problems));
+      return;
+    }
+    const { error } = await supabase.from("products").update(safeProductPatch(draft as unknown as Record<string, unknown>)).eq("id", productId);
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    const variantPriceError = await persistChangedVariantPricing();
+    if (variantPriceError) {
+      setMessage(variantPriceError);
+      return;
+    }
+    const recommendationError = await persistRecommendations();
+    if (recommendationError) {
+      setMessage(recommendationError);
+      return;
+    }
+    const check = await supabase.rpc("validate_product_for_publication", { p_product_id: productId });
+    const row = check.data?.[0];
+    setMessage(
+      check.error || !row?.is_valid
+        ? `Saved; status still published, but the server check reports: ${(row?.errors ?? [check.error?.message ?? "validation_failed"]).join(", ")}`
+        : "Changes saved. Status unchanged: published (server publish check passed).",
+    );
+    await load();
   };
   const save = async () => {
     if (!supabase) return;
@@ -810,6 +895,16 @@ export function Phase4ProductEditor() {
       setMessage(simConfiguration.message);
       return;
     }
+    if (liveGuard) {
+      const problems = await liveProblemsAfter((state) => ({
+        ...state,
+        variants: [...state.variants, { id: "new", is_active: true, price_minor: priceMinor, delivery_scope: newVariant.delivery_scope || null, pta_status: newVariant.pta_status, condition: newVariant.condition }],
+      }));
+      if (problems.length) {
+        setMessage(blockedMessage(problems));
+        return;
+      }
+    }
     // No SKU is sent: the database assigns the next sequential SKU for the
     // product's category (e.g. MB001) when the variant is inserted.
     const { error } = await supabase.from("product_variants").insert({
@@ -824,6 +919,7 @@ export function Phase4ProductEditor() {
       condition: newVariant.condition,
       sim_configuration: simConfiguration.value,
       delivery_scope: newVariant.delivery_scope || null,
+      warranty_override: newVariant.warranty_override.trim() || null,
     });
     setMessage(error?.message ?? "Explicit variant added. SKU assigned automatically.");
     if (!error) {
@@ -840,6 +936,7 @@ export function Phase4ProductEditor() {
         battery_cycle_count: "",
         sim_configuration: "",
         delivery_scope: "",
+        warranty_override: "",
       });
       await load();
     }
@@ -847,6 +944,13 @@ export function Phase4ProductEditor() {
   const saveVariantPrice = async (variantId: string) => {
     if (!supabase) return;
     if (!variants.some((item) => item.id === variantId)) return;
+    if (liveGuard) {
+      const problems = await liveProblemsAfter(withProposedPrices);
+      if (problems.length) {
+        setMessage(blockedMessage(problems));
+        return;
+      }
+    }
     const error = await persistChangedVariantPricing();
     setMessage(error ?? "Variant pricing saved exactly.");
     if (!error) await load();
@@ -868,6 +972,16 @@ export function Phase4ProductEditor() {
       setMessage(simConfiguration.message);
       return;
     }
+    if (liveGuard) {
+      const editing = variantEditing;
+      const problems = await liveProblemsAfter((state) =>
+        withVariant(state, editing.id, { pta_status: editing.pta_status, condition: editing.condition, delivery_scope: editing.delivery_scope || null }),
+      );
+      if (problems.length) {
+        setMessage(blockedMessage(problems));
+        return;
+      }
+    }
     setVariantSaving(true);
     // The SKU is never sent: existing SKUs are permanent and read-only.
     const { error } = await supabase
@@ -881,6 +995,7 @@ export function Phase4ProductEditor() {
         condition: variantEditing.condition,
         sim_configuration: simConfiguration.value,
         delivery_scope: variantEditing.delivery_scope || null,
+        ...(manualMode ? { warranty_override: variantEditing.warranty_override?.trim() || null } : {}),
       })
       .eq("id", variantEditing.id);
     setVariantSaving(false);
@@ -933,6 +1048,15 @@ export function Phase4ProductEditor() {
   const commercialDefaultsReady = draft.default_pta_status !== "unknown" && draft.default_condition !== "unknown";
   const deleteVariant = async () => {
     if (!supabase || !variantPendingDelete || variantDeleting) return;
+    if (liveGuard) {
+      const pending = variantPendingDelete;
+      const problems = await liveProblemsAfter((state) => withVariant(state, pending.id, null));
+      if (problems.length) {
+        setMessage(blockedMessage(problems));
+        setVariantPendingDelete(null);
+        return;
+      }
+    }
     setVariantDeleting(true);
     const { data: media, error: mediaReadError } = await supabase
       .from("product_media")
@@ -986,8 +1110,70 @@ export function Phase4ProductEditor() {
     setMessage(error?.message ?? "Inventory movement recorded.");
     if (!error) await load();
   };
+  /** "Set stock to N": one ledger movement for the difference from the fresh on-hand number. */
+  const setStockTo = async (variant: Variant) => {
+    if (!supabase) return;
+    const fresh = await supabase.from("admin_variant_inventory").select("quantity_on_hand").eq("variant_id", variant.id).maybeSingle();
+    if (fresh.error) {
+      setMessage(fresh.error.message);
+      return;
+    }
+    const onHand = Number(fresh.data?.quantity_on_hand ?? 0);
+    const plan = stockMovementTo(onHand, stockTarget[variant.id] ?? "");
+    if (!plan.ok) {
+      setMessage(plan.message);
+      return;
+    }
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setMessage("Sign in again to change stock.");
+      return;
+    }
+    const { error } = await supabase.from("inventory_movements").insert({
+      variant_id: variant.id,
+      quantity_delta: plan.delta,
+      reason: "correction",
+      actor_id: user.id,
+      note: `Admin Studio: stock set to ${onHand + plan.delta}`,
+    });
+    setMessage(error?.message ?? `Stock for ${variant.sku} set to ${onHand + plan.delta}.`);
+    if (!error) {
+      setStockTarget({ ...stockTarget, [variant.id]: "" });
+      await load();
+    }
+  };
+  const saveSpecEdit = async () => {
+    if (!supabase || !specEditing) return;
+    const problem = checkSpecEdit(specEditing, specs, specEditing.id);
+    if (problem) {
+      setMessage(problem);
+      return;
+    }
+    const { error } = await supabase
+      .from("product_specifications")
+      .update({ specification_group: specEditing.section.trim() || null, label: specEditing.label.trim(), value: specEditing.value.trim() })
+      .eq("id", specEditing.id);
+    setMessage(error?.message ?? "Specification saved.");
+    if (!error) {
+      setSpecEditing(null);
+      await load();
+    }
+  };
+  const deleteSpec = async (spec: Specification) => {
+    if (!supabase || !window.confirm(`Delete the specification "${spec.label}"?`)) return;
+    const { error } = await supabase.from("product_specifications").delete().eq("id", spec.id);
+    setMessage(error?.message ?? `Specification "${spec.label}" deleted.`);
+    if (!error) await load();
+  };
   const addSpec = async () => {
     if (!supabase || !productId) return;
+    const specProblem = checkSpecEdit({ section: newSpec.specification_group, label: newSpec.label, value: newSpec.value }, specs, null);
+    if (specProblem) {
+      setMessage(specProblem);
+      return;
+    }
     const { error } = await supabase.from("product_specifications").insert({
       product_id: productId,
       specification_group: newSpec.specification_group || null,
@@ -1020,9 +1206,15 @@ export function Phase4ProductEditor() {
           </p>
         </div>
         <div>
-          <button className="admin-secondary" onClick={save}>
-            Save draft
-          </button>
+          {liveGuard ? (
+            <button className="admin-secondary" onClick={() => void saveChanges()}>
+              Save changes (stays published)
+            </button>
+          ) : (
+            <button className="admin-secondary" onClick={save}>
+              Save draft
+            </button>
+          )}
           <button
             className="admin-primary"
             disabled={!productId}
@@ -1086,6 +1278,7 @@ export function Phase4ProductEditor() {
                 Category
                 <select
                   value={draft.category_id}
+                  disabled={manualMode}
                   onChange={(e) =>
                     setDraft({ ...draft, category_id: e.target.value })
                   }
@@ -1102,8 +1295,10 @@ export function Phase4ProductEditor() {
                 Slug
                 <input
                   value={draft.slug}
+                  readOnly={liveGuard}
                   onChange={(e) => setDraft({ ...draft, slug: e.target.value })}
                 />
+                {liveGuard && <small>The web address of a live product does not change.</small>}
               </label>
               <label className="wide">
                 Short description
@@ -1203,6 +1398,7 @@ export function Phase4ProductEditor() {
                 Catalog class
                 <select
                   value={draft.data_class}
+                  disabled={manualMode}
                   onChange={(e) =>
                     setDraft({
                       ...draft,
@@ -1305,7 +1501,7 @@ export function Phase4ProductEditor() {
                     }
                   />
                 </label>
-                <label>
+                <label style={phoneOnly}>
                   Storage
                   <input
                     value={newVariant.storage_display}
@@ -1317,7 +1513,7 @@ export function Phase4ProductEditor() {
                     }
                   />
                 </label>
-                <label>
+                <label style={phoneOnly}>
                   RAM
                   <input
                     value={newVariant.ram_display}
@@ -1379,7 +1575,7 @@ export function Phase4ProductEditor() {
                     <option value="refurbished">Refurbished</option>
                   </select>
                 </label>
-                <label>
+                <label style={phoneOnly}>
                   Condition Grade
                   <select
                     value={newVariant.condition_grade}
@@ -1395,7 +1591,7 @@ export function Phase4ProductEditor() {
                   </select>
                   <small>Used phones only.</small>
                 </label>
-                <label>
+                <label style={phoneOnly}>
                   Battery Health %
                   <input
                     type="number"
@@ -1409,7 +1605,7 @@ export function Phase4ProductEditor() {
                   />
                   <small>Optional · 1–100</small>
                 </label>
-                <label>
+                <label style={phoneOnly}>
                   Battery Cycle Count
                   <input
                     type="number"
@@ -1422,7 +1618,7 @@ export function Phase4ProductEditor() {
                   />
                   <small>Optional · 0 or more</small>
                 </label>
-                <label>
+                <label style={phoneOnly}>
                   SIM Configuration
                   <select
                     value={newVariant.sim_configuration}
@@ -1453,6 +1649,16 @@ export function Phase4ProductEditor() {
                     <option value="nationwide">Nationwide</option>
                   </select>
                 </label>
+                {manualMode && (
+                  <label>
+                    Warranty
+                    <input
+                      value={newVariant.warranty_override}
+                      placeholder="Optional"
+                      onChange={(e) => setNewVariant({ ...newVariant, warranty_override: e.target.value })}
+                    />
+                  </label>
+                )}
                 <button
                   className="admin-primary"
                   disabled={!productId}
@@ -1556,6 +1762,17 @@ export function Phase4ProductEditor() {
                     >
                       Record movement
                     </button>
+                    <input
+                      type="number"
+                      min="0"
+                      value={stockTarget[v.id] ?? ""}
+                      onChange={(e) => setStockTarget({ ...stockTarget, [v.id]: e.target.value })}
+                      placeholder="Set stock to"
+                      aria-label={`Set stock for ${v.sku}`}
+                    />
+                    <button className="admin-secondary" onClick={() => void setStockTo(v)}>
+                      Set stock
+                    </button>
                   </article>
                 ))}
               </div>
@@ -1606,15 +1823,31 @@ export function Phase4ProductEditor() {
                 </button>
               </div>
               <div className="variant-list">
-                {specs.map((s) => (
-                  <article key={s.id}>
-                    <div>
-                      <strong>{s.label}</strong>
-                      <span>{s.specification_group || "General"}</span>
-                    </div>
-                    <span>{s.value}</span>
-                  </article>
-                ))}
+                {specs.map((s) =>
+                  specEditing?.id === s.id ? (
+                    <article key={s.id}>
+                      <input aria-label="Specification section" value={specEditing.section} onChange={(e) => setSpecEditing({ ...specEditing, section: e.target.value })} placeholder="Section" />
+                      <input aria-label="Specification name" value={specEditing.label} onChange={(e) => setSpecEditing({ ...specEditing, label: e.target.value })} />
+                      <input aria-label="Specification value" value={specEditing.value} onChange={(e) => setSpecEditing({ ...specEditing, value: e.target.value })} />
+                      <div className="variant-actions">
+                        <button type="button" className="admin-primary" onClick={() => void saveSpecEdit()}>Save</button>
+                        <button type="button" className="admin-secondary" onClick={() => setSpecEditing(null)}>Cancel</button>
+                      </div>
+                    </article>
+                  ) : (
+                    <article key={s.id}>
+                      <div>
+                        <strong>{s.label}</strong>
+                        <span>{s.specification_group || "General"}</span>
+                      </div>
+                      <span>{s.value}</span>
+                      <div className="variant-actions">
+                        <button type="button" className="variant-edit" onClick={() => setSpecEditing({ id: s.id, section: s.specification_group ?? "", label: s.label, value: s.value })} aria-label={`Edit specification ${s.label}`}><Pencil /></button>
+                        <button type="button" className="variant-delete" onClick={() => void deleteSpec(s)} aria-label={`Delete specification ${s.label}`}><Trash2 /></button>
+                      </div>
+                    </article>
+                  ),
+                )}
               </div>
             </>
           )}
@@ -1736,16 +1969,17 @@ export function Phase4ProductEditor() {
             <p>Update only verified commercial identity fields. Inventory remains in the Inventory tab.</p>
             <div className="form-grid">
               <label className="wide">SKU<input value={variantEditing.sku} readOnly aria-readonly="true" /><small>SKU assigned automatically and cannot be changed.</small></label>
-              <label>Storage<input value={variantEditing.storage_display ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, storage_display: event.target.value || null })} /></label>
-              <label>RAM<input value={variantEditing.ram_display ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, ram_display: event.target.value || null })} /></label>
+              <label style={phoneOnly}>Storage<input value={variantEditing.storage_display ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, storage_display: event.target.value || null })} /></label>
+              <label style={phoneOnly}>RAM<input value={variantEditing.ram_display ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, ram_display: event.target.value || null })} /></label>
               <label>Color / finish<input value={variantEditing.color_finish ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, color_finish: event.target.value || null })} /></label>
               <label>PTA<select value={variantEditing.pta_status} onChange={(event) => setVariantEditing({ ...variantEditing, pta_status: event.target.value })}><option value="unknown">Unknown</option><option value="approved">Approved</option><option value="not_approved">Not approved</option><option value="not_applicable">Not applicable</option></select></label>
               <label>Condition<select value={variantEditing.condition} onChange={(event) => setVariantEditing({ ...variantEditing, condition: event.target.value, condition_grade: event.target.value === "used" ? variantEditing.condition_grade : null })}><option value="unknown">Unknown</option><option value="brand_new">Brand new</option><option value="used">Used</option><option value="open_box">Open box</option><option value="refurbished">Refurbished</option></select></label>
-              <label>Condition Grade<select value={variantEditing.condition_grade ?? ""} disabled={variantEditing.condition !== "used"} onChange={(event) => setVariantEditing({ ...variantEditing, condition_grade: event.target.value || null })}><option value="">None</option>{CONDITION_GRADES.map((grade) => <option key={grade} value={grade}>{grade}</option>)}</select><small>Used phones only.</small></label>
-              <label>Battery Health %<input type="number" min="1" max="100" step="1" value={variantEditing.batteryHealthInput} onChange={(event) => setVariantEditing({ ...variantEditing, batteryHealthInput: event.target.value })} /><small>Optional · 1–100 · blank stays empty</small></label>
-              <label>Battery Cycle Count<input type="number" min="0" step="1" value={variantEditing.cycleCountInput} onChange={(event) => setVariantEditing({ ...variantEditing, cycleCountInput: event.target.value })} /><small>Optional · 0 or more · blank stays empty</small></label>
-              <label>SIM Configuration<select value={variantEditing.sim_configuration ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, sim_configuration: event.target.value || null })}><option value="">None</option>{SIM_CONFIGURATIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><small>Optional · blank stays empty</small></label>
+              <label style={phoneOnly}>Condition Grade<select value={variantEditing.condition_grade ?? ""} disabled={variantEditing.condition !== "used"} onChange={(event) => setVariantEditing({ ...variantEditing, condition_grade: event.target.value || null })}><option value="">None</option>{CONDITION_GRADES.map((grade) => <option key={grade} value={grade}>{grade}</option>)}</select><small>Used phones only.</small></label>
+              <label style={phoneOnly}>Battery Health %<input type="number" min="1" max="100" step="1" value={variantEditing.batteryHealthInput} onChange={(event) => setVariantEditing({ ...variantEditing, batteryHealthInput: event.target.value })} /><small>Optional · 1–100 · blank stays empty</small></label>
+              <label style={phoneOnly}>Battery Cycle Count<input type="number" min="0" step="1" value={variantEditing.cycleCountInput} onChange={(event) => setVariantEditing({ ...variantEditing, cycleCountInput: event.target.value })} /><small>Optional · 0 or more · blank stays empty</small></label>
+              <label style={phoneOnly}>SIM Configuration<select value={variantEditing.sim_configuration ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, sim_configuration: event.target.value || null })}><option value="">None</option>{SIM_CONFIGURATIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><small>Optional · blank stays empty</small></label>
               <label>Delivery<select value={variantEditing.delivery_scope ?? ""} onChange={(event) => setVariantEditing({ ...variantEditing, delivery_scope: event.target.value || null })}><option value="">Unresolved</option><option value="karachi_only">Karachi only</option><option value="nationwide">Nationwide</option></select></label>
+              {manualMode && <label>Warranty<input value={variantEditing.warranty_override ?? ""} placeholder="Optional" onChange={(event) => setVariantEditing({ ...variantEditing, warranty_override: event.target.value || null })} /></label>}
             </div>
             <div><button type="button" className="admin-secondary" disabled={variantSaving} onClick={() => setVariantEditing(null)}>Cancel</button><button type="button" className="admin-primary" disabled={variantSaving} onClick={() => void saveVariantDetails()}>{variantSaving ? "Saving…" : "Save variant"}</button></div>
           </section>
