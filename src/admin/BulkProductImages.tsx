@@ -21,6 +21,7 @@ import {
 import { requestProductUploadSignature, uploadToCloudinary } from "../lib/productMediaUpload";
 import { supabaseRefsInText } from "../lib/supabaseEnvironment";
 import { installUnloadGuard } from "../lib/unloadGuard";
+import { SkuImageUpload } from "./SkuImageUpload";
 import {
   LOCAL_IMAGE_ACCEPT,
   attachLocalImages,
@@ -247,6 +248,8 @@ export function BulkProductImages() {
   }
 
   return (
+    <>
+    <SkuImageUpload />
     <section className="admin-panel bulk-images" aria-labelledby="bulk-images-title">
       <div className="bulk-images-head">
         <div>
@@ -407,6 +410,7 @@ export function BulkProductImages() {
         </div>
       )}
     </section>
+    </>
   );
 }
 
