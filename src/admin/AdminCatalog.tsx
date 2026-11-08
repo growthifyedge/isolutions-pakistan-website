@@ -31,6 +31,7 @@ import { commercialDbDeps } from "../lib/commercialDefaultsDb";
 import { commercialWriteTarget, planCommercialDefaults, runCommercialDefaults, type CommercialVariant } from "../lib/commercialDefaults";
 import { isDraft, pruneSelection, selectAllDrafts, toggleSelection } from "../lib/catalogBulkPublish";
 import { CatalogBulkPublish } from "./CatalogBulkPublish";
+import { productDescriptionPatch, type ProductDescriptionFields } from "../lib/productDescriptionEdit";
 
 type Option = {
   id: string;
@@ -440,6 +441,9 @@ export function Phase4ProductEditor() {
       : "Overview";
   const [tab, setTab] = useState(initial);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
+  // Description as last loaded from the database: "Save description" sends only the fields that differ from it.
+  const [loadedDescription, setLoadedDescription] = useState<ProductDescriptionFields>({ short_description: "", content: "" });
+  const [savingDescription, setSavingDescription] = useState(false);
   const [brands, setBrands] = useState<Option[]>([]);
   const [categories, setCategories] = useState<Option[]>([]);
   const [variants, setVariants] = useState<Variant[]>([]);
@@ -542,6 +546,7 @@ export function Phase4ProductEditor() {
       seo_title: p.data.seo_title ?? "",
       seo_description: p.data.seo_description ?? "",
     });
+    setLoadedDescription({ short_description: p.data.short_description ?? "", content: p.data.content ?? "" });
     const quantities = new Map(
       (i.data ?? []).map((x) => [x.variant_id, Number(x.quantity_on_hand)]),
     );
@@ -699,6 +704,38 @@ export function Phase4ProductEditor() {
       setMessage("Draft saved.");
       await load();
     }
+  };
+  // Updates only short_description / content (never publication_status), so a published product stays published.
+  const saveDescription = async () => {
+    if (!supabase || !productId || savingDescription) return;
+    const patch = productDescriptionPatch(loadedDescription, {
+      short_description: draft.short_description,
+      content: draft.content,
+    });
+    if (!patch) {
+      setMessage("Description unchanged — nothing to save.");
+      return;
+    }
+    setSavingDescription(true);
+    const { data, error } = await supabase
+      .from("products")
+      .update(patch)
+      .eq("id", productId)
+      .select("short_description,content,publication_status")
+      .single();
+    setSavingDescription(false);
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    setLoadedDescription({ short_description: data.short_description ?? "", content: data.content ?? "" });
+    setDraft((current) => ({
+      ...current,
+      short_description: data.short_description ?? "",
+      content: data.content ?? "",
+      publication_status: data.publication_status,
+    }));
+    setMessage(`Description saved. Status unchanged: ${data.publication_status}. Other unsaved edits on this page were not saved.`);
   };
   const publish = async () => {
     if (!supabase || !productId) return;
@@ -1086,6 +1123,19 @@ export function Phase4ProductEditor() {
                   }
                 />
               </label>
+              {productId && (
+                <div className="wide description-save" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px 14px" }}>
+                  <button
+                    type="button"
+                    className="admin-secondary"
+                    disabled={savingDescription || !productDescriptionPatch(loadedDescription, { short_description: draft.short_description, content: draft.content })}
+                    onClick={saveDescription}
+                  >
+                    {savingDescription ? "Saving description…" : "Save description"}
+                  </button>
+                  <small>Saves only the short description and product content. Publication status, prices, variants, stock and images stay unchanged.</small>
+                </div>
+              )}
               <label>
                 Default warranty
                 <input
