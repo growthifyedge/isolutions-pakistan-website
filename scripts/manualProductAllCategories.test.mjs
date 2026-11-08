@@ -118,12 +118,15 @@ test("Create for a phone reads back category, name, RAM / storage / colour, PTA,
 test("Server-safe live edits: only columns the publish validator never reads (checked against the current validator SQL)", () => {
   const migrations = readdirSync(new URL("../supabase/migrations/", import.meta.url)).filter((name) => name.endsWith(".sql")).sort();
   const definers = migrations.filter((name) => readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8").includes("function public.validate_product_for_publication"));
-  assert.equal(definers.at(-1), "202611060001_publication_accessories_no_warranty.sql", "the publish validator changed — re-check SERVER_SAFE_LIVE_COLUMNS and liveProductProblems");
-  const sql = readFileSync(new URL(`../supabase/migrations/${definers.at(-1)}`, import.meta.url), "utf8");
-  const body = sql.slice(sql.indexOf("create or replace function public.validate_product_for_publication"));
-  const validator = body.slice(0, body.indexOf("$$;"));
-  for (const column of SERVER_SAFE_LIVE_COLUMNS) assert.equal(new RegExp(`\\b${column}\\b`).test(validator), false, `${column} is not read by the validator`);
-  for (const column of ["title", "brand_id", "category_id", "data_class", "default_warranty", "warranty_override", "pta_status", "condition", "delivery_scope", "price_minor", "is_primary"]) assert.match(validator, new RegExp(`\\b${column}\\b`), `${column} is read by the validator (so it is locked while live)`);
+  // Reviewed validator versions: 202610270001 (committed) and 202611060001 (applied on DEV + PROD; may be uncommitted locally).
+  assert.ok(["202610270001_tablet_macbook_stock_update_and_publication.sql", "202611060001_publication_accessories_no_warranty.sql"].includes(definers.at(-1)), `the publish validator changed (${definers.at(-1)}) — re-check SERVER_SAFE_LIVE_COLUMNS and liveProductProblems`);
+  for (const name of definers.filter((file) => file >= "202610270001")) {
+    const sql = readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
+    const body = sql.slice(sql.lastIndexOf("create or replace function public.validate_product_for_publication"));
+    const validator = body.slice(0, body.indexOf("$$;"));
+    for (const column of SERVER_SAFE_LIVE_COLUMNS) assert.equal(new RegExp(`\\b${column}\\b`).test(validator), false, `${name}: ${column} is not read by the validator`);
+    for (const column of ["title", "brand_id", "category_id", "data_class", "default_warranty", "warranty_override", "pta_status", "condition", "delivery_scope", "price_minor", "is_primary"]) assert.match(validator, new RegExp(`\\b${column}\\b`), `${name}: ${column} is read by the validator (so it is locked while live)`);
+  }
   const patch = serverSafeLivePatch({ title: "x", brand_id: "b", category_id: "c", slug: "s", data_class: "development", publication_status: "draft", default_warranty: "", content: " A ", seo_title: "", is_featured: true });
   assert.deepEqual(Object.keys(patch).sort(), [...SERVER_SAFE_LIVE_COLUMNS].sort());
   assert.equal(patch.content, "A");
