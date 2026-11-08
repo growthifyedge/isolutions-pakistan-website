@@ -455,7 +455,8 @@ test("PDP: gadget descriptions become paragraphs and lines; spacing is cleaned f
 });
 
 test("PDP: Gadgets + Mobile Accessories show About This Product before Technical Specifications; empty sections stay hidden", () => {
-  const app = readFileSync(new URL("../src/StorefrontApp.tsx", import.meta.url), "utf8");
+  // CRLF → LF so the check also passes in a Windows `git archive` export.
+  const app = readFileSync(new URL("../src/StorefrontApp.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const aboutAt = app.indexOf("{gadgetParagraphs && gadgetParagraphs.length > 0 && (");
   const specsAt = app.indexOf("{product.specifications.length > 0 && (\n          <section className=\"pdp-specifications\">");
   const storyAt = app.indexOf("{!gadgetParagraphs && product.content && (");
