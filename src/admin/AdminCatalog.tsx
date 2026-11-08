@@ -32,7 +32,7 @@ import { commercialWriteTarget, planCommercialDefaults, runCommercialDefaults, t
 import { isDraft, pruneSelection, selectAllDrafts, toggleSelection } from "../lib/catalogBulkPublish";
 import { CatalogBulkPublish } from "./CatalogBulkPublish";
 import { productDescriptionPatch, type ProductDescriptionFields } from "../lib/productDescriptionEdit";
-import { checkSpecEdit, isManualCategory, liveProductProblems, safeProductPatch, stockMovementTo, withVariant, type LiveProductState } from "../lib/manualProduct";
+import { checkSpecEdit, isManualCategory, liveProductProblems, liveStockUpdatePage, safeProductPatch, serverSafeLivePatch, stockMovementTo, variantIdentity as variantKey, withVariant, type LiveProductState } from "../lib/manualProduct";
 
 type Option = {
   id: string;
@@ -599,6 +599,12 @@ export function Phase4ProductEditor() {
   const manualMode = Boolean(productId) && isManualCategory(loadedCategorySlug);
   const liveGuard = manualMode && draft.publication_status === "published";
   const phoneOnly = manualMode ? { display: "none" } : undefined;
+  // Every other category (Android, iPhones, Tablets, MacBooks): a LIVE product only accepts edits the server's publish
+  // rules never read (description, SEO, homepage placement, specifications, stock, recommendations). Prices, variants and
+  // commercial facts change through the existing server-checked Stock Update pages, so no edit here can break it.
+  const serverSafeLive = Boolean(productId) && !manualMode && draft.publication_status === "published";
+  const stockPage = liveStockUpdatePage(loadedCategorySlug, brands.find((item) => item.id === draft.brand_id)?.name ?? null);
+  const serverSafeMessage = `This product is live. Prices, variants, PTA, condition, warranty and delivery are changed in ${stockPage ? stockPage.label : "the Stock Update page"}, which checks every change on the server. Here you can edit the description, SEO, homepage placement, specifications, stock and images.`;
   const liveProblemsAfter = async (
     change: (state: LiveProductState) => LiveProductState,
     title: string = draft.title,
@@ -607,7 +613,7 @@ export function Phase4ProductEditor() {
     if (!supabase || !productId) return ["Supabase is not configured."];
     const [variantRows, primary] = await Promise.all([
       supabase.from("product_variants").select("id,is_active,price_minor,delivery_scope,pta_status,condition").eq("product_id", productId),
-      supabase.from("product_media").select("id", { count: "exact", head: true }).eq("product_id", productId).eq("is_primary", true).not("cloudinary_public_id", "is", null),
+      supabase.from("product_media").select("id", { count: "exact", head: true }).eq("product_id", productId).eq("is_primary", true).not("cloudinary_public_id", "is", null).not("secure_url", "is", null).gt("width", 0).gt("height", 0).gt("bytes", 0),
     ]);
     if (variantRows.error) return [variantRows.error.message];
     if (primary.error) return [primary.error.message];
@@ -703,6 +709,32 @@ export function Phase4ProductEditor() {
         is_active: true,
       })));
     return insertError?.message ?? null;
+  };
+  /** Live phone / tablet / MacBook: only columns the publish rules never read, so it stays valid and published. */
+  const saveServerSafe = async () => {
+    if (!supabase || !productId || !serverSafeLive) return;
+    const { error } = await supabase.from("products").update(serverSafeLivePatch(draft as unknown as Record<string, unknown>)).eq("id", productId);
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    const recommendationError = await persistRecommendations();
+    if (recommendationError) {
+      setMessage(recommendationError);
+      return;
+    }
+    const check = await supabase.rpc("validate_product_for_publication", { p_product_id: productId });
+    const row = check.data?.[0];
+    setMessage(
+      check.error || !row?.is_valid
+        ? `Saved (description / SEO / placement only); status still published. Server publish check reports existing problems: ${(row?.errors ?? [check.error?.message ?? "validation_failed"]).join(", ")}`
+        : "Changes saved. Status unchanged: published (server publish check passed).",
+    );
+    await load();
+  };
+  const unpublishAndSaveDraft = async () => {
+    if (!window.confirm("Take this product off the website and save it as a Draft? You can Validate & publish it again afterwards.")) return;
+    await save();
   };
   /** Live Gadget / Accessory: checked first, then saved without touching publication status, category, slug or data class. */
   const saveChanges = async () => {
@@ -858,6 +890,10 @@ export function Phase4ProductEditor() {
   };
   const addVariant = async () => {
     if (!supabase || !productId) return;
+    if (serverSafeLive) {
+      setMessage(serverSafeMessage);
+      return;
+    }
     let priceMinor: number;
     let compareAtPriceMinor: number | null;
     try {
@@ -893,6 +929,12 @@ export function Phase4ProductEditor() {
     const simConfiguration = parseSimConfiguration(newVariant.sim_configuration);
     if (!simConfiguration.ok) {
       setMessage(simConfiguration.message);
+      return;
+    }
+    // No duplicate variant (same identity the server uses for imports).
+    const newIdentity = variantKey({ ram: newVariant.ram_display, storage: newVariant.storage_display, color: newVariant.color_finish, pta: newVariant.pta_status, condition: newVariant.condition, grade: usedFacts.values.condition_grade, batteryHealth: usedFacts.values.battery_health_percent, cycleCount: usedFacts.values.battery_cycle_count });
+    if (variants.some((item) => variantKey({ ram: item.ram_display, storage: item.storage_display, color: item.color_finish, pta: item.pta_status, condition: item.condition, grade: item.condition_grade, batteryHealth: item.battery_health_percent, cycleCount: item.battery_cycle_count }) === newIdentity)) {
+      setMessage("This variant already exists on the product (same RAM, storage, colour, PTA and condition).");
       return;
     }
     if (liveGuard) {
@@ -944,6 +986,10 @@ export function Phase4ProductEditor() {
   const saveVariantPrice = async (variantId: string) => {
     if (!supabase) return;
     if (!variants.some((item) => item.id === variantId)) return;
+    if (serverSafeLive) {
+      setMessage(serverSafeMessage);
+      return;
+    }
     if (liveGuard) {
       const problems = await liveProblemsAfter(withProposedPrices);
       if (problems.length) {
@@ -957,6 +1003,11 @@ export function Phase4ProductEditor() {
   };
   const saveVariantDetails = async () => {
     if (!supabase || !variantEditing || variantSaving) return;
+    if (serverSafeLive) {
+      setMessage(serverSafeMessage);
+      setVariantEditing(null);
+      return;
+    }
     const usedFacts = parseUsedPhoneFacts({
       condition: variantEditing.condition,
       conditionGrade: variantEditing.condition_grade,
@@ -1010,6 +1061,11 @@ export function Phase4ProductEditor() {
   /** Product-level commercial defaults -> every explicit variant. Writes only pta_status/condition (+ the product defaults). */
   const applyCommercialDefaults = async () => {
     if (!supabase || !productId || commercialBusy) return;
+    if (serverSafeLive) {
+      setMessage(serverSafeMessage);
+      setCommercialConfirm(false);
+      return;
+    }
     const target = commercialWriteTarget(import.meta.env.VITE_SUPABASE_URL, import.meta.env.MODE);
     if (!target.allowed) {
       setMessage(target.reason ?? "Blocked: unknown environment.");
@@ -1048,6 +1104,11 @@ export function Phase4ProductEditor() {
   const commercialDefaultsReady = draft.default_pta_status !== "unknown" && draft.default_condition !== "unknown";
   const deleteVariant = async () => {
     if (!supabase || !variantPendingDelete || variantDeleting) return;
+    if (serverSafeLive) {
+      setMessage(serverSafeMessage);
+      setVariantPendingDelete(null);
+      return;
+    }
     if (liveGuard) {
       const pending = variantPendingDelete;
       const problems = await liveProblemsAfter((state) => withVariant(state, pending.id, null));
@@ -1206,7 +1267,16 @@ export function Phase4ProductEditor() {
           </p>
         </div>
         <div>
-          {liveGuard ? (
+          {serverSafeLive ? (
+            <>
+              <button className="admin-secondary" onClick={() => void saveServerSafe()}>
+                Save changes (stays published)
+              </button>
+              <button className="admin-secondary" onClick={() => void unpublishAndSaveDraft()}>
+                Unpublish &amp; edit as Draft
+              </button>
+            </>
+          ) : liveGuard ? (
             <button className="admin-secondary" onClick={() => void saveChanges()}>
               Save changes (stays published)
             </button>
@@ -1253,15 +1323,18 @@ export function Phase4ProductEditor() {
                 Product title
                 <input
                   value={draft.title}
+                  readOnly={serverSafeLive}
                   onChange={(e) =>
                     setDraft({ ...draft, title: e.target.value })
                   }
                 />
+                {serverSafeLive && <small>Locked while live: the name decides New / Used rules. Use “Unpublish &amp; edit as Draft” to change it.</small>}
               </label>
               <label>
                 Brand
                 <select
                   value={draft.brand_id}
+                  disabled={serverSafeLive}
                   onChange={(e) =>
                     setDraft({ ...draft, brand_id: e.target.value })
                   }
@@ -1278,7 +1351,7 @@ export function Phase4ProductEditor() {
                 Category
                 <select
                   value={draft.category_id}
-                  disabled={manualMode}
+                  disabled={manualMode || serverSafeLive}
                   onChange={(e) =>
                     setDraft({ ...draft, category_id: e.target.value })
                   }
@@ -1295,10 +1368,10 @@ export function Phase4ProductEditor() {
                 Slug
                 <input
                   value={draft.slug}
-                  readOnly={liveGuard}
+                  readOnly={liveGuard || serverSafeLive}
                   onChange={(e) => setDraft({ ...draft, slug: e.target.value })}
                 />
-                {liveGuard && <small>The web address of a live product does not change.</small>}
+                {(liveGuard || serverSafeLive) && <small>The web address of a live product does not change.</small>}
               </label>
               <label className="wide">
                 Short description
@@ -1335,6 +1408,7 @@ export function Phase4ProductEditor() {
                 Default warranty
                 <input
                   value={draft.default_warranty}
+                  readOnly={serverSafeLive}
                   onChange={(e) =>
                     setDraft({ ...draft, default_warranty: e.target.value })
                   }
@@ -1344,6 +1418,7 @@ export function Phase4ProductEditor() {
                 Default condition
                 <select
                   value={draft.default_condition}
+                  disabled={serverSafeLive}
                   onChange={(e) =>
                     setDraft({
                       ...draft,
@@ -1363,6 +1438,7 @@ export function Phase4ProductEditor() {
                 Default delivery scope
                 <select
                   value={draft.default_delivery_scope}
+                  disabled={serverSafeLive}
                   onChange={(e) =>
                     setDraft({
                       ...draft,
@@ -1380,6 +1456,7 @@ export function Phase4ProductEditor() {
                 Default PTA status
                 <select
                   value={draft.default_pta_status}
+                  disabled={serverSafeLive}
                   onChange={(e) =>
                     setDraft({
                       ...draft,
@@ -1398,7 +1475,7 @@ export function Phase4ProductEditor() {
                 Catalog class
                 <select
                   value={draft.data_class}
-                  disabled={manualMode}
+                  disabled={manualMode || serverSafeLive}
                   onChange={(e) =>
                     setDraft({
                       ...draft,
@@ -1440,11 +1517,23 @@ export function Phase4ProductEditor() {
                   unresolved and block publication.
                 </p>
               </div>
+              {serverSafeLive && (
+                <div className="validation-callout">
+                  <ShieldCheck />
+                  <div>
+                    <strong>Live product — variants are changed on the server-checked Stock Update page</strong>
+                    <p>
+                      {serverSafeMessage}{" "}
+                      {stockPage && <a href={stockPage.href}>Open {stockPage.label}</a>}
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="commercial-defaults-action">
                 <button
                   type="button"
                   className="admin-secondary"
-                  disabled={!commercialDefaultsReady || variants.length === 0 || commercialBusy}
+                  disabled={!commercialDefaultsReady || variants.length === 0 || commercialBusy || serverSafeLive}
                   title={commercialDefaultsReady ? undefined : "Set Default PTA status and Default condition (Product Details) first"}
                   onClick={() => setCommercialConfirm(true)}
                 >
@@ -1661,7 +1750,7 @@ export function Phase4ProductEditor() {
                 )}
                 <button
                   className="admin-primary"
-                  disabled={!productId}
+                  disabled={!productId || serverSafeLive}
                   onClick={addVariant}
                 >
                   <Plus /> Add explicit variant
@@ -1710,6 +1799,7 @@ export function Phase4ProductEditor() {
                       <small>{formatPkrMinor(v.price_minor)}</small>
                       <button
                         className="admin-secondary"
+                        disabled={serverSafeLive}
                         onClick={() => saveVariantPrice(v.id)}
                       >
                         Save pricing
@@ -1718,8 +1808,8 @@ export function Phase4ProductEditor() {
                     <span>{ptaLabel(v.pta_status)}</span>
                     <span>{v.quantity ?? 0} units</span>
                     <div className="variant-actions">
-                      <button type="button" className="variant-edit" onClick={() => setVariantEditing(editableVariant(v))} aria-label={`Edit variant ${variantIdentity(v)}`}><Pencil /></button>
-                      <button type="button" className="variant-delete" onClick={() => setVariantPendingDelete(v)} aria-label={`Delete variant ${variantIdentity(v)}`}><Trash2 /></button>
+                      <button type="button" className="variant-edit" disabled={serverSafeLive} onClick={() => setVariantEditing(editableVariant(v))} aria-label={`Edit variant ${variantIdentity(v)}`}><Pencil /></button>
+                      <button type="button" className="variant-delete" disabled={serverSafeLive} onClick={() => setVariantPendingDelete(v)} aria-label={`Delete variant ${variantIdentity(v)}`}><Trash2 /></button>
                     </div>
                     <dl className="variant-facts" aria-label={`Facts for ${v.sku}`}>
                       <div><dt>SKU</dt><dd>{v.sku}</dd></div>

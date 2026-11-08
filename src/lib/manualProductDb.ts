@@ -45,7 +45,7 @@ export function manualCreateDbDeps(client: SupabaseClient): Pick<ManualCreateDep
         .eq("id", productId)
         .single();
       if (product.error || !product.data) throw new Error(product.error?.message || "product not found");
-      const variants = await client.from("product_variants").select("id,sku,color_finish,price_minor").eq("product_id", productId).order("sku");
+      const variants = await client.from("product_variants").select("id,sku,ram_display,storage_display,color_finish,price_minor,pta_status,condition,warranty_override,delivery_scope").eq("product_id", productId).order("sku");
       if (variants.error) throw new Error(variants.error.message);
       const ids = (variants.data ?? []).map((row) => row.id as string);
       const stock = ids.length ? await client.from("admin_variant_inventory").select("variant_id,quantity_on_hand").in("variant_id", ids) : { data: [], error: null };
@@ -66,7 +66,13 @@ export function manualCreateDbDeps(client: SupabaseClient): Pick<ManualCreateDep
         category_slug: category?.slug ?? null,
         variants: (variants.data ?? []).map((variant) => ({
           sku: variant.sku as string,
+          ram: (variant.ram_display as string | null) ?? null,
+          storage: (variant.storage_display as string | null) ?? null,
           color: (variant.color_finish as string | null) ?? null,
+          pta_status: variant.pta_status as string,
+          condition: variant.condition as string,
+          warranty_override: (variant.warranty_override as string | null) ?? null,
+          delivery_scope: (variant.delivery_scope as string | null) ?? null,
           price_minor: Number(variant.price_minor),
           on_hand: onHand.get(variant.id as string) ?? 0,
         })),

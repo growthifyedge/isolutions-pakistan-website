@@ -184,8 +184,8 @@ test("Wiring: route + nav; editor guards every write on a live Gadget / Accessor
     const body = editor.match(new RegExp(`const ${name} = async [^\\n]*\\n[\\s\\S]*?\\n  \\};`))[0];
     assert.match(body, /if \(liveGuard\) \{[\s\S]*?liveProblemsAfter/, `${name} is checked before saving`);
   }
-  assert.match(editor, /\{liveGuard \? \(\s*<button className="admin-secondary" onClick=\{\(\) => void saveChanges\(\)\}>/);
-  assert.match(editor, /value=\{draft\.category_id\}\s*disabled=\{manualMode\}/);
+  assert.match(editor, /liveGuard \? \(\s*<button className="admin-secondary" onClick=\{\(\) => void saveChanges\(\)\}>/);
+  assert.match(editor, /value=\{draft\.category_id\}\s*disabled=\{manualMode \|\| serverSafeLive\}/);
   // Phones / tablets keep their existing Save draft behaviour.
   assert.match(editor, /publication_status: "draft" as const,/);
 });

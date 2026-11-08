@@ -3,13 +3,17 @@ import { AlertTriangle, CheckCircle2, Plus, Trash2, XCircle } from "lucide-react
 import { supabase, supabaseEnvironmentLabel } from "../lib/supabase";
 import { commercialWriteTarget } from "../lib/commercialDefaults";
 import { loadAddProductContext, manualCreateDbDeps } from "../lib/manualProductDb";
+import { CONDITION_GRADES, SIM_CONFIGURATIONS, conditionLabel, ptaLabel } from "../lib/variantFacts";
 import {
-  MANUAL_CATEGORIES,
+  IPHONE_NEW_WARRANTIES,
+  KIND_PROFILES,
   SPEC_SECTION_OPTIONS,
   checkManualProduct,
   emptyManualVariant,
+  kindProfile,
   runManualCreate,
   type ExistingCatalogProduct,
+  type KindProfile,
   type ManualCreateResult,
   type ManualProductInput,
   type ManualSpecInput,
@@ -21,13 +25,23 @@ const target = commercialWriteTarget(import.meta.env.VITE_SUPABASE_URL, BUILD_MO
 const PROD = target.environment === "production";
 const CONFIRM_PHRASE = "CREATE PRODUCT";
 
-const emptyInput = (): ManualProductInput => ({ category: "", title: "", brandName: "", content: "", shortDescription: "", variants: [emptyManualVariant()], specs: [] });
+const emptyInput = (): ManualProductInput => ({ category: "", title: "", brandName: "", content: "", shortDescription: "", productCondition: "", connectivity: "", variants: [emptyManualVariant()], specs: [] });
 const row = { display: "grid", gap: "8px", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", alignItems: "end" } as const;
+const fixed = (rule: unknown) => (rule && typeof rule === "object" && "fixed" in (rule as object) ? (rule as { fixed: string }).fixed : null);
+const groups = [...new Set(KIND_PROFILES.map((profile) => profile.group))];
+const Locked = ({ label, value }: { label: string; value: string }) => (
+  <label>
+    {label}
+    <input value={value} readOnly aria-readonly="true" />
+    <small>Set by the category rule</small>
+  </label>
+);
 
 /**
- * Add Product: create ONE Gadget or Mobile Accessory without Excel. Nothing is saved until "Create product"; the form is
- * checked first (required fields, prices, stock, duplicates), then ONE call to the existing apply_catalog_bulk_import_v2
- * creates the product as a Draft with its variants, stock and specifications. Images and publishing follow in the editor.
+ * Add Product: create ONE product of any category without Excel. Nothing is saved until "Create product"; the form is
+ * checked first (category rules, required facts, prices, stock, duplicate products and variants), then ONE call to the
+ * existing apply_catalog_bulk_import_v2 creates it as a Draft with its variants, stock and specifications. Images and
+ * Validate & publish follow in the product editor (the server checks every publish rule).
  */
 export function AddProduct() {
   const [input, setInput] = useState<ManualProductInput>(emptyInput);
@@ -57,6 +71,7 @@ export function AddProduct() {
     };
   }, []);
 
+  const profile: KindProfile | null = kindProfile(input.category);
   const check = useMemo(() => checkManualProduct(input, catalog, brands), [input, catalog, brands]);
   const set = (patch: Partial<ManualProductInput>) => {
     setInput((current) => ({ ...current, ...patch }));
@@ -108,19 +123,75 @@ export function AddProduct() {
     }
   };
 
-  const isAccessory = input.category === "mobile-accessories";
   const locked = busy || Boolean(result?.productId);
+  const isGadgetLike = profile?.kind === "gadgets" || profile?.kind === "mobile-accessories";
+  const ptaFixed = fixed(profile?.pta);
+  const conditionFixed = fixed(profile?.condition);
+  const warrantyFixed = fixed(profile?.warranty);
+  const productConditionLabel = input.productCondition ? conditionLabel(input.productCondition) : "Choose New / Used above";
+
+  const ptaField = (variant: ManualVariantInput, index: number) => {
+    if (!profile) return null;
+    if (ptaFixed) return <Locked label="PTA" value={ptaLabel(ptaFixed)} />;
+    if (profile.pta === "by-connectivity" && input.connectivity !== "cellular")
+      return <Locked label="PTA" value={input.connectivity === "wifi" ? ptaLabel("not_applicable") : "Choose connectivity above"} />;
+    const both = profile.pta === "approved-or-non" || profile.pta === "by-connectivity";
+    return (
+      <label>
+        PTA
+        <select value={variant.pta} onChange={(event) => setVariant(index, { pta: event.target.value })}>
+          <option value="">{profile.pta === "optional" ? "Not set" : "Select"}</option>
+          {!both && <option value="not_applicable">Not applicable</option>}
+          <option value="approved">PTA Approved</option>
+          <option value="not_approved">Non-PTA</option>
+        </select>
+      </label>
+    );
+  };
+  const conditionField = (variant: ManualVariantInput, index: number) => {
+    if (!profile) return null;
+    if (conditionFixed) return <Locked label="Condition" value={conditionLabel(conditionFixed)} />;
+    if (profile.condition === "by-product") return <Locked label="Condition" value={productConditionLabel} />;
+    return (
+      <label>
+        Condition
+        <select value={variant.condition} onChange={(event) => setVariant(index, { condition: event.target.value })}>
+          <option value="">{profile.condition === "optional" ? "Not set" : "Select"}</option>
+          <option value="brand_new">Brand new</option>
+          <option value="open_box">Open box</option>
+          <option value="refurbished">Refurbished</option>
+          <option value="used">Used</option>
+        </select>
+      </label>
+    );
+  };
+  const warrantyField = (variant: ManualVariantInput, index: number) => {
+    if (!profile || profile.warranty === "hidden") return null;
+    if (warrantyFixed) return <Locked label="Warranty" value={warrantyFixed} />;
+    if (profile.warranty === "required")
+      return (
+        <label>
+          Warranty
+          <select value={variant.warranty} onChange={(event) => setVariant(index, { warranty: event.target.value })}>
+            <option value="">Select</option>
+            {IPHONE_NEW_WARRANTIES.map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </label>
+      );
+    return <label>Warranty<input value={variant.warranty} onChange={(event) => setVariant(index, { warranty: event.target.value })} placeholder="Optional, e.g. 1 Year" /></label>;
+  };
 
   return (
     <section className="spec-upload add-product">
       <div className="admin-heading compact">
         <div>
           <span className="admin-kicker">CATALOG · ADD PRODUCT</span>
-          <h1>Add a Gadget or Mobile Accessory</h1>
+          <h1>Add a product</h1>
           <p>
-            Create one product without Excel. It is saved as a <strong>Draft</strong> with its variants, prices, stock and specifications; then add images
-            and Validate &amp; publish in the product editor. An existing product (same name and brand, or same web address) is never created again —
-            edit it in Catalog instead. Blank facts stay empty. Connected to {supabaseEnvironmentLabel}.
+            Create one product of any category without Excel. It is saved as a <strong>Draft</strong> with its variants, prices, stock and
+            specifications; then add images and Validate &amp; publish in the product editor. Category rules (PTA, condition, warranty, delivery) are
+            applied for you and shown as locked. An existing product (same name and brand, or same web address) is never created again — edit it in
+            Catalog instead. Blank facts stay empty. Connected to {supabaseEnvironmentLabel}.
           </p>
         </div>
       </div>
@@ -129,23 +200,51 @@ export function AddProduct() {
         <h3>1 · Product</h3>
         <div className="form-grid">
           <label>
-            Category
+            What are you adding?
             <select value={input.category} disabled={locked} onChange={(event) => set({ category: event.target.value as ManualProductInput["category"] })}>
               <option value="">Select</option>
-              {MANUAL_CATEGORIES.map((entry) => <option key={entry.slug} value={entry.slug}>{entry.label}</option>)}
+              {groups.map((group) => (
+                <optgroup key={group} label={group}>
+                  {KIND_PROFILES.filter((entry) => entry.group === group).map((entry) => <option key={entry.kind} value={entry.kind}>{entry.label}</option>)}
+                </optgroup>
+              ))}
             </select>
           </label>
-          <label>
-            Brand
-            <select value={input.brandName} disabled={locked} onChange={(event) => set({ brandName: event.target.value })}>
-              <option value="">No brand</option>
-              {brands.map((name) => <option key={name} value={name}>{name}</option>)}
-            </select>
-          </label>
+          {profile?.brand === "apple" ? (
+            <Locked label="Brand" value="Apple" />
+          ) : (
+            <label>
+              Brand
+              <select value={input.brandName} disabled={locked} onChange={(event) => set({ brandName: event.target.value })}>
+                <option value="">{profile?.brand === "optional" || !profile ? "No brand" : "Select"}</option>
+                {brands.filter((name) => profile?.brand !== "not-apple" || name.toLowerCase() !== "apple").map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </label>
+          )}
+          {profile?.usedTitle === "by-condition" && (
+            <label>
+              New or Used
+              <select value={input.productCondition ?? ""} disabled={locked} onChange={(event) => set({ productCondition: event.target.value as ManualProductInput["productCondition"] })}>
+                <option value="">Select</option>
+                <option value="brand_new">New</option>
+                <option value="used">Used</option>
+              </select>
+            </label>
+          )}
+          {profile?.kind === "tablet" && (
+            <label>
+              Connectivity
+              <select value={input.connectivity ?? ""} disabled={locked} onChange={(event) => set({ connectivity: event.target.value as ManualProductInput["connectivity"] })}>
+                <option value="">Select</option>
+                <option value="wifi">Wi-Fi only (PTA Not Applicable)</option>
+                <option value="cellular">Cellular (PTA Approved / Non-PTA)</option>
+              </select>
+            </label>
+          )}
           <label className="wide">
             Product name
-            <input value={input.title} disabled={locked} onChange={(event) => set({ title: event.target.value })} placeholder="e.g. Xiaomi Redmi Buds 8" />
-            <small>Web address: {check.slug ? `/product/${check.slug}` : "—"}</small>
+            <input value={input.title} disabled={locked} onChange={(event) => set({ title: event.target.value })} placeholder={profile?.kind === "iphone-used" ? "e.g. Apple iPhone 15 Pro Max" : "e.g. Xiaomi Redmi Buds 8"} />
+            <small>Saved as: {check.title || "—"} · Web address: {check.slug ? `/product/${check.slug}` : "—"}</small>
           </label>
           <label className="wide">
             Description (Product content)
@@ -159,49 +258,64 @@ export function AddProduct() {
       </div>
 
       <div className="spec-upload-step">
-        <h3>2 · Variants (colour, price, stock)</h3>
+        <h3>2 · Variants</h3>
         <p className="stock-hint">
-          One row per colour. SKUs are assigned automatically. {isAccessory ? "Accessories need PTA status and condition to be published." : "Gadgets need a price and delivery area to be published."}
+          One row per {profile?.storage ? "storage / colour" : "colour"}. SKUs are assigned automatically.
+          {profile && !isGadgetLike && " Delivery is Karachi only for this category."}
+          {profile?.kind === "iphone-used" && " Battery health, cycles and grade are optional — enter them only when known."}
         </p>
-        <div className="spec-upload-actions">
-          <button type="button" disabled={locked} onClick={fillCommon}>Fill empty: PTA Not applicable · Brand new · Nationwide</button>
-        </div>
+        {isGadgetLike && (
+          <div className="spec-upload-actions">
+            <button type="button" disabled={locked} onClick={fillCommon}>Fill empty: PTA Not applicable · Brand new · Nationwide</button>
+          </div>
+        )}
         {input.variants.map((variant, index) => (
           <fieldset key={index} className="add-product-variant" style={{ border: "1px solid var(--admin-line, #ddd)", borderRadius: 10, padding: 12, marginTop: 10 }} disabled={locked}>
             <legend>Variant {index + 1}</legend>
             <div style={row}>
+              {profile?.ram && <label>RAM<input value={variant.ram ?? ""} onChange={(event) => setVariant(index, { ram: event.target.value })} placeholder="Optional, e.g. 8 GB" /></label>}
+              {profile?.storage && <label>Storage<input value={variant.storage ?? ""} onChange={(event) => setVariant(index, { storage: event.target.value })} placeholder="e.g. 256 GB" /></label>}
               <label>Colour<input value={variant.color} onChange={(event) => setVariant(index, { color: event.target.value })} placeholder="Optional" /></label>
               <label>Price PKR<input inputMode="decimal" value={variant.price} onChange={(event) => setVariant(index, { price: event.target.value })} /></label>
               <label>Compare-at PKR<input inputMode="decimal" value={variant.compareAt} onChange={(event) => setVariant(index, { compareAt: event.target.value })} placeholder="Optional" /></label>
               <label>Stock<input inputMode="numeric" value={variant.stock} onChange={(event) => setVariant(index, { stock: event.target.value })} /></label>
-              <label>
-                PTA
-                <select value={variant.pta} onChange={(event) => setVariant(index, { pta: event.target.value })}>
-                  <option value="">{isAccessory ? "Select" : "Not set"}</option>
-                  <option value="not_applicable">Not applicable</option>
-                  <option value="approved">Approved</option>
-                  <option value="not_approved">Not approved</option>
-                </select>
-              </label>
-              <label>
-                Condition
-                <select value={variant.condition} onChange={(event) => setVariant(index, { condition: event.target.value })}>
-                  <option value="">{isAccessory ? "Select" : "Not set"}</option>
-                  <option value="brand_new">Brand new</option>
-                  <option value="open_box">Open box</option>
-                  <option value="refurbished">Refurbished</option>
-                  <option value="used">Used</option>
-                </select>
-              </label>
-              <label>
-                Delivery
-                <select value={variant.delivery} onChange={(event) => setVariant(index, { delivery: event.target.value })}>
-                  <option value="">Select</option>
-                  <option value="nationwide">Nationwide</option>
-                  <option value="karachi_only">Karachi only</option>
-                </select>
-              </label>
-              <label>Warranty<input value={variant.warranty} onChange={(event) => setVariant(index, { warranty: event.target.value })} placeholder="Optional, e.g. 1 Year" /></label>
+              {ptaField(variant, index)}
+              {conditionField(variant, index)}
+              {profile?.delivery === "karachi_only" ? (
+                <Locked label="Delivery" value="Karachi only" />
+              ) : (
+                <label>
+                  Delivery
+                  <select value={variant.delivery} onChange={(event) => setVariant(index, { delivery: event.target.value })}>
+                    <option value="">Select</option>
+                    <option value="nationwide">Nationwide</option>
+                    <option value="karachi_only">Karachi only</option>
+                  </select>
+                </label>
+              )}
+              {warrantyField(variant, index)}
+              {profile?.sim && (
+                <label>
+                  SIM
+                  <select value={variant.sim ?? ""} onChange={(event) => setVariant(index, { sim: event.target.value })}>
+                    <option value="">Not set</option>
+                    {SIM_CONFIGURATIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </label>
+              )}
+              {profile?.usedFacts && (
+                <>
+                  <label>
+                    Grade
+                    <select value={variant.grade ?? ""} onChange={(event) => setVariant(index, { grade: event.target.value })}>
+                      <option value="">None</option>
+                      {CONDITION_GRADES.map((grade) => <option key={grade} value={grade}>{grade}</option>)}
+                    </select>
+                  </label>
+                  <label>Battery health %<input inputMode="numeric" value={variant.batteryHealth ?? ""} onChange={(event) => setVariant(index, { batteryHealth: event.target.value })} placeholder="Optional" /></label>
+                  <label>Cycle count<input inputMode="numeric" value={variant.cycleCount ?? ""} onChange={(event) => setVariant(index, { cycleCount: event.target.value })} placeholder="Optional" /></label>
+                </>
+              )}
               {input.variants.length > 1 && (
                 <button type="button" className="admin-secondary" onClick={() => set({ variants: input.variants.filter((_, at) => at !== index) })} aria-label={`Remove variant ${index + 1}`}>
                   <Trash2 /> Remove
@@ -211,7 +325,7 @@ export function AddProduct() {
           </fieldset>
         ))}
         <div className="spec-upload-actions" style={{ marginTop: 10 }}>
-          <button type="button" disabled={locked} onClick={() => set({ variants: [...input.variants, emptyManualVariant()] })}><Plus /> Add another colour</button>
+          <button type="button" disabled={locked} onClick={() => set({ variants: [...input.variants, emptyManualVariant()] })}><Plus /> Add another variant</button>
         </div>
       </div>
 
@@ -244,6 +358,11 @@ export function AddProduct() {
         {(showErrors || check.errors.length <= 3) && check.errors.length > 0 && !result?.productId && (
           <ul className="admin-error" aria-label="Problems to fix">
             {check.errors.map((message) => <li key={message}>{message}</li>)}
+          </ul>
+        )}
+        {check.warnings.length > 0 && !result?.productId && (
+          <ul className="stock-hint" aria-label="Warnings">
+            {check.warnings.map((message) => <li key={message}><AlertTriangle /> {message}</li>)}
           </ul>
         )}
         <div className="spec-upload-actions">
