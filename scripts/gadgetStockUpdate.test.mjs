@@ -448,6 +448,28 @@ test("PDP: gadget descriptions become paragraphs and lines; spacing is cleaned f
   assert.deepEqual(descriptionParagraphs(null), []);
   assert.equal(isGadgetProduct({ category: { id: "c", name: "Gadgets", slug: "gadgets" } }), true);
   assert.equal(isGadgetProduct({ category: { id: "c", name: "Mobile Phones", slug: "mobile-phones" } }), false);
+  // Gadgets PDP V3 is shared with Mobile Accessories; Tablets & MacBooks and Mobile Phones keep their own PDPs.
+  assert.equal(isGadgetProduct({ category: { id: "c", name: "Mobile Accessories", slug: "mobile-accessories" } }), true);
+  assert.equal(isGadgetProduct({ category: { id: "c", name: "Tablets & MacBooks", slug: "tablets-macbooks" } }), false);
+  assert.equal(isGadgetProduct({ category: null }), false);
+});
+
+test("PDP: Gadgets + Mobile Accessories show About This Product before Technical Specifications; empty sections stay hidden", () => {
+  const app = readFileSync(new URL("../src/StorefrontApp.tsx", import.meta.url), "utf8");
+  const aboutAt = app.indexOf("{gadgetParagraphs && gadgetParagraphs.length > 0 && (");
+  const specsAt = app.indexOf("{product.specifications.length > 0 && (\n          <section className=\"pdp-specifications\">");
+  const storyAt = app.indexOf("{!gadgetParagraphs && product.content && (");
+  assert.ok(aboutAt > 0 && specsAt > aboutAt && storyAt > specsAt, "About (gadget PDP) → Specifications → original story (other categories)");
+  assert.match(app, /<h2>\{gadgetParagraphs \? "Technical Specifications" : "Everything you need to know\."\}<\/h2>/);
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  // New specification styling is scoped to the gadget PDP class only.
+  const start = css.indexOf("/* Gadgets + Mobile Accessories PDP: Technical Specifications");
+  const end = css.indexOf(".pdp-page--gadget .pdp-spec-group dd { font-size:13.5px; }", start);
+  assert.ok(start > 0 && end > start);
+  const block = css.slice(start, end).replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const selector of block.match(/^\s*([^{}@\n/][^{}\n]*)\{/gm) ?? []) {
+    assert.match(selector.trim(), /^\.pdp-page--gadget /, `scoped selector: ${selector.trim()}`);
+  }
 });
 
 test("PDP: gadgets get the About This Product section through React text (no dangerouslySetInnerHTML); other products keep their section", () => {

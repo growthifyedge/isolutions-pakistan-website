@@ -1917,6 +1917,31 @@ body:has(.home-page) footer { padding-top:96px; }
 @media (max-width:600px) {
   .pdp-delivery { padding:14px 14px 12px; }
 }
+/* Gadgets + Mobile Accessories PDP: Technical Specifications — the shared grouped specification markup shown as light,
+   readable cards (label left, value right) on a soft panel. Mobile Phones and Tablets & MacBooks keep their styling. */
+.pdp-page--gadget .pdp-specifications { padding:60px 0 64px; background:#F5F6F3; color:var(--ink); border-top:1px solid var(--line); }
+.pdp-page--gadget .pdp-section-heading { flex-direction:column; align-items:flex-start; gap:12px; margin-bottom:28px; padding-bottom:0; border-bottom:0; }
+.pdp-page--gadget .pdp-section-heading::before { content:""; width:36px; height:3px; border-radius:3px; background:var(--accent); }
+.pdp-page--gadget .pdp-section-heading .eyebrow { color:var(--accent); }
+.pdp-page--gadget .pdp-section-heading h2 { color:var(--ink); font:600 clamp(28px,2.8vw,38px)/1.08 Manrope,sans-serif; letter-spacing:-.04em; }
+.pdp-page--gadget .pdp-spec-groups { column-gap:20px; }
+.pdp-page--gadget .pdp-spec-groups:has(> .pdp-spec-group:only-child) { max-width:760px; }
+.pdp-page--gadget .pdp-spec-group { display:inline-block; width:100%; margin:0 0 20px; padding:20px 22px 6px; border:1px solid var(--line); border-radius:16px; background:#FFFFFF; box-shadow:0 8px 24px rgba(21,23,21,.04); }
+.pdp-page--gadget .pdp-spec-group h3 { position:relative; margin:0 0 2px; padding:0 0 12px 12px; border-bottom:1px solid var(--line); color:var(--ink); font:800 12.5px/1.2 Manrope,sans-serif; letter-spacing:.12em; }
+.pdp-page--gadget .pdp-spec-group h3::before { content:""; position:absolute; left:0; top:-1px; width:3px; height:14px; border-radius:3px; background:var(--accent); }
+.pdp-page--gadget .pdp-spec-group dl > div { grid-template-columns:minmax(0,min(42%,190px)) minmax(0,1fr); gap:16px; padding:12px 0; border-bottom:1px solid #EEF0EC; }
+.pdp-page--gadget .pdp-spec-group dl > div:last-child { border-bottom:0; }
+.pdp-page--gadget .pdp-spec-group dt { color:#5F6863; font:550 13.5px/1.5 Manrope,sans-serif; }
+.pdp-page--gadget .pdp-spec-group dd { color:var(--ink); font:650 14.5px/1.5 Manrope,sans-serif; }
+@media (max-width:600px) {
+  .pdp-page--gadget .pdp-specifications { padding:40px 0 44px; }
+  .pdp-page--gadget .pdp-section-heading { margin-bottom:20px; }
+  .pdp-page--gadget .pdp-section-heading h2 { font-size:28px; }
+  .pdp-page--gadget .pdp-spec-group { margin-bottom:12px; padding:16px 16px 4px; border-radius:14px; }
+  .pdp-page--gadget .pdp-spec-group dl > div { gap:12px; padding:11px 0; }
+  .pdp-page--gadget .pdp-spec-group dt { font-size:13px; }
+  .pdp-page--gadget .pdp-spec-group dd { font-size:13.5px; }
+}
 @media (max-width:900px) {
   .pdp-showcase { grid-template-columns:1fr; gap:42px; }
   .pdp-main-image { height:650px; }

@@ -3414,9 +3414,9 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
     { title: "100% Authentic", subtitle: "Official Product", animation: authenticAnimation },
     { title: "Trusted by Thousands", subtitle: "Customers across Pakistan", animation: trustedAnimation },
   ];
-  // Gadgets: the Owner's description as clean paragraphs and line breaks. Other categories keep the single paragraph.
+  // Gadgets + Mobile Accessories: the Owner's description as clean paragraphs and line breaks. Other categories keep the single paragraph.
   const gadgetParagraphs = isGadgetProduct(product) ? descriptionParagraphs(product.content) : null;
-  // Gadgets only: a WhatsApp order enquiry (no website order) and delivery facts from the stored scope and checkout rules.
+  // Gadgets + Mobile Accessories only: a WhatsApp order enquiry (no website order) and delivery facts from the stored scope and checkout rules.
   const gadgetOrderUrl = isGadgetProduct(product) && variant ? gadgetWhatsappOrderUrl({
     whatsappNumber: storefrontContact.whatsappNumber,
     productTitle: product.title,
@@ -3751,10 +3751,25 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
             ))}
           </div>
         </section>
+        {/* Gadgets + Mobile Accessories: About This Product comes before Technical Specifications. Other categories keep their order. */}
+        {gadgetParagraphs && gadgetParagraphs.length > 0 && (
+          // Gadgets + Mobile Accessories: the Owner's description as an editorial section. Hidden when the description is empty.
+          <section className="pdp-about container" aria-labelledby="pdp-about-heading">
+            <div className="pdp-about-head">
+              <span className="eyebrow accent">PRODUCT INFORMATION</span>
+              <h2 id="pdp-about-heading">About This Product</h2>
+            </div>
+            <div className="pdp-story-text pdp-about-text">
+              {gadgetParagraphs.map((lines, index) => (
+                <p key={index}>{lines.map((line, lineIndex) => (lineIndex ? [<br key={`br${lineIndex}`} />, line] : line))}</p>
+              ))}
+            </div>
+          </section>
+        )}
         {product.specifications.length > 0 && (
           <section className="pdp-specifications">
             <div className="container">
-              <div className="pdp-section-heading"><span className="eyebrow">SPECIFICATIONS</span><h2>Everything you need to know.</h2></div>
+              <div className="pdp-section-heading"><span className="eyebrow">SPECIFICATIONS</span><h2>{gadgetParagraphs ? "Technical Specifications" : "Everything you need to know."}</h2></div>
               {(() => {
                 const groups = groupSpecifications(product.specifications);
                 return (
@@ -3775,31 +3790,14 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
             </div>
           </section>
         )}
-        {gadgetParagraphs ? (
-          gadgetParagraphs.length > 0 && (
-            // Gadgets: the Owner's description as an editorial section of the page. Other categories keep the section below unchanged.
-            <section className="pdp-about container" aria-labelledby="pdp-about-heading">
-              <div className="pdp-about-head">
-                <span className="eyebrow accent">PRODUCT INFORMATION</span>
-                <h2 id="pdp-about-heading">About This Product</h2>
-              </div>
-              <div className="pdp-story-text pdp-about-text">
-                {gadgetParagraphs.map((lines, index) => (
-                  <p key={index}>{lines.map((line, lineIndex) => (lineIndex ? [<br key={`br${lineIndex}`} />, line] : line))}</p>
-                ))}
-              </div>
-            </section>
-          )
-        ) : (
-          product.content && (
-            <section className="pdp-story container">
-              <div><span className="eyebrow accent">PRODUCT INFORMATION</span><h2>Made to fit<br />your everyday.</h2></div>
-              <div>
-                <h3>{product.title}</h3>
-                <p>{product.content}</p>
-              </div>
-            </section>
-          )
+        {!gadgetParagraphs && product.content && (
+          <section className="pdp-story container">
+            <div><span className="eyebrow accent">PRODUCT INFORMATION</span><h2>Made to fit<br />your everyday.</h2></div>
+            <div>
+              <h3>{product.title}</h3>
+              <p>{product.content}</p>
+            </div>
+          </section>
         )}
       </div>
     </Layout>

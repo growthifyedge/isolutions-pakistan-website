@@ -1,12 +1,19 @@
 /**
- * PDP "Product Information" text for Gadgets: the Owner's description (products.content) shown as clean paragraphs.
+ * PDP "Product Information" text for Gadgets and Mobile Accessories: the Owner's description (products.content) shown as clean paragraphs.
  * Display only — the stored text is never changed. A blank line starts a new paragraph, a single line break stays a line
  * break, and runs of spaces/tabs inside a line show as one space. The result is plain text: React renders it, never HTML.
  */
 import type { CatalogProduct, CatalogVariant } from "./catalog.ts";
 import { formatPkrMinor } from "./money.ts";
 
-export const isGadgetProduct = (product: Pick<CatalogProduct, "category">) => product.category?.slug === "gadgets";
+/**
+ * Categories that use the Gadgets PDP V3 layout (About This Product, Technical Specifications, Order on WhatsApp,
+ * delivery card). Mobile Phones and Tablets & MacBooks keep their own PDPs.
+ */
+export const GADGET_PDP_CATEGORY_SLUGS: readonly string[] = ["gadgets", "mobile-accessories"];
+
+export const isGadgetProduct = (product: Pick<CatalogProduct, "category">) =>
+  GADGET_PDP_CATEGORY_SLUGS.includes(product.category?.slug ?? "");
 
 /** Paragraphs, each a list of lines. Empty when the text is blank. */
 export function descriptionParagraphs(text: string | null | undefined): string[][] {
