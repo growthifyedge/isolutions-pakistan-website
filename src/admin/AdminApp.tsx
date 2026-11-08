@@ -15,6 +15,7 @@ import {
   Tablet,
   ClipboardCheck,
   FileSearch,
+  FileText,
   Plus,
   Search,
   Settings,
@@ -50,6 +51,7 @@ import { IphoneStockUpdate } from "./IphoneStockUpdate";
 import { GadgetStockUpdate } from "./GadgetStockUpdate";
 import { TabletStockUpdate } from "./TabletStockUpdate";
 import { SpecificationBulkUpload } from "./SpecificationBulkUpload";
+import { DescriptionBulkUpload } from "./DescriptionBulkUpload";
 import { CatalogReadiness } from "./CatalogReadiness";
 import { ContactEnquiries } from "./ContactEnquiries";
 import { BundleManager } from "./BundleManager";
@@ -68,6 +70,7 @@ const nav: ReadonlyArray<readonly [string, string, LucideIcon]> = [
   ["Gadgets Stock", "/admin/gadget-stock-update", PackageCheck],
   ["Tablets & MacBooks", "/admin/tablet-stock-update", Tablet],
   ["Spec Upload", "/admin/spec-upload", FileSearch],
+  ["Descriptions", "/admin/description-upload", FileText],
   ["Readiness", "/admin/catalog-readiness", ClipboardCheck],
   ["Enquiries", "/admin/contact-enquiries", MessageSquareText],
   ["Homepage", "/admin/homepage", Sparkles],
@@ -661,6 +664,12 @@ export function AdminApp() {
     page = (
       <AdminLayout section="Gadgets Stock">
         <GadgetStockUpdate />
+      </AdminLayout>
+    );
+  else if (path === "/admin/description-upload")
+    page = (
+      <AdminLayout section="Descriptions">
+        <DescriptionBulkUpload />
       </AdminLayout>
     );
   else if (path === "/admin/spec-upload")
