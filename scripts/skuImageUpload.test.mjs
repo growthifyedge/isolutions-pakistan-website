@@ -6,6 +6,7 @@ import test from "node:test";
 import JSZip from "jszip";
 import {
   buildSkuPreview,
+  fileSkuSpans,
   ledgerKey,
   parseSkuFileName,
   parseSkuRange,
@@ -207,8 +208,54 @@ test("preview: PRODUCTION without a SKU range blocks every product; DEV does not
   const files = [await file("GD032-01.jpg")];
   const prod = buildSkuPreview(files, catalog, options({ range: null }));
   assert.equal(prod.products[0].status, "blocked");
-  assert.match(prod.products[0].reason, /PRODUCTION uploads need a SKU range/);
+  assert.match(prod.products[0].reason, /SKU range not set/);
   assert.equal(buildSkuPreview(files, catalog, options({ range: null, environment: "development" })).products[0].status, "ready");
+});
+
+test("range fix: GD032–GD223 accepted; missing / one-sided / reversed / malformed ranges block on PRODUCTION; out-of-range stays out", async () => {
+  const catalog = [product(31, "GD031"), product(32, "GD032"), product(150, "GD150"), product(223, "GD223"), product(224, "GD224"), product(10, "GD010")];
+  const files = [];
+  for (const sku of ["GD031", "GD032", "GD150", "GD223", "GD224", "GD010"]) files.push(await file(`${sku}-01.jpg`, jpeg(1000, 1000, files.length + 40)));
+  const preview = (from, to) => {
+    const parsed = parseSkuRange(from, to);
+    return buildSkuPreview(files, catalog, options({ range: parsed.range, rangeError: parsed.error }));
+  };
+  // Valid range, typed with spaces and lower case as the Owner might.
+  for (const [from, to] of [["GD032", "GD223"], [" gd032 ", "gd223"]]) {
+    const ok = preview(from, to);
+    assert.deepEqual(ok.products.map((entry) => [entry.skus[0], entry.status]), [["GD032", "ready"], ["GD150", "ready"], ["GD223", "ready"]]);
+    assert.deepEqual(ok.unmatched.map((entry) => entry.sku).sort(), ["GD010", "GD031", "GD224"]);
+    assert.ok(ok.unmatched.every((entry) => /outside the SKU range GD032–GD223/.test(entry.reason)));
+  }
+  // Missing range: nothing can be uploaded, the message says the boxes are empty.
+  const missing = preview("", "");
+  assert.equal(missing.totals.readyProducts, 0);
+  assert.ok(missing.products.every((entry) => entry.status === "blocked" && /SKU range not set/.test(entry.reason)));
+  // One-sided, reversed, malformed, mixed prefixes: blocked with the reason, never treated as "no limit".
+  for (const [from, to, why] of [["GD032", "", /both ends/], ["GD223", "GD032", /not be higher/], ["GD-032", "GD223", /both ends/], ["GD032", "AC223", /same prefix/], ["GD032", "GD0223", /same prefix/]]) {
+    const bad = preview(from, to);
+    assert.equal(bad.totals.readyProducts, 0, `${from}–${to}`);
+    assert.ok(bad.products.every((entry) => entry.status === "blocked" && /SKU range invalid/.test(entry.reason) && why.test(entry.reason)), `${from}–${to}`);
+  }
+  // Recalculation: the same files give a new result when the range changes.
+  assert.deepEqual(preview("GD150", "GD150").products.map((entry) => entry.skus[0]), ["GD150"]);
+  assert.equal(preview("GD031", "GD223").products.some((entry) => entry.skus[0] === "GD031"), true, "GD031 is only reachable when the Owner types it into the range");
+});
+
+test("range hint: the SKU span of the chosen files, per prefix", () => {
+  assert.deepEqual(fileSkuSpans(["GD223-01.jpg", "GD032-02.png", "GD100-01.webp", "notes.txt", "holiday.jpg"]), ["GD032–GD223"]);
+  assert.deepEqual(fileSkuSpans(["AC001-01.jpg", "GD050-01.jpg"]), ["AC001", "GD050"]);
+  assert.deepEqual(fileSkuSpans([]), []);
+});
+
+test("range boxes never show a SKU as placeholder (an empty box must not look filled in)", async () => {
+  const section = await readFile(new URL("../src/admin/SkuImageUpload.tsx", import.meta.url), "utf8");
+  const placeholders = [...section.matchAll(/placeholder="([^"]*)"/g)].map((match) => match[1]);
+  assert.ok(placeholders.length >= 2);
+  for (const value of placeholders) assert.equal(/[A-Z]{2,4}\d{3}/i.test(value), false, `placeholder "${value}" looks like a real SKU`);
+  assert.match(section, /SKU range active/);
+  assert.match(section, /not set<\/strong> \(the From \/ To boxes are empty\)/);
+  assert.equal(/setRange(From|To)\((?!event)/.test(section), false, "the range is never filled in automatically");
 });
 
 test("preview: a SKU shared by two products is an error, never guessed", async () => {

@@ -63,6 +63,7 @@ export type SkuRange = { prefix: string; from: number; to: number; width: number
 // ---------------- filenames, SKUs and ranges ----------------
 
 const SKU_FILE = /^([A-Za-z]{2,4})(\d{3,6})(?:[-_ ]+(\d{1,3}))?\.(jpe?g|png|webp)$/i;
+const SKU_PARTS = /^([A-Za-z]{2,4})(\d{3,6})$/;
 
 /** "GD032-01.jpg" → { sku: "GD032", number: 1 }. "GD032.jpg" is image 1. Anything else → null. */
 export function parseSkuFileName(name: string): { sku: string; number: number } | null {
@@ -73,8 +74,6 @@ export function parseSkuFileName(name: string): { sku: string; number: number } 
   if (!Number.isInteger(number) || number < 1) return null;
   return { sku: `${match[1].toUpperCase()}${match[2]}`, number };
 }
-
-const SKU_PARTS = /^([A-Za-z]{2,4})(\d{3,6})$/;
 
 /** "GD032" – "GD223" → a range; both ends need the same prefix and digit count. */
 export function parseSkuRange(fromText: string, toText: string): { range: SkuRange | null; error: string | null } {
@@ -90,6 +89,32 @@ export function parseSkuRange(fromText: string, toText: string): { range: SkuRan
   const prefix = from[1].toUpperCase();
   return { range: { prefix, from: a, to: b, width: from[2].length, label: `${prefix}${from[2]}–${prefix}${to[2]}` }, error: null };
 }
+
+/**
+ * The SKU span the chosen files cover, per prefix ("GD032–GD223"). Shown as a hint next to the range boxes only —
+ * it is never copied into the range automatically, so the PRODUCTION guard stays a deliberate Owner entry.
+ */
+export function fileSkuSpans(names: string[]): string[] {
+  const spans = new Map<string, { width: number; min: number; max: number }>();
+  for (const name of names) {
+    const parsed = parseSkuFileName(name);
+    const parts = parsed ? SKU_PARTS.exec(parsed.sku) : null;
+    if (!parts) continue;
+    const key = `${parts[1]}|${parts[2].length}`;
+    const value = Number(parts[2]);
+    const span = spans.get(key);
+    spans.set(key, span ? { ...span, min: Math.min(span.min, value), max: Math.max(span.max, value) } : { width: parts[2].length, min: value, max: value });
+  }
+  return [...spans.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, span]) => {
+      const prefix = key.split("|")[0];
+      const pad = (value: number) => `${prefix}${String(value).padStart(span.width, "0")}`;
+      return span.min === span.max ? pad(span.min) : `${pad(span.min)}–${pad(span.max)}`;
+    });
+}
+
+export const RANGE_NOT_SET_MESSAGE = "SKU range not set: type the first and last SKU in the “SKU range from” and “to” boxes. PRODUCTION uploads need one.";
 
 export function skuInRange(sku: string, range: SkuRange) {
   const parts = SKU_PARTS.exec(sku);
@@ -342,7 +367,7 @@ export function buildSkuPreview(files: SkuImageFile[], catalog: SkuCatalogProduc
     let reason: string | null = null;
     if (productionNeedsRange) {
       status = "blocked";
-      reason = "PRODUCTION uploads need a SKU range (e.g. GD032 – GD223).";
+      reason = options.rangeError ? `SKU range invalid: ${options.rangeError}` : RANGE_NOT_SET_MESSAGE;
     } else if (numberConflict) {
       status = "blocked";
       reason = `Filename conflict: ${numberConflict} Rename one of them.`;

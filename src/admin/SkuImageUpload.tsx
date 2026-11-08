@@ -9,7 +9,9 @@ import { installUnloadGuard } from "../lib/unloadGuard";
 import { readPickedFiles, readZipFile } from "../lib/skuImageFiles";
 import {
   SKU_IMAGE_ACCEPT,
+  RANGE_NOT_SET_MESSAGE,
   buildSkuPreview,
+  fileSkuSpans,
   parseSkuRange,
   runSkuImageUpload,
   skuUploadReportCsv,
@@ -150,6 +152,7 @@ export function SkuImageUpload() {
       }),
     [files, catalog, range, addToExisting, ledger],
   );
+  const skuSpans = useMemo(() => fileSkuSpans(files.map((file) => file.name)), [files]);
   const fileByIndex = useMemo(() => new Map(files.map((file) => [file.index, file.file])), [files]);
 
   async function addFiles(reader: (start: number) => Promise<{ files: SkuImageFile[]; ignored: string[]; error: string | null }>) {
@@ -192,7 +195,7 @@ export function SkuImageUpload() {
     if (!uploadTarget.allowed) errors.push(uploadTarget.reason ?? "Upload target blocked.");
     if (catalogLoading || catalogError || catalog.length === 0) errors.push("The catalog is not loaded, so existing images cannot be checked.");
     if (range.error) errors.push(range.error);
-    if (uploadTarget.environment === "production" && !range.range) errors.push("PRODUCTION uploads need a SKU range (From / To).");
+    if (uploadTarget.environment === "production" && !range.range && !range.error) errors.push(RANGE_NOT_SET_MESSAGE);
     const foreign = RUNTIME_REFS.filter((ref) => ref !== uploadTarget.projectRef);
     if (foreign.length) errors.push(`The active build references another Supabase project (${foreign.join(", ")}).`);
     const ready = preview.products.filter((product) => product.status === "ready");
@@ -323,21 +326,35 @@ export function SkuImageUpload() {
           )}
           <label>
             SKU range from
-            <input value={rangeFrom} onChange={(event) => setRangeFrom(event.target.value.toUpperCase())} placeholder="GD032" size={8} aria-label="SKU range from" />
+            <input value={rangeFrom} onChange={(event) => setRangeFrom(event.target.value.toUpperCase())} placeholder="first SKU" size={9} aria-label="SKU range from" />
           </label>
           <label>
             to
-            <input value={rangeTo} onChange={(event) => setRangeTo(event.target.value.toUpperCase())} placeholder="GD223" size={8} aria-label="SKU range to" />
+            <input value={rangeTo} onChange={(event) => setRangeTo(event.target.value.toUpperCase())} placeholder="last SKU" size={9} aria-label="SKU range to" />
           </label>
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="checkbox" checked={addToExisting} onChange={(event) => setAddToExisting(event.target.checked)} />
             Add gallery images to products that already have images
           </label>
         </div>
-        {uploadTarget.environment === "production" && !range.range && (
-          <p className="bulk-images-note">A SKU range is required on PRODUCTION: only files whose SKU is inside the range can be uploaded.</p>
+        {/* Range state is always spelled out: an empty box must never look like an entered range. */}
+        {range.range ? (
+          <p className="bulk-images-valid" role="status" aria-label="SKU range status">
+            <ShieldCheck size={16} /> SKU range active: <strong>{range.range.label}</strong>. Files outside it are listed under Unmatched and are never uploaded.
+          </p>
+        ) : range.error ? (
+          <p className="bulk-images-error" role="alert" aria-label="SKU range status">SKU range invalid: {range.error}</p>
+        ) : (
+          <p className={uploadTarget.environment === "production" ? "bulk-images-error" : "bulk-images-note"} role="status" aria-label="SKU range status">
+            SKU range: <strong>not set</strong> (the From / To boxes are empty).
+            {uploadTarget.environment === "production" ? " PRODUCTION uploads need one: only files whose SKU is inside the range can be uploaded." : " Optional on DEV."}
+          </p>
         )}
-        {range.error && <p className="bulk-images-error">{range.error}</p>}
+        {skuSpans.length > 0 && (
+          <p className="bulk-images-note" aria-label="SKUs in the chosen files">
+            The chosen files cover: <strong>{skuSpans.join(", ")}</strong>. Type the range yourself; it is not filled in automatically.
+          </p>
+        )}
         {readError && <p className="bulk-images-error" role="alert">{readError}</p>}
         {reading && <p className="bulk-images-note" role="status">Reading files… {reading.total ? `${reading.done} / ${reading.total}` : ""}</p>}
 
