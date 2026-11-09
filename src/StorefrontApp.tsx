@@ -1244,7 +1244,77 @@ function CatalogEmpty({
   );
 }
 
-function ProductCard({ product, categoryLabel }: { product: CatalogProduct; categoryLabel?: string }) {
+/**
+ * Product cards in every collection and Shop grid: Add to cart / Buy it now (desktop: shown on hover or keyboard focus over the image;
+ * touch / small screens: always shown under the price). Same rules as the homepage card actions:
+ * - one variant in stock → added to the existing cart (stock and per-line limits kept); Buy it now then opens /checkout;
+ * - several variants → both buttons open the product page so the customer chooses (no variant is picked for them);
+ * - out of stock → disabled.
+ */
+function ProductCardActions({ product, placement }: { product: CatalogProduct; placement: "overlay" | "inline" }) {
+  const inStock = product.variants.some((variant) => variant.quantity > 0);
+  const needsOptions = product.variants.length > 1;
+  const variant = product.variants.length === 1 ? product.variants[0] : null;
+  const media = primaryMedia(product);
+  const productHref = `/product/${product.slug}`;
+
+  const add = (buyNow: boolean) => {
+    if (!inStock) return;
+    if (needsOptions || !variant) {
+      window.location.assign(productHref);
+      return;
+    }
+    const before = storefrontCartItemQuantity(variant.id);
+    const after = addStorefrontCartItem({
+      productId: product.id,
+      productSlug: product.slug,
+      productTitle: product.title,
+      variantId: variant.id,
+      sku: variant.sku,
+      quantity: 1,
+      priceMinor: variant.priceMinor,
+      imageUrl: media ? cloudinaryDeliveryUrl(media.publicId, 320) || media.url : null,
+      variantLabel: [
+        variant.ram || variant.storage ? displayConfigurationLabel(configurationLabel(variant)) : null,
+        variant.color ? labelize(variant.color) : null,
+      ].filter(Boolean).join(" · ") || null,
+    }, variant.quantity);
+    if (buyNow) {
+      // Already in the cart at its stock / line limit still goes to checkout with what is there.
+      if (after > 0) window.location.assign("/checkout");
+      return;
+    }
+    if (after > before) {
+      window.dispatchEvent(new CustomEvent("isolutions:cart-feedback", { detail: { title: product.title } }));
+    }
+  };
+
+  const addLabel = !inStock ? "Out of stock" : needsOptions ? "Choose options" : "Add to cart";
+  return (
+    <div className={`product-card-actions product-card-actions--${placement}`}>
+      <button
+        type="button"
+        className="product-card-add"
+        disabled={!inStock}
+        onClick={() => add(false)}
+        aria-label={!inStock ? `${product.title} is out of stock` : needsOptions ? `Choose options for ${product.title}` : `Add ${product.title} to cart`}
+      >
+        <ShoppingCart aria-hidden="true" />{addLabel}
+      </button>
+      <button
+        type="button"
+        className="product-card-buy"
+        disabled={!inStock}
+        onClick={() => add(true)}
+        aria-label={!inStock ? `${product.title} is out of stock` : needsOptions ? `Choose options to buy ${product.title}` : `Buy ${product.title} now`}
+      >
+        Buy it now
+      </button>
+    </div>
+  );
+}
+
+function ProductCard({ product, categoryLabel, cartActions = false }: { product: CatalogProduct; categoryLabel?: string; cartActions?: boolean }) {
   const media = primaryMedia(product);
   const pricedVariant = [...product.variants]
     .sort((left, right) => left.priceMinor - right.priceMinor)[0];
@@ -1252,19 +1322,27 @@ function ProductCard({ product, categoryLabel }: { product: CatalogProduct; cate
   const compareAt = pricedVariant ? validCompareAt(pricedVariant) : null;
   const inStock = product.variants.some((variant) => variant.quantity > 0);
   const shortDescription = product.short_description?.trim();
+  const image = (
+    <a className="product-image" href={`/product/${product.slug}`}>
+      {media ? (
+        <img
+          src={cloudinaryDeliveryUrl(media.publicId, 800, { trim: true }) || media.url}
+          alt={media.alt}
+        />
+      ) : null}
+      <button aria-label={`Save ${product.title}`} className="save">
+        <Heart size={18} />
+      </button>
+    </a>
+  );
   return (
-    <article className="product-card">
-      <a className="product-image" href={`/product/${product.slug}`}>
-        {media ? (
-          <img
-            src={cloudinaryDeliveryUrl(media.publicId, 800, { trim: true }) || media.url}
-            alt={media.alt}
-          />
-        ) : null}
-        <button aria-label={`Save ${product.title}`} className="save">
-          <Heart size={18} />
-        </button>
-      </a>
+    <article className={cartActions ? "product-card has-card-actions" : "product-card"}>
+      {cartActions ? (
+        <div className="product-image-wrap">
+          {image}
+          <ProductCardActions product={product} placement="overlay" />
+        </div>
+      ) : image}
       <div className="product-copy">
         <span className="eyebrow">
           {product.brand ? `${product.brand.name} · ` : ""}{categoryLabel ?? product.category.name}
@@ -1287,6 +1365,7 @@ function ProductCard({ product, categoryLabel }: { product: CatalogProduct; cate
           <span className={`dot${inStock ? "" : " unavailable"}`} />
           {inStock ? "In stock" : "Out of stock"}
         </div>
+        {cartActions && <ProductCardActions product={product} placement="inline" />}
       </div>
     </article>
   );
@@ -2640,7 +2719,7 @@ function Shop({ taxonomy }: { taxonomy: Taxonomy }) {
             {products.length > 0 && (
               <div className="product-grid shop-product-grid">
                 {products.map((product) => (
-                  <ProductCard product={product} key={product.id} />
+                  <ProductCard product={product} cartActions key={product.id} />
                 ))}
               </div>
             )}
@@ -3294,6 +3373,7 @@ function CollectionPage({
                 <ProductCard
                   product={product}
                   categoryLabel={collection?.extraProducts?.productIds.includes(product.id) ? collection.extraProducts.cardCategory : undefined}
+                  cartActions
                   key={product.id}
                 />
               ))}

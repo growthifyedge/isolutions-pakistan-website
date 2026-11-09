@@ -3575,6 +3575,66 @@ body:has(.pdp-page) header.storefront-navbar {
 }
 .navbar-links .navbar-mega-panel[aria-label="Home Gadgets collections"] .navbar-mega-groups h3 a:hover,
 .navbar-links .navbar-mega-panel[aria-label="Home Gadgets collections"] .navbar-mega-groups h3 a:focus-visible { color:#F0643A; }
+/* Collection / Shop product cards: Add to cart / Buy it now (same colours as the homepage card actions).
+   Desktop with a mouse: overlay at the bottom of the image, revealed on hover / keyboard focus.
+   Touch or small screens: always visible under the price (never hover-only). */
+.product-image-wrap { position:relative; }
+.product-card-actions { display:flex; gap:7px; }
+.product-card-add,
+.product-card-buy {
+  min-width:0;
+  min-height:38px;
+  flex:1 1 0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  padding:0 8px;
+  border-radius:8px;
+  font:700 11px/1 Manrope,sans-serif;
+  white-space:nowrap;
+  cursor:pointer;
+  transition:background .2s ease,border-color .2s ease,color .2s ease;
+}
+.product-card-add { border:1px solid #F0643A; background:#F0643A; color:#FFFFFF; }
+.product-card-buy { border:1px solid rgba(16,26,23,.32); background:#FFFFFF; color:#101A17; }
+.product-card-add svg { width:14px; height:14px; stroke-width:2.2; flex:none; }
+.product-card-add:hover:not(:disabled) { background:#D9532F; border-color:#D9532F; }
+.product-card-buy:hover:not(:disabled) { border-color:#101A17; background:#F7F8F7; }
+.product-card-add:disabled,
+.product-card-buy:disabled { opacity:.55; cursor:not-allowed; }
+.product-card-add:focus-visible,
+.product-card-buy:focus-visible { outline:2px solid #101A17; outline-offset:2px; }
+.product-card-actions--overlay { display:none; }
+.product-card-actions--inline { margin-top:12px; }
+@media (max-width:767px) {
+  .product-card-actions--inline { flex-direction:column; gap:6px; }
+}
+@media (min-width:768px) and (hover:hover) and (pointer:fine) {
+  .product-card-actions--inline { display:none; }
+  .product-card-actions--overlay {
+    position:absolute;
+    right:12px;
+    bottom:12px;
+    left:12px;
+    z-index:3;
+    display:flex;
+    opacity:0;
+    visibility:hidden;
+    pointer-events:none;
+    transform:translateY(8px);
+    transition:opacity .2s ease,transform .2s ease,visibility .2s ease;
+  }
+  .has-card-actions:hover .product-card-actions--overlay,
+  .has-card-actions:focus-within .product-card-actions--overlay {
+    opacity:1;
+    visibility:visible;
+    pointer-events:auto;
+    transform:translateY(0);
+  }
+  .product-card-add:focus-visible,
+  .product-card-buy:focus-visible { outline-color:#FFFFFF; }
+}
 /* Homepage shop-by-category carousel */
 .home-category-carousel {
   padding-top:72px;
