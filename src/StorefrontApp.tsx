@@ -948,10 +948,6 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
             promoWidth={300}
             promoHeight={200}
             showHeading={false}
-
-            groupColumns={4}
-            groupColumnGap={44}
-            groupRowGap={22}
           />
           <a className="navbar-deals" href="/collections/deals" aria-current={location.pathname === "/collections/deals" ? "page" : undefined}><span aria-hidden="true">🔥</span>Deals</a>
         </nav>
