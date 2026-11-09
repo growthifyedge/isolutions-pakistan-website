@@ -3579,6 +3579,17 @@ body:has(.pdp-page) header.storefront-navbar {
    Desktop with a mouse: overlay at the bottom of the image, revealed on hover / keyboard focus.
    Touch or small screens: always visible under the price (never hover-only). */
 .product-image-wrap { position:relative; }
+/* Sale badge on collection / Shop cards: reuses .home-featured-sale, aligned with the save (heart) button. */
+.product-image .product-card-sale { top:12px; left:12px; z-index:2; padding:7px 9px; font-size:10px; line-height:1; white-space:nowrap; }
+/* Missing / broken product image: keep the grey placeholder but hide the browser's alt-text fallback visually
+   (alt stays available to screen readers; the title is printed under the image), so nothing collides with the
+   Sale badge or the heart button. Loaded images are unaffected. */
+.product-card .product-image img { color:transparent; background:inherit; }
+/* Pseudo-elements only render on images that failed to load: cover the broken-image icon with the placeholder. */
+.product-card .product-image img::after { content:""; position:absolute; inset:0; background:inherit; }
+@media (max-width:767px) {
+  .product-image .product-card-sale { top:8px; left:8px; padding:5px 7px; font-size:9px; }
+}
 .product-card-actions { display:flex; gap:7px; }
 .product-card-add,
 .product-card-buy {

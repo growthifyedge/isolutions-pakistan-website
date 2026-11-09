@@ -1322,6 +1322,17 @@ function ProductCard({ product, categoryLabel, cartActions = false }: { product:
   const compareAt = pricedVariant ? validCompareAt(pricedVariant) : null;
   const inStock = product.variants.some((variant) => variant.quantity > 0);
   const shortDescription = product.short_description?.trim();
+  // Sale badge (same look as the homepage cards): shown only when a variant has a valid compare-at price.
+  // The % is shown only when every discounted variant has the same discount; otherwise just "Sale".
+  const discountPercents = [...new Set(product.variants.flatMap((variant) => {
+    const original = validCompareAt(variant);
+    return original === null ? [] : [Math.round(((original - variant.priceMinor) / original) * 100)];
+  }))];
+  const saleLabel = discountPercents.length === 0
+    ? null
+    : discountPercents.length === 1 && discountPercents[0] > 0
+      ? `Sale · ${discountPercents[0]}%`
+      : "Sale";
   const image = (
     <a className="product-image" href={`/product/${product.slug}`}>
       {media ? (
@@ -1330,6 +1341,7 @@ function ProductCard({ product, categoryLabel, cartActions = false }: { product:
           alt={media.alt}
         />
       ) : null}
+      {saleLabel && <span className="home-featured-sale product-card-sale">{saleLabel}</span>}
       <button aria-label={`Save ${product.title}`} className="save">
         <Heart size={18} />
       </button>
