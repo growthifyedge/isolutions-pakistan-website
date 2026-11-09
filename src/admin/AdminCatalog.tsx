@@ -1570,7 +1570,7 @@ export function Phase4ProductEditor() {
                 <div>
                   <label className="admin-checkbox">
                     <input type="checkbox" checked={draft.is_flash_sale} onChange={(e) => setDraft({ ...draft, is_flash_sale: e.target.checked })} />
-                    <span>Flash Sale</span>
+                    <span>Flash Sale &amp; Deals</span>
                   </label>
                   <label className="admin-checkbox">
                     <input type="checkbox" checked={draft.is_featured} onChange={(e) => setDraft({ ...draft, is_featured: e.target.checked })} />

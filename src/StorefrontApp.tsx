@@ -1322,13 +1322,14 @@ function ProductCard({ product, categoryLabel, cartActions = false }: { product:
   const compareAt = pricedVariant ? validCompareAt(pricedVariant) : null;
   const inStock = product.variants.some((variant) => variant.quantity > 0);
   const shortDescription = product.short_description?.trim();
-  // Sale badge (same look as the homepage cards): shown only when a variant has a valid compare-at price.
-  // The % is shown only when every discounted variant has the same discount; otherwise just "Sale".
+  // Sale badge (same look as the homepage cards): shown only when the Admin marked the product
+  // "Flash Sale & Deals". The % comes from valid compare-at prices and is shown only when every discounted
+  // variant has the same discount; otherwise (or with no compare-at price) just "Sale".
   const discountPercents = [...new Set(product.variants.flatMap((variant) => {
     const original = validCompareAt(variant);
     return original === null ? [] : [Math.round(((original - variant.priceMinor) / original) * 100)];
   }))];
-  const saleLabel = discountPercents.length === 0
+  const saleLabel = product.is_flash_sale !== true
     ? null
     : discountPercents.length === 1 && discountPercents[0] > 0
       ? `Sale · ${discountPercents[0]}%`
@@ -3288,8 +3289,9 @@ function CollectionPage({
           extras ? mergeCollectionExtras(baseItems, extraItems, extras.productIds) : baseItems,
           collection.excludeProductIds,
         );
+        // Deals: published products the Admin marked "Flash Sale & Deals" (products.is_flash_sale).
         const collectionItems = collection.deals
-          ? items.filter((product) => product.variants.some((variant) => validCompareAt(variant)))
+          ? items.filter((product) => product.is_flash_sale === true)
           : items;
         const rankedItems = collection.bestSellers
           ? [...collectionItems]
