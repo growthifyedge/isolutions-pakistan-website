@@ -3563,6 +3563,19 @@ body:has(.pdp-page) header.storefront-navbar {
   .navbar-mega-menu:hover .navbar-mega-trigger::after,
   .navbar-mega-menu:focus-within .navbar-mega-trigger::after { transform:scaleX(1); }
 }
+/* Home Gadgets mega menu (6 types + 10 subcategories, 4 columns): on narrow desktops give the links room so the last
+   column never runs under the promo image. Other menus and wider screens are unchanged. */
+@media (min-width:1080px) and (max-width:1279px) {
+  .navbar-mega-panel[aria-label="Home Gadgets collections"] .navbar-mega-inner {
+    grid-template-columns:minmax(0,1fr) 220px;
+    gap:32px;
+  }
+  .navbar-mega-panel[aria-label="Home Gadgets collections"] .navbar-mega-groups { column-gap:28px !important; }
+  .navbar-mega-panel[aria-label="Home Gadgets collections"] .navbar-mega-visual {
+    width:220px !important;
+    max-width:220px !important;
+  }
+}
 /* Homepage shop-by-category carousel */
 .home-category-carousel {
   padding-top:72px;

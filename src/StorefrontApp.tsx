@@ -107,6 +107,7 @@ import {
   withoutExcludedProducts,
   type ResolvedCollection,
 } from "./lib/collections";
+import { HOME_GADGET_SUBCATEGORIES, homeGadgetSubcategoryHref } from "./lib/homeGadgetSubcategories";
 import { storefrontContact } from "./lib/storefrontContact";
 import { groupSpecifications } from "./lib/specificationGroups";
 import {
@@ -261,6 +262,8 @@ type NavbarMegaMenuProps = {
   showHeading?: boolean;
   groupColumns?: number;
   groupColumnGap?: number;
+  /** Row gap of the grouped grid (default: the stylesheet's). */
+  groupRowGap?: number;
 };
 
 function NavbarMegaMenu({
@@ -277,6 +280,7 @@ function NavbarMegaMenu({
   showHeading = true,
   groupColumns,
   groupColumnGap = 64,
+  groupRowGap,
 }: NavbarMegaMenuProps) {
   const isCurrent = location.pathname === href || location.pathname.startsWith(`${href}/`);
   return (
@@ -293,6 +297,7 @@ function NavbarMegaMenu({
                   display: "grid",
                   gridTemplateColumns: Array.from({ length: groupColumns }, () => "max-content").join(" "),
                   columnGap: `${groupColumnGap}px`,
+                  ...(groupRowGap === undefined ? {} : { rowGap: `${groupRowGap}px` }),
                   justifyContent: "start",
                   alignItems: "start",
                 } : undefined}
@@ -935,6 +940,8 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
               { heading: "Home Appliances", href: "/collections/home-gadgets?type=home-appliances", links: [] },
               { heading: "Personal Care", href: "/collections/home-gadgets?type=personal-care", links: [] },
               { heading: "Smart TVs", href: "/collections/home-gadgets?type=smart-tvs", links: [] },
+              // Home Gadgets subcategories (202611090001), after the existing six.
+              ...HOME_GADGET_SUBCATEGORIES.map((subcategory) => ({ heading: subcategory.name, href: homeGadgetSubcategoryHref(subcategory.slug), links: [] })),
             ]}
             promoImage="/assets/home-gadgets.png"
             promoFit="contain"
@@ -942,8 +949,9 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
             promoHeight={200}
             showHeading={false}
 
-            groupColumns={6}
-            groupColumnGap={56}
+            groupColumns={4}
+            groupColumnGap={44}
+            groupRowGap={22}
           />
           <a className="navbar-deals" href="/collections/deals" aria-current={location.pathname === "/collections/deals" ? "page" : undefined}><span aria-hidden="true">🔥</span>Deals</a>
         </nav>
@@ -1068,6 +1076,9 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
                   <a href="/collections/home-gadgets?type=home-appliances">Home Appliances</a>
                   <a href="/collections/home-gadgets?type=personal-care">Personal Care</a>
                   <a href="/collections/home-gadgets?type=smart-tvs">Smart TVs</a>
+                  {HOME_GADGET_SUBCATEGORIES.map((subcategory) => (
+                    <a href={homeGadgetSubcategoryHref(subcategory.slug)} key={subcategory.slug}>{subcategory.name}</a>
+                  ))}
                 </DrawerCategory>
               </nav>
             </section>
@@ -3134,6 +3145,14 @@ function OrderSuccessPage({ taxonomy }: { taxonomy: Taxonomy }) {
   );
 }
 
+/** Scrolls only the horizontal chip row (never the page) so the active Home Gadgets subcategory chip is in view on phones. */
+function revealActiveChip(chip: HTMLAnchorElement | null) {
+  const row = chip?.parentElement;
+  if (!chip || !row || row.scrollWidth <= row.clientWidth) return;
+  const offset = chip.getBoundingClientRect().left - row.getBoundingClientRect().left + row.scrollLeft;
+  row.scrollLeft = Math.max(0, offset - (row.clientWidth - chip.offsetWidth) / 2);
+}
+
 function CollectionPage({
   taxonomy,
   taxonomyReady,
@@ -3157,6 +3176,7 @@ function CollectionPage({
         collection.condition ?? "",
         ...(collection.extraProducts?.productIds ?? []),
         ...(collection.excludeProductIds ?? []).map((id) => `-${id}`),
+        ...(collection.filters.subcategories ?? []).map((slug) => `sub:${slug}`),
       ].join("|")
     : "invalid";
 
@@ -3234,6 +3254,25 @@ function CollectionPage({
           loading={loading}
           count={products.length}
         />
+
+        {collection?.homeGadgetSubcategory !== undefined && (
+          <nav className="collection-subcollections container" aria-label="Home Gadgets subcategories">
+            <a className={collection.homeGadgetSubcategory === "" ? "active" : ""} href="/collections/home-gadgets" aria-current={collection.homeGadgetSubcategory === "" ? "page" : undefined}>
+              All
+            </a>
+            {HOME_GADGET_SUBCATEGORIES.map((subcategory) => (
+              <a
+                key={subcategory.slug}
+                className={collection.homeGadgetSubcategory === subcategory.slug ? "active" : ""}
+                ref={collection.homeGadgetSubcategory === subcategory.slug ? revealActiveChip : undefined}
+                href={homeGadgetSubcategoryHref(subcategory.slug)}
+                aria-current={collection.homeGadgetSubcategory === subcategory.slug ? "page" : undefined}
+              >
+                {subcategory.name}
+              </a>
+            ))}
+          </nav>
+        )}
 
         {collection?.activeBrand === "iphone" && (
           <nav className="collection-subcollections container" aria-label="iPhone condition">

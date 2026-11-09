@@ -32,6 +32,7 @@ import { commercialWriteTarget, planCommercialDefaults, runCommercialDefaults, t
 import { isDraft, pruneSelection, selectAllDrafts, toggleSelection } from "../lib/catalogBulkPublish";
 import { CatalogBulkPublish } from "./CatalogBulkPublish";
 import { productDescriptionPatch, type ProductDescriptionFields } from "../lib/productDescriptionEdit";
+import { subcategoryEditBlocker, subcategoryOptionsFor, subcategoryPatch, type SubcategoryRow } from "../lib/productSubcategoryEdit";
 import { checkSpecEdit, isManualCategory, liveProductProblems, liveStockUpdatePage, safeProductPatch, serverSafeLivePatch, stockMovementTo, variantIdentity as variantKey, withVariant, type LiveProductState } from "../lib/manualProduct";
 
 type Option = {
@@ -73,6 +74,8 @@ type Draft = {
   is_flash_sale: boolean;
   is_featured: boolean;
   is_best_seller: boolean;
+  /** Home Gadgets subcategory (202611090001). Present only once loaded from a database that has the column. */
+  subcategory_id?: string | null;
 };
 type Variant = {
   id: string;
@@ -450,6 +453,11 @@ export function Phase4ProductEditor() {
   // Description as last loaded from the database: "Save description" sends only the fields that differ from it.
   const [loadedDescription, setLoadedDescription] = useState<ProductDescriptionFields>({ short_description: "", content: "" });
   const [savingDescription, setSavingDescription] = useState(false);
+  // Home Gadgets subcategory: null list = table not available (migration 202611090001 not applied on this database).
+  const [subcategoryRows, setSubcategoryRows] = useState<SubcategoryRow[] | null>(null);
+  const [loadedSubcategoryId, setLoadedSubcategoryId] = useState<string | null>(null);
+  const [subcategoryChoice, setSubcategoryChoice] = useState("");
+  const [savingSubcategory, setSavingSubcategory] = useState(false);
   // Manual Add / Edit (Gadgets + Mobile Accessories): category as loaded, the spec row being edited, "set stock" inputs.
   const [loadedCategoryId, setLoadedCategoryId] = useState("");
   const [specEditing, setSpecEditing] = useState<{ id: string; section: string; label: string; value: string } | null>(null);
@@ -495,7 +503,7 @@ export function Phase4ProductEditor() {
   const [commercialBusy, setCommercialBusy] = useState(false);
   const load = useCallback(async () => {
     if (!supabase) return;
-    const [b, c, catalog] = await Promise.all([
+    const [b, c, catalog, sub] = await Promise.all([
       supabase
         .from("brands")
         .select("id,name,slug,data_class,is_active")
@@ -508,7 +516,12 @@ export function Phase4ProductEditor() {
         .from("products")
         .select("id,title,slug,publication_status,data_class,brand:brands(name),product_variants(price_minor)")
         .order("title"),
+      supabase
+        .from("product_subcategories")
+        .select("id,name,slug,category_id,is_active,sort_order")
+        .order("sort_order"),
     ]);
+    setSubcategoryRows(sub.error ? null : ((sub.data ?? []) as SubcategoryRow[]));
     setBrands((b.data ?? []) as Option[]);
     setCategories((c.data ?? []) as Option[]);
     setRecommendationOptions((catalog.data ?? []) as unknown as RecommendationProduct[]);
@@ -559,6 +572,8 @@ export function Phase4ProductEditor() {
     });
     setLoadedDescription({ short_description: p.data.short_description ?? "", content: p.data.content ?? "" });
     setLoadedCategoryId(p.data.category_id ?? "");
+    setLoadedSubcategoryId(p.data.subcategory_id ?? null);
+    setSubcategoryChoice(p.data.subcategory_id ?? "");
     const quantities = new Map(
       (i.data ?? []).map((x) => [x.variant_id, Number(x.quantity_on_hand)]),
     );
@@ -596,6 +611,8 @@ export function Phase4ProductEditor() {
   // Gadgets / Mobile Accessories get the simplified, category-aware editor. A LIVE one keeps its status: every change is
   // checked against the publish rules BEFORE it is saved, using fresh database state.
   const loadedCategorySlug = categories.find((item) => item.id === loadedCategoryId)?.slug ?? null;
+  const subcategoryBlocker = subcategoryEditBlocker({ productId, categorySlug: loadedCategorySlug, subcategoriesAvailable: subcategoryRows !== null });
+  const subcategoryOptions = subcategoryOptionsFor(loadedCategoryId, subcategoryRows ?? [], loadedSubcategoryId);
   const manualMode = Boolean(productId) && isManualCategory(loadedCategorySlug);
   const liveGuard = manualMode && draft.publication_status === "published";
   const phoneOnly = manualMode ? { display: "none" } : undefined;
@@ -797,6 +814,8 @@ export function Phase4ProductEditor() {
       publication_status: "draft" as const,
     };
     delete payload.id;
+    // A subcategory belongs to one category (database foreign key): moving the product to another category clears it.
+    if ("subcategory_id" in payload && payload.category_id !== loadedCategoryId) payload.subcategory_id = null;
     const result = productId
       ? await supabase
           .from("products")
@@ -853,6 +872,35 @@ export function Phase4ProductEditor() {
       publication_status: data.publication_status,
     }));
     setMessage(`Description saved. Status unchanged: ${data.publication_status}. Other unsaved edits on this page were not saved.`);
+  };
+  // Updates only subcategory_id (never publication_status), after an explicit confirmation.
+  const saveSubcategory = async () => {
+    if (!supabase || !productId || savingSubcategory || subcategoryBlocker) return;
+    const patch = subcategoryPatch(loadedSubcategoryId, subcategoryChoice);
+    if (!patch) {
+      setMessage("Subcategory unchanged — nothing to save.");
+      return;
+    }
+    const fromName = subcategoryRows?.find((row) => row.id === loadedSubcategoryId)?.name ?? "None";
+    const toName = subcategoryRows?.find((row) => row.id === patch.subcategory_id)?.name ?? "None";
+    if (!window.confirm(`Change the Home Gadgets subcategory of “${draft.title}” from ${fromName} to ${toName}?` +
+      "\n\nOnly the subcategory is saved. Publication status, prices, variants, stock, images and descriptions stay unchanged.")) return;
+    setSavingSubcategory(true);
+    const { data, error } = await supabase
+      .from("products")
+      .update(patch)
+      .eq("id", productId)
+      .select("subcategory_id,publication_status")
+      .single();
+    setSavingSubcategory(false);
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    setLoadedSubcategoryId(data.subcategory_id ?? null);
+    setSubcategoryChoice(data.subcategory_id ?? "");
+    setDraft((current) => ({ ...current, subcategory_id: data.subcategory_id ?? null, publication_status: data.publication_status }));
+    setMessage(`Subcategory saved: ${toName}. Status unchanged: ${data.publication_status}. Other unsaved edits on this page were not saved.`);
   };
   const publish = async () => {
     if (!supabase || !productId) return;
@@ -1364,6 +1412,34 @@ export function Phase4ProductEditor() {
                   ))}
                 </select>
               </label>
+              {productId && loadedCategorySlug === "gadgets" && (
+                <div className="wide subcategory-edit" style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "8px 14px" }}>
+                  <label style={{ minWidth: 240 }}>
+                    Home Gadgets subcategory
+                    <select
+                      value={subcategoryChoice}
+                      disabled={Boolean(subcategoryBlocker) || savingSubcategory}
+                      onChange={(e) => setSubcategoryChoice(e.target.value)}
+                    >
+                      <option value="">None</option>
+                      {subcategoryOptions.map((x) => (
+                        <option value={x.id} key={x.id}>
+                          {x.name}{x.is_active ? "" : " (inactive)"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="admin-secondary"
+                    disabled={Boolean(subcategoryBlocker) || savingSubcategory || !subcategoryPatch(loadedSubcategoryId, subcategoryChoice)}
+                    onClick={saveSubcategory}
+                  >
+                    {savingSubcategory ? "Saving subcategory…" : "Save subcategory"}
+                  </button>
+                  <small>{subcategoryBlocker ?? "Saves only the subcategory, after you confirm. Publication status, prices, variants, stock and images stay unchanged."}</small>
+                </div>
+              )}
               <label className="wide">
                 Slug
                 <input

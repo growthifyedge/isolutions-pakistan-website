@@ -17,6 +17,7 @@ import {
   ClipboardCheck,
   FileSearch,
   FileText,
+  FolderTree,
   Plus,
   Search,
   Settings,
@@ -53,6 +54,7 @@ import { GadgetStockUpdate } from "./GadgetStockUpdate";
 import { TabletStockUpdate } from "./TabletStockUpdate";
 import { SpecificationBulkUpload } from "./SpecificationBulkUpload";
 import { DescriptionBulkUpload } from "./DescriptionBulkUpload";
+import { SubcategoryAssignment } from "./SubcategoryAssignment";
 import { AddProduct } from "./AddProduct";
 import { CatalogReadiness } from "./CatalogReadiness";
 import { ContactEnquiries } from "./ContactEnquiries";
@@ -74,6 +76,7 @@ const nav: ReadonlyArray<readonly [string, string, LucideIcon]> = [
   ["Tablets & MacBooks", "/admin/tablet-stock-update", Tablet],
   ["Spec Upload", "/admin/spec-upload", FileSearch],
   ["Descriptions", "/admin/description-upload", FileText],
+  ["Subcategories", "/admin/subcategory-upload", FolderTree],
   ["Readiness", "/admin/catalog-readiness", ClipboardCheck],
   ["Enquiries", "/admin/contact-enquiries", MessageSquareText],
   ["Homepage", "/admin/homepage", Sparkles],
@@ -673,6 +676,12 @@ export function AdminApp() {
     page = (
       <AdminLayout section="Descriptions">
         <DescriptionBulkUpload />
+      </AdminLayout>
+    );
+  else if (path === "/admin/subcategory-upload")
+    page = (
+      <AdminLayout section="Subcategories">
+        <SubcategoryAssignment />
       </AdminLayout>
     );
   else if (path === "/admin/spec-upload")

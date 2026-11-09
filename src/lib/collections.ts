@@ -1,4 +1,5 @@
 import type { CatalogFilters, CatalogVariant } from "./catalog";
+import { homeGadgetSubcategoryBySlug } from "./homeGadgetSubcategories.ts";
 
 export type PublicTaxonomy = {
   brands: { id: string; name: string; slug: string }[];
@@ -131,6 +132,11 @@ export type ResolvedCollection = {
   extraProducts?: CollectionExtraProducts;
   /** Products this collection never shows (by product ID), even though its filters return them. */
   excludeProductIds?: readonly string[];
+  /**
+   * Home Gadgets main page and its subcategory pages show the subcategory filter chips; the value is the active
+   * subcategory slug ("" = the main page, i.e. "All").
+   */
+  homeGadgetSubcategory?: string;
 };
 
 /**
@@ -446,7 +452,25 @@ export function resolveCollection(
       "smart-tvs": "Smart TVs",
       "smart-watches-bands": "Smart Watches & Bands",
     };
-    if (!type) return collection;
+    if (!type) return { ...collection, homeGadgetSubcategory: "" };
+    // Home Gadgets subcategories (202611090001): filtered by the stored products.subcategory_id, never by title search.
+    // The 16 Watches / Bands stay hidden here too (excludeProductIds is kept from the main collection).
+    const subcategory = homeGadgetSubcategoryBySlug(type);
+    if (subcategory) {
+      if (brandParam) return null;
+      return {
+        ...collection,
+        title: subcategory.name,
+        description: `Explore published ${subcategory.name.toLowerCase()} home gadgets.`,
+        breadcrumbs: [
+          ...collection.breadcrumbs.slice(0, -1),
+          { label: "Home Gadgets", href: "/collections/home-gadgets" },
+          { label: subcategory.name },
+        ],
+        filters: { ...collection.filters, subcategories: [subcategory.slug] },
+        homeGadgetSubcategory: subcategory.slug,
+      };
+    }
     const typeLabel = homeTypes[type];
     if (!typeLabel) return null;
     const brand = brandParam ? taxonomySlug(taxonomy.brands, [brandParam]) : undefined;

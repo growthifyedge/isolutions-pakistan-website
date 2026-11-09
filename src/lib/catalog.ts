@@ -52,6 +52,8 @@ export type CatalogProduct = {
   variants: CatalogVariant[];
   media: CatalogMedia[];
   specifications: { group: string | null; label: string; value: string }[];
+  /** search_public_catalog only (202611090001); absent before that migration and from other catalog RPCs. NULL = none. */
+  subcategory?: { id: string; name: string; slug: string } | null;
 };
 
 export type FrequentlyBoughtTogetherProduct = Pick<
@@ -71,6 +73,8 @@ export type CatalogFilters = {
   ptaStatus?: CatalogVariant["ptaStatus"][];
   inStock?: boolean;
   deliveryScope?: NonNullable<CatalogVariant["deliveryScope"]>[];
+  /** Home Gadgets subcategory slugs (products.subcategory_id, migration 202611090001). */
+  subcategories?: string[];
   limit?: number;
 };
 
@@ -92,6 +96,8 @@ export function publicCatalogRpcParameters(filters: CatalogFilters = {}) {
     p_delivery_scope: nullIfEmpty(filters.deliveryScope),
     p_limit: filters.limit ?? 48,
     p_offset: 0,
+    // Sent only when a subcategory is chosen, so every other page calls the RPC exactly as before 202611090001.
+    ...(filters.subcategories?.length ? { p_subcategory_slugs: filters.subcategories } : {}),
   };
 }
 
