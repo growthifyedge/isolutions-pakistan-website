@@ -1800,8 +1800,9 @@ body:has(.home-page) footer { padding-top:96px; }
 .pdp-purchase .pdp-price { flex-wrap:wrap; margin-bottom:5px; }
 .pdp-purchase .pdp-price .pdp-discount { width:auto; padding:5px 8px; border-radius:999px; background:#FBE8E1; color:#B74626; font:750 10px/1 Manrope,sans-serif; letter-spacing:0; text-transform:none; }
 .pdp-purchase .pdp-price strong { order:1; }
-.pdp-purchase .pdp-price .pdp-discount { order:2; }
-.pdp-purchase .pdp-price del { order:3; flex-basis:100%; margin-top:-2px; }
+/* Selling price, then the crossed-out compare-at price beside it, then the Save badge. */
+.pdp-purchase .pdp-price del { order:2; }
+.pdp-purchase .pdp-price .pdp-discount { order:3; }
 .pdp-purchase > .pdp-stock { display:inline-flex; align-items:center; margin-bottom:16px; }
 .pdp-option-groups { display:grid; gap:16px; margin-bottom:14px; }
 .pdp-option-group { min-width:0; margin:0; padding:0; border:0; }
