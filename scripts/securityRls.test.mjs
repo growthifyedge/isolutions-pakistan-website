@@ -117,7 +117,15 @@ test("SECURITY DEFINER RPCs callable by visitors are exactly the reviewed set", 
     "set_product_media_color_assignment", "submit_contact_message", "subscribe_newsletter", "validate_storefront_coupon"];
   assert.deepEqual(await callable("anon"), reviewed);
   assert.deepEqual(await callable("authenticated"),
-    [...reviewed, "apply_android_stock_phone", "apply_catalog_bulk_import", "apply_catalog_bulk_import_v2", "apply_iphone_stock_phone"].sort());
+    [...reviewed, "apply_android_stock_phone", "apply_catalog_bulk_import", "apply_catalog_bulk_import_v2", "apply_gadget_stock_product", "apply_iphone_stock_phone",
+      // Reviewed 2026-11-14: both refuse non-admins themselves (catalog_admin_required).
+      "admin_assign_product_subcategories", "apply_tablet_stock_product",
+      // Two-Vendor Orders (202611150002): Admin RPCs refuse non-admins (catalog_admin_required); staff RPCs refuse
+      // anyone who is not active staff of an active vendor (staff_access_required) and act on that vendor only.
+      // is_order_staff only answers for the caller. Covered by scripts/vendorOrders.test.mjs.
+      "admin_assign_order_items", "admin_cancel_open_fulfilments", "admin_confirm_and_release_order", "admin_release_order_to_vendors", "admin_set_fulfilment_status",
+      "is_order_staff", "staff_current_vendor", "staff_fulfilment_history", "staff_list_fulfilments", "staff_mark_fulfilment_seen",
+      "staff_set_fulfilment_status"].sort());
 });
 
 test("visitors, customers and inactive admins cannot read Admin, order, stock or contact data", async () => {

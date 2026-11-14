@@ -5,7 +5,7 @@
 /** A live variant with 1..LOW_STOCK_MAX_UNITS units on hand counts as low stock. */
 export const LOW_STOCK_MAX_UNITS = 2;
 /** Orders still being handled (not completed, not cancelled). */
-export const OPEN_ORDER_STATUSES = ["new", "confirmed", "processing"] as const;
+export const OPEN_ORDER_STATUSES = ["new", "confirmed", "processing", "in_transit"] as const;
 
 export type DashboardProduct = {
   id: string;
@@ -20,7 +20,7 @@ export type DashboardOrder = {
   order_number: string;
   customer_name: string;
   total_minor: number;
-  status: "new" | "confirmed" | "processing" | "completed" | "cancelled";
+  status: "new" | "confirmed" | "processing" | "in_transit" | "completed" | "cancelled";
   created_at: string;
 };
 export type DashboardOrderCounts = { today: number; open: number; new: number };

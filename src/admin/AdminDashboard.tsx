@@ -21,11 +21,11 @@ import {
   type DashboardProduct,
   type DashboardSummary,
 } from "../lib/adminDashboard";
+import { orderStatusLabel } from "../lib/orderRules";
 import { supabase } from "../lib/supabase";
 
 const PAGE_SIZE = 1000;
-const statusLabel = (status: DashboardOrder["status"]) =>
-  status === "new" ? "New" : status[0].toUpperCase() + status.slice(1);
+const statusLabel = (status: DashboardOrder["status"]) => orderStatusLabel(status);
 const orderTime = (date: string) =>
   new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(new Date(date));
 const count = (value: number | null | undefined) => (typeof value === "number" ? value : null);
@@ -114,7 +114,7 @@ export function AdminDashboard() {
     { label: "Low stock", value: summary?.lowStockVariants, note: `Live variants with ${LOW_STOCK_MAX_UNITS} or fewer units`, href: "/admin/products", tone: summary?.lowStockVariants ? "alert" : undefined },
     { label: "Out of stock", value: summary?.outOfStockVariants, note: "Live variants with no units", href: "/admin/products", tone: summary?.outOfStockVariants ? "alert" : undefined },
     { label: "Orders today", value: summary?.ordersToday, note: "Placed since midnight", href: "/admin/orders" },
-    { label: "Pending orders", value: summary?.openOrders, note: "New, confirmed or processing", href: "/admin/orders", tone: summary?.openOrders ? "alert" : undefined },
+    { label: "Pending orders", value: summary?.openOrders, note: "New, Received, In Process or In Transit", href: "/admin/orders", tone: summary?.openOrders ? "alert" : undefined },
   ];
 
   return (

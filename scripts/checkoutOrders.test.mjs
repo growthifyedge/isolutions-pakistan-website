@@ -8,8 +8,12 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { createCatalogTestDatabase, signInAsOwner } from "./support/catalogTestDatabase.mjs";
 import {
+  BULK_ORDER_STATUSES,
   CANCELLED_ORDER_FINAL_MESSAGE,
   MAX_ORDER_LINE_QUANTITY,
+  chunkOrderIds,
+  planBulkStatusUpdate,
+  verifyBulkOrderStatusChunk,
   ORDER_STATUS_NOT_SAVED_MESSAGE,
   PHONE_VALIDATION_MESSAGE,
   canChangeOrderStatus,
@@ -437,4 +441,70 @@ test("Cancelled is terminal: every other status is rejected at the database; Can
   const admin = await readFile(new URL("../src/admin/AdminOrders.tsx", import.meta.url), "utf8");
   assert.match(admin, /disabled=\{saving \|\| !canChangeOrderStatus\(selected\.status\)\}/);
   assert.match(admin, /if \(!canChangeOrderStatus\(selected\.status\)\) \{ setError\(CANCELLED_ORDER_FINAL_MESSAGE\); return; \}/);
+});
+
+// --- Admin Orders bulk status update (Phase 1: existing statuses, same RLS, no new database objects).
+test("bulk plan: cancelled orders are skipped, orders already in the target status are left alone", () => {
+  assert.deepEqual([...BULK_ORDER_STATUSES], ["confirmed", "processing", "in_transit", "completed", "cancelled"]);
+  const orders = [
+    { id: "a", status: "new" }, { id: "b", status: "confirmed" }, { id: "c", status: "cancelled" }, { id: "d", status: "completed" },
+  ];
+  assert.deepEqual(planBulkStatusUpdate(orders, "confirmed"), { eligible: ["a", "d"], skippedCancelled: ["c"], unchanged: ["b"], skippedVendor: [] });
+  // Cancelling: an already-cancelled order needs no change (not a skip).
+  assert.deepEqual(planBulkStatusUpdate(orders, "cancelled"), { eligible: ["a", "b", "d"], skippedCancelled: [], unchanged: ["c"], skippedVendor: [] });
+  assert.deepEqual(chunkOrderIds(["1", "2", "3", "4", "5"], 2), [["1", "2"], ["3", "4"], ["5"]]);
+  assert.deepEqual(chunkOrderIds([]), []);
+  // Only rows returned with the new status count as saved; a database error saves nothing.
+  assert.deepEqual(verifyBulkOrderStatusChunk({ data: [{ id: "a", status: "processing" }], error: null }, ["a", "b"], "processing"),
+    { saved: ["a"], notSaved: ["b"], error: null });
+  assert.deepEqual(verifyBulkOrderStatusChunk({ data: [{ id: "a", status: "new" }], error: null }, ["a"], "processing"),
+    { saved: [], notSaved: ["a"], error: null });
+  assert.deepEqual(verifyBulkOrderStatusChunk({ data: null, error: { message: "order_cancelled_is_final" } }, ["a"], "processing"),
+    { saved: [], notSaved: ["a"], error: CANCELLED_ORDER_FINAL_MESSAGE });
+});
+
+test("bulk update: admin-only, cancelled rows excluded in the request, bulk cancel restores each order's stock once", async () => {
+  const start = await stockOf(CANCEL_PHONE);
+  const a = await place({ items: [{ variant_id: CANCEL_PHONE, quantity: 1 }] });
+  const b = await place({ payment: "bank_transfer", items: [{ variant_id: CANCEL_PHONE, quantity: 1 }] });
+  const c = await place({ items: [{ variant_id: CANCEL_PHONE, quantity: 1 }] });
+  assert.equal(await stockOf(CANCEL_PHONE), start - 3);
+  await setStatus(c.order_id, "cancelled"); // cancelled before the bulk action (e.g. by another Admin)
+  assert.equal(await stockOf(CANCEL_PHONE), start - 2);
+  const ids = [a.order_id, b.order_id, c.order_id];
+  // Same statement shape as Admin Orders: update ... in (ids) and status <> 'cancelled' returning id, status.
+  const bulk = (userId, status) => as("authenticated", userId, async () => ({
+    data: await all(`update public.orders set status = $1 where id = any($2::uuid[]) and status <> 'cancelled' returning id, status`, [status, ids]),
+    error: null,
+  }));
+  // Signed-in non-admin: RLS matches nothing -> nothing reported as saved, nothing changed.
+  assert.deepEqual(verifyBulkOrderStatusChunk(await bulk(customerId, "processing"), ids, "processing"), { saved: [], notSaved: ids, error: null });
+  assert.equal((await one(`select status from public.orders where id = $1`, [a.order_id])).status, "new");
+  // Admin: the cancelled order is not matched, so the request succeeds without order_cancelled_is_final.
+  assert.deepEqual(verifyBulkOrderStatusChunk(await bulk(ownerId, "processing"), ids, "processing"),
+    { saved: [a.order_id, b.order_id], notSaved: [c.order_id], error: null });
+  assert.equal((await one(`select status from public.orders where id = $1`, [c.order_id])).status, "cancelled");
+  // Bulk cancel: each remaining order's stock returns exactly once; the earlier cancel is untouched.
+  assert.deepEqual(verifyBulkOrderStatusChunk(await bulk(ownerId, "cancelled"), ids, "cancelled"),
+    { saved: [a.order_id, b.order_id], notSaved: [c.order_id], error: null });
+  assert.equal(await stockOf(CANCEL_PHONE), start);
+  for (const id of ids)
+    assert.deepEqual((await movementsFor(id)).map((move) => [move.quantity_delta, move.reason]), [[-1, "sale"], [1, "return"]], id);
+  // Repeating the bulk cancel changes nothing.
+  assert.deepEqual((await bulk(ownerId, "cancelled")).data, []);
+  assert.equal(await stockOf(CANCEL_PHONE), start);
+  // Admin UI uses exactly this request and verification, and asks before cancelling.
+  const admin = await readFile(new URL("../src/admin/AdminOrders.tsx", import.meta.url), "utf8");
+  assert.match(admin, /\.update\(\{ status: target \}\)\.in\("id", chunk\)\.neq\("status", "cancelled"\)\.select\("id,status"\)/);
+  assert.match(admin, /verifyBulkOrderStatusChunk\(result, chunk, target\)/);
+  assert.match(admin, /planBulkStatusUpdate\(checkedOrders\.map\(\(order\) => \(\{ \.\.\.order, releasedToVendors: isReleasedToVendors\(order\) \}\)\), bulkStatus\)/);
+  assert.match(admin, /This cannot be undone\./);
+  assert.doesNotMatch(admin, /service_role/);
+  // Admin Orders itself calls no RPC; the vendor panel calls only the reviewed Admin vendor RPCs (202611150002/3):
+  // after-release moves, the atomic Confirm & Release, per-vendor status and cancel-open.
+  assert.deepEqual([...admin.matchAll(/rpc\("([a-z_]+)"/g)].map((match) => match[1]), []);
+  const vendorPanel = await readFile(new URL("../src/admin/AdminOrderVendors.tsx", import.meta.url), "utf8");
+  assert.deepEqual([...vendorPanel.matchAll(/rpc\("([a-z_]+)"/g)].map((match) => match[1]),
+    ["admin_assign_order_items", "admin_confirm_and_release_order", "admin_set_fulfilment_status", "admin_cancel_open_fulfilments"]);
+  assert.doesNotMatch(vendorPanel, /service_role|\.from\(/);
 });
