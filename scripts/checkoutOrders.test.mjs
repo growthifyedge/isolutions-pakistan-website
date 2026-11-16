@@ -505,6 +505,10 @@ test("bulk update: admin-only, cancelled rows excluded in the request, bulk canc
   assert.deepEqual([...admin.matchAll(/rpc\("([a-z_]+)"/g)].map((match) => match[1]), []);
   const vendorPanel = await readFile(new URL("../src/admin/AdminOrderVendors.tsx", import.meta.url), "utf8");
   assert.deepEqual([...vendorPanel.matchAll(/rpc\("([a-z_]+)"/g)].map((match) => match[1]),
-    ["admin_assign_order_items", "admin_confirm_and_release_order", "admin_set_fulfilment_status", "admin_cancel_open_fulfilments"]);
-  assert.doesNotMatch(vendorPanel, /service_role|\.from\(/);
+    ["admin_retry_vendor_notification", "admin_assign_order_items", "admin_confirm_and_release_order", "admin_set_fulfilment_status", "admin_cancel_open_fulfilments"]);
+  // The only table access: a read-only select of the vendor email status rows (202611160001).
+  assert.deepEqual([...vendorPanel.matchAll(/\.from\(("[a-z_]+")\)\.([a-z]+)\(/g)].map((match) => `${match[1]}.${match[2]}`),
+    ['"vendor_order_notifications".select']);
+  assert.equal([...vendorPanel.matchAll(/\.from\(/g)].length, 1);
+  assert.doesNotMatch(vendorPanel, /service_role|\.(insert|update|upsert|delete)\(/);
 });

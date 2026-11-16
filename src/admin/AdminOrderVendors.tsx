@@ -7,6 +7,10 @@ import {
   FULFILMENT_STATUSES, type FulfilmentStatus, type VendorCode, canReassign, isReleasedToVendors, liveFulfilments,
   orderPartiallyCancelled, releaseBlocker, suggestVendor, vendorErrorMessage,
 } from "../lib/vendorOrders";
+import {
+  VENDOR_NOTIFICATION_COLUMNS, VENDOR_NOTIFICATION_FUNCTION, type VendorNotification, hasDeliverableNotification,
+  notificationLabel,
+} from "../lib/vendorNotifications";
 
 // Admin Orders: Two-Vendor assignment, release and per-vendor status (migrations 202611150002 + 202611150003).
 // Every write goes through an Admin RPC that re-checks the rules (D1 assign-before-release, D3 reassign only while
@@ -52,6 +56,36 @@ export function AdminOrderVendors({ order, vendors, disabled, onChanged }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order.id, savedKey, vendors.length]);
   useEffect(() => { setMessage(null); }, [order.id]);
+
+  // Vendor email status (migration 202611160001). Best-effort and read-only here: any error (table not there yet,
+  // function not deployed, provider not configured) only hides the status line; it never affects order actions.
+  const [notes, setNotes] = useState<VendorNotification[]>([]);
+  const loadNotes = async () => {
+    if (!supabase) return [];
+    const { data, error } = await supabase.from("vendor_order_notifications").select(VENDOR_NOTIFICATION_COLUMNS).eq("order_id", order.id);
+    const rows = error ? [] : (data ?? []) as VendorNotification[];
+    setNotes(rows);
+    return rows;
+  };
+  const deliverNotes = async (rows: VendorNotification[]) => {
+    if (!supabase || !hasDeliverableNotification(rows)) return;
+    try { await supabase.functions.invoke(VENDOR_NOTIFICATION_FUNCTION, { body: {} }); } catch { /* retried later */ }
+    await loadNotes();
+  };
+  const fulfilmentKey = (order.order_fulfilments ?? []).map((part) => part.id).join("|");
+  useEffect(() => {
+    let active = true;
+    void loadNotes().then((rows) => { if (active) void deliverNotes(rows); });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order.id, fulfilmentKey]);
+  const noteByPart = new Map(notes.map((note) => [note.fulfilment_id, note]));
+  const retryNote = async (note: VendorNotification) => {
+    if (!supabase) return;
+    const { error } = await supabase.rpc("admin_retry_vendor_notification", { p_id: note.id });
+    if (error) { setMessage({ tone: "error", text: "Could not re-queue the email." }); return; }
+    await deliverNotes(await loadNotes());
+  };
 
   const released = isReleasedToVendors(order);
   const parts = [...liveFulfilments(order)].sort((left, right) =>
@@ -119,6 +153,14 @@ export function AdminOrderVendors({ order, vendors, disabled, onChanged }: {
         <ul>{lines.map((item) => <li key={item.id}><span>{item.quantity} × {item.product_title_snapshot}</span><small>{formatPkrMinor(item.line_total_minor)}</small></li>)}</ul>
         <div className="ao-part-total"><span>Items subtotal</span><strong>{formatPkrMinor(lines.reduce((sum, item) => sum + item.line_total_minor, 0))}</strong></div>
         <p className="ao-part-meta">Released {dateTime(part.released_at)}{part.stock_restored_at ? " · stock returned" : ""}</p>
+        {(() => {
+          const note = noteByPart.get(part.id);
+          const label = notificationLabel(note);
+          if (!note || !label) return null;
+          return <p className={`ao-part-email ${label.tone}`}>{label.text}
+            {note.status === "failed" ? <button type="button" className="ao-link" disabled={locked} onClick={() => void retryNote(note)}>Retry email</button> : null}
+          </p>;
+        })()}
         <label className="ao-part-status"><span>Vendor status</span>
           <select value={part.status} disabled={locked || part.status === "cancelled"} onChange={(event) => {
             const next = event.target.value as FulfilmentStatus;

@@ -368,3 +368,11 @@
   .ao-summary { grid-template-columns: 1fr 1fr; }
   .ao-summary > div:first-child { grid-column: 1 / -1; }
 }
+
+/* Vendor email notification status (202611160001) */
+.admin-orders .ao-part-email { display: flex; align-items: center; gap: 8px; margin: 0; padding: 2px 14px 0; font-size: 11px; color: var(--ao-faint); }
+.admin-orders .ao-part-email::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #94a3b8; flex: none; }
+.admin-orders .ao-part-email.ok::before { background: #16a34a; }
+.admin-orders .ao-part-email.error { color: #b42318; }
+.admin-orders .ao-part-email.error::before { background: #d92d20; }
+.admin-orders .ao-part-email .ao-link { font-size: 11px; padding: 0; }

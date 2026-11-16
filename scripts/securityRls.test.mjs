@@ -85,7 +85,7 @@ async function blocked(sql, params = []) {
 }
 
 const PRIVATE_TABLES = ["orders", "order_items", "inventory_movements", "contact_messages", "newsletter_subscribers",
-  "product_recommendations", "bundles", "bundle_items", "product_media_variant_assignments", "coupons", "coupon_redemptions"];
+  "product_recommendations", "bundles", "bundle_items", "product_media_variant_assignments", "coupons", "coupon_redemptions", "vendor_order_notifications"];
 const ALL_TABLES = (await all(`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind in ('r', 'p') order by 1`)).map((r) => r.relname);
 const rowCounts = async () => Object.fromEntries(await Promise.all(ALL_TABLES.map(async (t) =>
@@ -125,7 +125,10 @@ test("SECURITY DEFINER RPCs callable by visitors are exactly the reviewed set", 
       // is_order_staff only answers for the caller. Covered by scripts/vendorOrders.test.mjs.
       "admin_assign_order_items", "admin_cancel_open_fulfilments", "admin_confirm_and_release_order", "admin_release_order_to_vendors", "admin_set_fulfilment_status",
       "is_order_staff", "staff_current_vendor", "staff_fulfilment_history", "staff_list_fulfilments", "staff_mark_fulfilment_seen",
-      "staff_set_fulfilment_status"].sort());
+      "staff_set_fulfilment_status",
+      // Vendor email outbox (202611160001): refuse anyone but an Admin session or the service role
+      // (catalog_admin_required). Covered by scripts/vendorNotifications.test.mjs.
+      "admin_claim_vendor_notifications", "admin_complete_vendor_notification", "admin_retry_vendor_notification"].sort());
 });
 
 test("visitors, customers and inactive admins cannot read Admin, order, stock or contact data", async () => {
