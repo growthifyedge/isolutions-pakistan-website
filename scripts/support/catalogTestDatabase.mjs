@@ -4,6 +4,8 @@
 // Replay-only adjustments (the migration files themselves are never changed):
 // * Minimal Supabase stand-ins: anon/authenticated/service_role roles, auth.users, auth.uid()
 //   (driven by the request.jwt.claim.sub setting) and extensions.gen_random_uuid().
+// * pg_cron / pg_net / Vault stand-ins: cron.schedule() records jobs in cron.job, net.http_post() only records the
+//   request in net.http_request_queue (nothing is ever sent), vault.decrypted_secrets is a plain table.
 // * One-off data repairs that target rows created through Admin on the live database are
 //   skipped, because those rows do not exist in a fresh database.
 // * 202608270002 contains schema changes behind a data guard; its guard only warns here.
@@ -40,6 +42,19 @@ create function auth.jwt() returns jsonb language sql stable as
 create schema extensions;
 create function extensions.gen_random_uuid() returns uuid language sql volatile as
   $$ select pg_catalog.gen_random_uuid() $$;
+create schema vault;
+create table vault.decrypted_secrets (name text primary key, decrypted_secret text);
+create schema cron;
+create table cron.job (jobname text primary key, schedule text not null, command text not null);
+create function cron.schedule(p_name text, p_schedule text, p_command text) returns bigint language sql as
+  $$ insert into cron.job values (p_name, p_schedule, p_command)
+     on conflict (jobname) do update set schedule = excluded.schedule, command = excluded.command; select 1::bigint $$;
+create schema net;
+create table net.http_request_queue (id bigserial primary key, url text, body jsonb, headers jsonb, timeout_milliseconds int);
+create function net.http_post(url text, body jsonb default '{}', params jsonb default '{}',
+  headers jsonb default '{}', timeout_milliseconds int default 5000) returns bigint language sql as
+  $$ insert into net.http_request_queue (url, body, headers, timeout_milliseconds)
+     values (url, body, headers, timeout_milliseconds) returning id $$;
 `;
 
 // End state of 202609240001 (plus the brands the live catalog uses).
@@ -58,7 +73,8 @@ where slug not in ('mobile-phones', 'mobile-accessories', 'gadgets', 'laptops', 
 `;
 
 function prepare(name, sql) {
-  let text = sql.replace(/create extension if not exists pgcrypto with schema extensions;/gi, "");
+  let text = sql.replace(/create extension if not exists pgcrypto with schema extensions;/gi, "")
+    .replace(/create extension if not exists (pg_cron|pg_net) with schema \w+;/gi, "");
   if (name === "202608270002_phase_4_product_defaults_inheritance.sql")
     text = text.replace("raise exception 'Apple 17 Pro Max delivery repair aborted", "raise notice 'Apple 17 Pro Max delivery repair aborted");
   if (name === "202608300001_phase_4_product_default_consistency_repair.sql")

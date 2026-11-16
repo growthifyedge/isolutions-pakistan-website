@@ -16,6 +16,7 @@ import {
   verifyOrderStatusUpdate,
 } from "../lib/orderRules";
 import { supabase } from "../lib/supabase";
+import { requestAdminOrderNotification } from "../lib/adminOrderNotifications";
 import { isReleasedToVendors, liveFulfilments, orderPartiallyCancelled, vendorLabel } from "../lib/vendorOrders";
 import { AdminOrderVendors, type Fulfilment, type Vendor, type VendorOrderItem } from "./AdminOrderVendors";
 import "./adminOrders.css";
@@ -133,7 +134,7 @@ export function AdminOrders() {
     else { const rows = (data ?? []) as unknown as Order[]; setOrders(rows); setSelectedId((current) => current ?? rows[0]?.id ?? null); }
     setLoading(false);
   };
-  useEffect(() => { void loadOrders(); }, []);
+  useEffect(() => { void loadOrders(); requestAdminOrderNotification(); }, []);
 
   // Search, payment and city narrow the list; the status chips show counts within that view.
   const baseOrders = useMemo(() => {

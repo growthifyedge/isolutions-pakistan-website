@@ -122,6 +122,7 @@ import {
   type CouponPreview,
   type ShippingMethod,
 } from "./lib/orders";
+import { requestAdminOrderNotification } from "./lib/adminOrderNotifications";
 import {
   canonicalCouponCode,
   couponReasonFromError,
@@ -3017,6 +3018,8 @@ function CheckoutPage({ taxonomy }: { taxonomy: Taxonomy }) {
       });
       saveStorefrontOrderConfirmation(confirmation);
       clearStorefrontCart();
+      // Admin New Order Alert: fire-and-forget, never awaited; the order is already committed and queued.
+      requestAdminOrderNotification();
       window.location.assign("/order-success");
     } catch (error) {
       const detail = error instanceof Error ? error.message : "";
