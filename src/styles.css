@@ -5125,6 +5125,25 @@ body:has(.home-page) footer.storefront-footer {
 .home-banner-dots button { width:8px; height:8px; padding:0; border:1px solid rgba(255,255,255,.9); border-radius:999px; background:rgba(16,26,23,.35); cursor:pointer; box-shadow:0 1px 4px rgba(16,26,23,.18); transition:width 220ms ease,background 220ms ease,border-color 220ms ease; }
 .home-banner-dots button.is-active { width:24px; border-color:#F0643A; background:#F0643A; }
 .home-banner-dots button:focus-visible { outline:2px solid #FFFFFF; outline-offset:3px; }
+/* Website Editor banners: optional link / heading / button. Absent on the built-in banners, so they render unchanged. */
+.home-banner-link { display:block; width:100%; height:100%; }
+.home-banner-link:focus-visible { outline:3px solid rgba(240,100,58,.7); outline-offset:-3px; }
+.home-banner-copy { position:absolute; z-index:2; left:clamp(18px,5%,72px); bottom:clamp(40px,12%,96px); max-width:min(46%,560px); display:grid; justify-items:start; gap:clamp(10px,1.4vw,18px); pointer-events:none; }
+.home-banner-heading { margin:0; color:#FFFFFF; font-size:clamp(20px,2.6vw,42px); font-weight:800; line-height:1.12; text-shadow:0 2px 14px rgba(16,26,23,.55); overflow-wrap:anywhere; }
+.home-banner-button { pointer-events:auto; display:inline-flex; align-items:center; min-height:42px; padding:0 22px; border-radius:999px; background:#F0643A; color:#FFFFFF; font-weight:700; font-size:15px; text-decoration:none; box-shadow:0 6px 18px rgba(16,26,23,.25); transition:background 180ms ease,transform 180ms ease; }
+.home-banner-button:hover { background:#D9532B; transform:translateY(-1px); }
+.home-banner-button:focus-visible { outline:3px solid #FFFFFF; outline-offset:3px; }
+/* Banner Editor preview tab only (?bannerPreview=1): never rendered for visitors. */
+.banner-preview-label { position:fixed; z-index:2000; left:16px; bottom:16px; max-width:min(560px,calc(100vw - 32px)); display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; padding:12px 14px; border:2px solid #F0643A; border-radius:14px; background:#101A17; color:#FFFFFF; font-size:13px; line-height:1.4; box-shadow:0 10px 30px rgba(16,26,23,.35); }
+.banner-preview-label strong { color:#F0643A; text-transform:uppercase; letter-spacing:.06em; font-size:12px; }
+.banner-preview-label span { flex:1 1 220px; }
+.banner-preview-label a { padding:7px 14px; border-radius:999px; background:#F0643A; color:#FFFFFF; font-weight:700; text-decoration:none; }
+.banner-preview-label a:focus-visible { outline:2px solid #FFFFFF; outline-offset:2px; }
+@media (max-width:600px) {
+  .home-banner-copy { left:18px; right:18px; bottom:44px; max-width:none; }
+  .home-banner-heading { font-size:clamp(20px,6vw,28px); }
+  .home-banner-button { min-height:40px; padding:0 18px; font-size:14px; }
+}
 @media (max-width:900px) {
   .home-banner-carousel { width:calc(100% - 32px); aspect-ratio:16 / 7; border-radius:18px; }
 }
@@ -7396,4 +7415,77 @@ body:has(.pdp-page) header.storefront-navbar {
   .home-bundles-grid { grid-column:1; grid-row:2; grid-template-rows:repeat(2,minmax(0,1fr)); align-self:stretch; contain:size; }
   .home-bundles-grid .home-bundle-card { aspect-ratio:auto; }
   .home-bundles-promo { grid-column:2; grid-row:2; }
+}
+
+/* PDP main image auto-fit (2026-11-21): the image box takes the image's own shape (--pdp-image-ratio, set from the image
+   size), so portrait images are shown taller and landscape images without empty bands. Width stays the gallery width;
+   height is limited so the purchase panel stays near. object-fit stays contain: nothing is stretched or cropped.
+   Gallery, thumbnails, arrows, zoom-on-hover and colour selection are unchanged. PDP only. */
+/* Zoom-consistent sizing (2026-11-21): browser zoom changes the CSS viewport, so at 67% the gallery column grows
+   wider while the height stops at its cap; the box then turned wider than the image (empty side bands, inconsistent
+   size). The box width is now also capped at "height cap x image ratio", so it always keeps the image's own shape
+   and is centred in the gallery column when the height cap applies. The image itself is unchanged (contain). */
+.pdp-showcase .pdp-main-image.has-image-ratio {
+  width:100%;
+  height:auto;
+  aspect-ratio:var(--pdp-image-ratio);
+  --pdp-image-max-height:min(84vh,820px);
+  min-height:380px;
+  max-height:var(--pdp-image-max-height);
+  max-width:calc(var(--pdp-image-max-height) * var(--pdp-image-ratio));
+  margin-inline:auto;
+}
+.pdp-showcase .pdp-main-image.has-image-ratio img { padding:2.5%; }
+@media (max-width:900px) {
+  .pdp-showcase .pdp-main-image.has-image-ratio { --pdp-image-max-height:min(80vh,760px); min-height:300px; }
+}
+@media (max-width:600px) {
+  .pdp-showcase .pdp-main-image.has-image-ratio { --pdp-image-max-height:74vh; min-height:240px; }
+  .pdp-showcase .pdp-main-image.has-image-ratio img { padding:2%; }
+}
+/* PDP image backdrop (2026-11-21): when the image's edges are one even colour, the box takes that colour
+   (--pdp-image-backdrop) so the space beside the image blends in. Normal blending keeps the image's own colours exact. */
+.pdp-showcase .pdp-main-image.has-image-backdrop { background:var(--pdp-image-backdrop); transition:background-color .25s ease; }
+.pdp-showcase .pdp-main-image.has-image-backdrop img { mix-blend-mode:normal; }
+
+/* Global PDP Background (2026-11-21, Admin → Media): one solid colour or background image behind every product's main
+   gallery image. Desktop/tablet use the landscape image, phones (up to 600 px) the portrait one (falls back to the
+   landscape image). The background fills the box (cover, centred, painted under the border too); the product image
+   itself stays "contain" on top: never cropped or stretched. The product image is drawn with normal blending, so the
+   background stays strictly behind it and never shows through the photo or its branding (multiply blending made the
+   background appear over the product). Thumbnails, arrows, zoom-on-hover and colour selection are unchanged. */
+.pdp-showcase .pdp-main-image.has-global-background {
+  background-color:var(--pdp-bg-color,#FFFFFF);
+  background-image:var(--pdp-bg-desktop,none);
+  background-size:cover;
+  background-position:center center;
+  background-repeat:no-repeat;
+  background-origin:border-box;
+  isolation:isolate;
+}
+.pdp-showcase .pdp-main-image.has-global-background img { position:relative; z-index:0; mix-blend-mode:normal; }
+@media (max-width:600px) {
+  .pdp-showcase .pdp-main-image.has-global-background { background-image:var(--pdp-bg-mobile,var(--pdp-bg-desktop,none)); }
+  /* No portrait image uploaded: the landscape image is cropped from its bottom edge (keeps the bottom waves). */
+  .pdp-showcase .pdp-main-image.has-global-background { background-position:var(--pdp-bg-mobile-position,center center); }
+  /* Localhost preview notice on phones: one compact line (label + Exit Preview) so it no longer covers the page.
+     The full sentence stays available to screen readers; "nothing saved here" is still shown. Desktop unchanged. */
+  .pdp-bg-preview-label {
+    left:12px;
+    right:auto;
+    bottom:12px;
+    max-width:calc(100vw - 96px);
+    flex-wrap:nowrap;
+    gap:10px;
+    padding:6px 6px 6px 12px;
+    border-width:1px;
+    border-radius:999px;
+    font-size:12px;
+    line-height:1.2;
+  }
+  .pdp-bg-preview-label strong { font-size:11px; letter-spacing:.04em; white-space:nowrap; }
+  .pdp-bg-preview-label span { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; }
+  .pdp-bg-preview-label a { flex:none; padding:6px 12px; font-size:12px; white-space:nowrap; min-height:32px; display:inline-flex; align-items:center; }
+  .pdp-bg-preview-label.is-empty { flex-wrap:wrap; border-radius:14px; }
+  .pdp-bg-preview-label.is-empty span { position:static; width:auto; height:auto; overflow:visible; clip:auto; clip-path:none; white-space:normal; flex:1 1 100%; order:3; font-size:11.5px; }
 }

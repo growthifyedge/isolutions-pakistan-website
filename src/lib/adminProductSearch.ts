@@ -20,3 +20,47 @@ export function adminProductMatchesQuery(product: AdminSearchableProduct, query:
   ];
   return haystack.some((value) => value?.toLowerCase().includes(needle));
 }
+
+// Category + Subcategory filter (2026-11-21, localhost). Reuses the existing catalog relationships: products.category_id
+// -> categories, products.subcategory_id -> product_subcategories (whose category_id is the parent). "" = all.
+export type AdminCategoryFilter = { categoryId: string; subcategoryId: string };
+export const NO_CATEGORY_FILTER: AdminCategoryFilter = { categoryId: "", subcategoryId: "" };
+
+export type AdminFilterableProduct = { category_id: string | null; subcategory_id?: string | null };
+export type AdminSubcategoryOption = { id: string; name: string; category_id: string; is_active: boolean; sort_order: number };
+
+/** Category = every product of that category; Subcategory = only products stored with that subcategory. */
+export function adminProductMatchesCategory(product: AdminFilterableProduct, filter: AdminCategoryFilter) {
+  if (filter.categoryId && product.category_id !== filter.categoryId) return false;
+  if (filter.subcategoryId && (product.subcategory_id ?? null) !== filter.subcategoryId) return false;
+  return true;
+}
+
+/** Subcategories of one category, in their stored order; inactive ones only while products still use them. */
+export function subcategoriesForCategory(
+  categoryId: string,
+  rows: readonly AdminSubcategoryOption[],
+  products: readonly AdminFilterableProduct[],
+): AdminSubcategoryOption[] {
+  if (!categoryId) return [];
+  const used = new Set(products.map((product) => product.subcategory_id).filter(Boolean));
+  return rows
+    .filter((row) => row.category_id === categoryId && (row.is_active || used.has(row.id)))
+    .sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name));
+}
+
+/** Choosing a category clears a subcategory that belongs to another category. */
+export function withCategory(filter: AdminCategoryFilter, categoryId: string, rows: readonly AdminSubcategoryOption[]): AdminCategoryFilter {
+  const keep = rows.some((row) => row.id === filter.subcategoryId && row.category_id === categoryId);
+  return { categoryId, subcategoryId: categoryId && keep ? filter.subcategoryId : "" };
+}
+
+/** Number of loaded products per category / subcategory id (for the option labels). */
+export function countBy(products: readonly AdminFilterableProduct[], key: "category_id" | "subcategory_id") {
+  const counts = new Map<string, number>();
+  for (const product of products) {
+    const id = product[key];
+    if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return counts;
+}

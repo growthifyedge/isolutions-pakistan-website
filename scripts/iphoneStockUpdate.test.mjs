@@ -758,3 +758,60 @@ test("colour-only lines need a heading above them", () => {
   assert.equal(parsed.unread.length, 1);
   assert.equal(parsed.skipped.length, 1);
 });
+
+// Supplier block form (2026-11-17): colour line, model heading without storage, then "storage @ price" lines.
+const HK_BLOCK = "HK -Approved Burgundy\nIPhone 18Pro Max\n256Gb @578,500\n512Gb @567,400";
+
+test("supplier block: exact failing input reads as iPhone 18 Pro Max Burgundy 256GB / 512GB", () => {
+  const parsed = parseIphoneList(HK_BLOCK, BRANDS);
+  assert.equal(parsed.unread.length, 0);
+  assert.equal(parsed.skipped.length, 0);
+  assert.deepEqual(parsed.lines.map((line) => [line.baseTitle, line.storage, line.colorWritten, line.priceMinor, line.listedMarket, line.listedPta, line.listedCondition, line.problems]), [
+    ["Apple iPhone 18 Pro Max", "256 GB", "Burgundy", 57850000, "HK Approved", null, null, []],
+    ["Apple iPhone 18 Pro Max", "512 GB", "Burgundy", 56740000, "HK Approved", null, null, []],
+  ]);
+});
+
+test("supplier block: HK Approved is never turned into PTA; the page choice decides", () => {
+  const parsed = parseIphoneList(HK_BLOCK, BRANDS);
+  const none = compareIphoneList(parsed, [], { condition: "brand_new", pta: null });
+  assert.deepEqual(none.entries.map((entry) => entry.kind), ["attention", "attention"]);
+  assert.ok(none.entries.every((entry) => entry.pta === null && entry.reasons.some((reason) => /Choose PTA/.test(reason))));
+  assert.ok(none.entries.every((entry) => entry.notes.some((note) => /HK Approved/.test(note))));
+  for (const pta of ["approved", "not_approved"]) {
+    const chosen = compareIphoneList(parsed, [], { condition: "brand_new", pta });
+    assert.deepEqual(chosen.entries.map((entry) => [entry.kind, entry.pta, entry.productTitle]), [["new_phone", pta, "Apple iPhone 18 Pro Max"], ["new_phone", pta, "Apple iPhone 18 Pro Max"]]);
+  }
+});
+
+test("supplier block: flexible spacing, case and price notation; colour may follow the heading", () => {
+  for (const text of [
+    "hk approved burgundy\niphone 18 pro max\n256 GB @ 578,500\n512gb 567400",
+    "Hk-Approved   Burgundy\n  IPHONE 18PRO MAX  \n\n256GB @Rs 578,500/-\n512 Gb@567,400",
+    "iPhone 18 Pro Max\nBurgundy HK Approved\n256Gb @578,500\n512Gb @567,400",
+  ]) {
+    const parsed = parseIphoneList(text, BRANDS);
+    assert.deepEqual(parsed.unread, [], text);
+    assert.deepEqual(parsed.lines.map((line) => [line.baseTitle, line.storage, line.colorWritten, line.priceMinor, line.listedMarket, line.problems.length]), [
+      ["Apple iPhone 18 Pro Max", "256 GB", "Burgundy", 57850000, "HK Approved", 0],
+      ["Apple iPhone 18 Pro Max", "512 GB", "Burgundy", 56740000, "HK Approved", 0],
+    ], text);
+  }
+});
+
+test("supplier block: missing colour, missing storage or clashing PTA go to Needs Review, never guessed", () => {
+  const noColour = parseIphoneList("IPhone 18Pro Max\n256Gb @578,500", BRANDS);
+  assert.deepEqual(noColour.lines.map((line) => [line.storage, line.colorWritten, line.problems]), [["256 GB", null, ["This line has no colour"]]]);
+  const noStorage = parseIphoneList("Burgundy\nIPhone 18Pro Max\nBurgundy @578,500", BRANDS);
+  assert.equal(noStorage.lines[0].storage, null);
+  assert.match(noStorage.unread.find((line) => line.lineNumber === 2).reason, /no storage/);
+  const laterNoStorage = parseIphoneList("Burgundy\nIPhone 18Pro Max\n256Gb @578,500\nBlue @567,400", BRANDS);
+  assert.equal(laterNoStorage.lines[1].storage, null);
+  assert.match(laterNoStorage.lines[1].problems.join(" "), /No storage/);
+  const twoStorages = parseIphoneList("Burgundy\nIPhone 18Pro Max\n256Gb 512Gb @578,500", BRANDS);
+  assert.match(twoStorages.lines[0].problems.join(" "), /More than one storage/);
+  const clash = parseIphoneList("Burgundy Non PTA\nIPhone 18Pro Max PTA\n256Gb @578,500", BRANDS);
+  assert.match(clash.lines[0].problems.join(" "), /PTA is written differently/);
+  const plainApproved = compareIphoneList(parseIphoneList("Approved Burgundy\nIPhone 18Pro Max\n256Gb @578,500", BRANDS), [], { condition: "brand_new", pta: "approved" });
+  assert.equal(plainApproved.entries[0].kind, "attention", "a bare “Approved” is not read as PTA or dropped");
+});

@@ -7,7 +7,8 @@
  *    specifications). The server re-checks duplicates (name + brand, web address, variants), prices and enums, and
  *    publishing is always validated by the server (validate_product_for_publication). Blank facts are sent as null.
  *  - Category rules (Owner-approved): Android = PTA Approved, Brand New, 1 Year, Karachi only. New / Used iPhones are
- *    separate Apple products ("… (Used)", every variant Used, no warranty); no battery / SIM facts unless entered.
+ *    separate Apple products ("… (Used)", every variant Used, no warranty); New iPhone warranty optional (1 or 2 Years,
+ *    or blank = NULL — Owner rule 2026-11-18); no battery / SIM facts unless entered.
  *    Tablets: New or Used, Wi-Fi = PTA Not Applicable, Cellular = PTA Approved / Non-PTA, Karachi only, warranty
  *    optional. MacBooks: Apple only, PTA Not Applicable, Karachi only, warranty optional.
  *  - Edit: see liveProductProblems (Gadgets / Accessories) and SERVER_SAFE_LIVE_COLUMNS (every other category).
@@ -35,7 +36,8 @@ export type KindProfile = {
   sim: boolean;
   usedFacts: boolean;
   delivery: "choose" | "karachi_only";
-  warranty: "optional" | "required" | "hidden" | { fixed: string };
+  /** "choice" = optional pick from IPHONE_NEW_WARRANTIES; blank stays NULL (New iPhones, Owner rule 2026-11-18). */
+  warranty: "optional" | "choice" | "hidden" | { fixed: string };
   pta: "optional" | "required" | { fixed: string } | "approved-or-non" | "by-connectivity";
   condition: "optional" | "required" | { fixed: string } | "by-product";
 };
@@ -48,7 +50,7 @@ export const KIND_PROFILES: readonly KindProfile[] = [
   { kind: "gadgets", label: "Gadget", group: "Gadgets & Accessories", productType: "Gadget", categorySlug: "gadgets", brand: "optional", usedTitle: "never", ram: false, storage: false, sim: false, usedFacts: false, delivery: "choose", warranty: "optional", pta: "optional", condition: "optional" },
   { kind: "mobile-accessories", label: "Mobile Accessory", group: "Gadgets & Accessories", productType: "Accessory", categorySlug: "mobile-accessories", brand: "optional", usedTitle: "never", ram: false, storage: false, sim: false, usedFacts: false, delivery: "choose", warranty: "optional", pta: "required", condition: "required" },
   { kind: "android", label: "Android Mobile", group: "Mobile Phones", productType: "Mobile Phone", categorySlug: "mobile-phones", brand: "not-apple", usedTitle: "never", ram: true, storage: true, sim: true, usedFacts: false, delivery: "karachi_only", warranty: { fixed: ANDROID_WARRANTY }, pta: { fixed: "approved" }, condition: { fixed: "brand_new" } },
-  { kind: "iphone-new", label: "New iPhone", group: "Mobile Phones", productType: "Mobile Phone", categorySlug: "mobile-phones", brand: "apple", usedTitle: "never", ram: false, storage: true, sim: true, usedFacts: false, delivery: "karachi_only", warranty: "required", pta: "approved-or-non", condition: { fixed: "brand_new" } },
+  { kind: "iphone-new", label: "New iPhone", group: "Mobile Phones", productType: "Mobile Phone", categorySlug: "mobile-phones", brand: "apple", usedTitle: "never", ram: false, storage: true, sim: true, usedFacts: false, delivery: "karachi_only", warranty: "choice", pta: "approved-or-non", condition: { fixed: "brand_new" } },
   { kind: "iphone-used", label: "Used iPhone", group: "Mobile Phones", productType: "Mobile Phone", categorySlug: "mobile-phones", brand: "apple", usedTitle: "always", ram: false, storage: true, sim: true, usedFacts: true, delivery: "karachi_only", warranty: "hidden", pta: "approved-or-non", condition: { fixed: "used" } },
   { kind: "tablet", label: "Tablet / iPad", group: "Tablets & MacBooks", productType: "Tablet", categorySlug: "tablets", brand: "required", usedTitle: "by-condition", ram: true, storage: true, sim: false, usedFacts: false, delivery: "karachi_only", warranty: "optional", pta: "by-connectivity", condition: "by-product" },
   { kind: "macbook", label: "Apple MacBook", group: "Tablets & MacBooks", productType: "Laptop", categorySlug: "laptops", brand: "apple", usedTitle: "by-condition", ram: true, storage: true, sim: false, usedFacts: false, delivery: "karachi_only", warranty: "optional", pta: { fixed: "not_applicable" }, condition: "by-product" },
@@ -248,8 +250,9 @@ export function checkManualProduct(input: ManualProductInput, catalog: readonly 
     const warrantyFixed = fixedValue(profile?.warranty);
     if (warrantyFixed) warranty = warrantyFixed;
     else if (profile?.warranty === "hidden") warranty = null;
-    else if (profile?.warranty === "required" && !IPHONE_NEW_WARRANTIES.includes(warranty as (typeof IPHONE_NEW_WARRANTIES)[number]))
-      errors.push(`${label}: choose the warranty (1 Year or 2 Years) — New iPhones need it to publish.`);
+    // New iPhones: warranty is optional (blank stays NULL, never a default); a chosen value must be 1 Year or 2 Years.
+    else if (profile?.warranty === "choice" && warranty !== null && !IPHONE_NEW_WARRANTIES.includes(warranty as (typeof IPHONE_NEW_WARRANTIES)[number]))
+      errors.push(`${label}: warranty must be 1 Year or 2 Years, or left blank.`);
 
     let delivery: string | null = variant.delivery || null;
     if (profile?.delivery === "karachi_only") delivery = "karachi_only";

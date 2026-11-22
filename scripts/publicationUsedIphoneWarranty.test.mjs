@@ -72,16 +72,14 @@ test("Used iPhone keeps every other blocker: image, PTA, price, delivery, active
   assert.deepEqual((await validate(await listing("Apple iPhone 15 Pro Max (Used)", [{ active: false }]))).errors, ["active_variant_required"]);
 });
 
-test("New iPhone with NULL warranty is blocked; with an Owner-set warranty it passes", async () => {
-  const { db, listing, validate, publish } = await makeDb();
-  const id = await listing("Apple iPhone 16", [{ condition: "brand_new" }]);
-  assert.deepEqual(await validate(id), { is_valid: false, errors: [COMMERCIAL] });
-  await assert.rejects(publish(id), /product_publication_validation_failed/);
+// Since 202611190001 (Owner rule 2026-11-18) New iPhones need no warranty either — see publicationNewIphoneWarranty.test.mjs.
+test("New iPhone passes with or without a warranty (202611190001)", async () => {
+  const { listing, validate } = await makeDb();
+  assert.deepEqual(await validate(await listing("Apple iPhone 16", [{ condition: "brand_new" }])), { is_valid: true, errors: [] });
   const withWarranty = await listing("Apple iPhone 16 Pro", [{ condition: "brand_new" }], { warranty: "Test warranty" });
   assert.deepEqual(await validate(withWarranty), { is_valid: true, errors: [] });
   const override = await listing("Apple iPhone 16 Plus", [{ condition: "brand_new", warranty: "Test warranty" }, { condition: "brand_new" }]);
-  assert.deepEqual((await validate(override)).errors, [COMMERCIAL], "every active New variant still needs a warranty");
-  assert.equal((await db.query(`select publication_status from public.products where id = $1`, [id])).rows[0].publication_status, "draft");
+  assert.deepEqual(await validate(override), { is_valid: true, errors: [] });
 });
 
 test("Android keeps the existing rule, even for a Used Android with a (Used) title", async () => {
@@ -100,8 +98,9 @@ test("mixed, unknown, open-box or refurbished conditions, a plain title or anoth
   await blocked("Apple iPhone 12 Pro (Used)", [{ condition: "open_box" }]);
   await blocked("Apple iPhone 12 Mini (Used)", [{ condition: "refurbished" }]);
   await blocked("Apple iPhone 15 Pro", [{}]);
-  // Another category (tablets have their own no-warranty rule since 202610270001, so accessories are used here).
-  await blocked("Apple iPhone 11 (Used)", [{}], { category: "mobile-accessories" });
+  // Another category: tablets (202610270001) and accessories (202611060001) now have their own no-warranty rules,
+  // so a "(Used)" title there passes through that rule, not the used-iPhone one.
+  assert.deepEqual(await validate(await listing("Apple iPhone 11 (Used)", [{}], { category: "mobile-accessories" })), { is_valid: true, errors: [] });
   // An unknown-condition active variant is blocked by the condition check itself.
   await blocked("Apple iPhone 11 Pro (Used)", [{ condition: "unknown" }]);
 });

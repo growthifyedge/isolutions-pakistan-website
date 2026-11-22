@@ -168,12 +168,12 @@ export function AddProduct() {
   const warrantyField = (variant: ManualVariantInput, index: number) => {
     if (!profile || profile.warranty === "hidden") return null;
     if (warrantyFixed) return <Locked label="Warranty" value={warrantyFixed} />;
-    if (profile.warranty === "required")
+    if (profile.warranty === "choice")
       return (
         <label>
-          Warranty
+          Warranty (optional)
           <select value={variant.warranty} onChange={(event) => setVariant(index, { warranty: event.target.value })}>
-            <option value="">Select</option>
+            <option value="">Not stated (leave blank)</option>
             {IPHONE_NEW_WARRANTIES.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
         </label>

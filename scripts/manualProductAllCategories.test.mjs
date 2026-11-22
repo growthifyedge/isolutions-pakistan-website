@@ -36,7 +36,7 @@ test("Android: PTA Approved, Brand New, 1 Year, Karachi only are fixed; RAM / st
   assert.match(checkManualProduct(input({ title: "Samsung Galaxy A16", brandName: "Samsung" }), catalog, brands).errors.join(" "), /already exists/);
 });
 
-test("New iPhone: Apple, Brand New, PTA chosen (Approved / Non-PTA), warranty 1 or 2 years required; no '(Used)' in the name", () => {
+test("New iPhone: Apple, Brand New, PTA chosen (Approved / Non-PTA), warranty optional (1 or 2 years, or blank); no '(Used)' in the name", () => {
   const base = { category: "iphone-new", title: "Apple iPhone 16", brandName: "" };
   const ok = checkManualProduct(input({ ...base, variants: [v({ pta: "approved", warranty: "1 Year", ram: "8 GB", batteryHealth: "90" })] }), catalog, brands);
   assert.equal(ok.ok, true, ok.errors.join("; "));
@@ -45,8 +45,13 @@ test("New iPhone: Apple, Brand New, PTA chosen (Approved / Non-PTA), warranty 1 
   assert.deepEqual([variant.condition, variant.pta_status, variant.warranty, variant.delivery_scope, variant.ram, variant.battery_health_percent], ["brand_new", "approved", "1 Year", "karachi_only", null, null], "no RAM / battery facts for a New iPhone");
   const missing = checkManualProduct(input({ ...base, variants: [v()] }), catalog, brands).errors.join(" ");
   assert.match(missing, /PTA Approved or Non-PTA/);
-  assert.match(missing, /choose the warranty \(1 Year or 2 Years\)/);
-  assert.match(checkManualProduct(input({ ...base, variants: [v({ pta: "approved", warranty: "3 Years" })] }), catalog, brands).errors.join(" "), /warranty/);
+  assert.doesNotMatch(missing, /warranty/i, "a missing New iPhone warranty is not an error (Owner rule 2026-11-18)");
+  const blank = checkManualProduct(input({ ...base, variants: [v({ pta: "approved" })] }), catalog, brands);
+  assert.equal(blank.ok, true, blank.errors.join("; "));
+  assert.equal(one(blank).variants[0].warranty, null, "blank warranty stays NULL — no default is inserted");
+  const twoYears = checkManualProduct(input({ ...base, variants: [v({ pta: "approved", warranty: "2 Years" })] }), catalog, brands);
+  assert.equal(one(twoYears).variants[0].warranty, "2 Years", "a stated warranty is kept as given");
+  assert.match(checkManualProduct(input({ ...base, variants: [v({ pta: "approved", warranty: "3 Years" })] }), catalog, brands).errors.join(" "), /1 Year or 2 Years, or left blank/);
   assert.match(checkManualProduct(input({ ...base, title: "Apple iPhone 16 (Used)", variants: [v({ pta: "approved", warranty: "1 Year" })] }), catalog, brands).errors.join(" "), /choose Used iPhone/);
   assert.match(checkManualProduct(input({ ...base, title: "Apple iPhone 15 Pro Max", variants: [v({ pta: "approved", warranty: "1 Year" })] }), catalog, brands).errors.join(" "), /already exists/);
 });
@@ -118,8 +123,9 @@ test("Create for a phone reads back category, name, RAM / storage / colour, PTA,
 test("Server-safe live edits: only columns the publish validator never reads (checked against the current validator SQL)", () => {
   const migrations = readdirSync(new URL("../supabase/migrations/", import.meta.url)).filter((name) => name.endsWith(".sql")).sort();
   const definers = migrations.filter((name) => readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8").includes("function public.validate_product_for_publication"));
-  // Reviewed validator versions: 202610270001 (committed) and 202611060001 (applied on DEV + PROD; may be uncommitted locally).
-  assert.ok(["202610270001_tablet_macbook_stock_update_and_publication.sql", "202611060001_publication_accessories_no_warranty.sql"].includes(definers.at(-1)), `the publish validator changed (${definers.at(-1)}) — re-check SERVER_SAFE_LIVE_COLUMNS and liveProductProblems`);
+  // Reviewed validator versions: 202610270001 (committed), 202611060001 (applied on DEV + PROD; may be uncommitted locally)
+  // and 202611190001 (New iPhone warranty optional; file only, not applied). 202611190001 reads no new product column.
+  assert.ok(["202610270001_tablet_macbook_stock_update_and_publication.sql", "202611060001_publication_accessories_no_warranty.sql", "202611190001_publication_new_iphone_warranty_optional.sql"].includes(definers.at(-1)), `the publish validator changed (${definers.at(-1)}) — re-check SERVER_SAFE_LIVE_COLUMNS and liveProductProblems`);
   for (const name of definers.filter((file) => file >= "202610270001")) {
     const sql = readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
     const body = sql.slice(sql.lastIndexOf("create or replace function public.validate_product_for_publication"));

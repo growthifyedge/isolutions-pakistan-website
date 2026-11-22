@@ -88,3 +88,50 @@ test("the PDP uses the sync helper for load, colour change, thumbnails and arrow
   assert.match(source, /onClick=\{\(\) => showMedia\(item\)\}/);
   assert.match(source, /showMedia\(gallery\[nextIndex\]\)/);
 });
+
+// PDP main image auto-fit (2026-11-21): the main image box follows the image's own shape; PDP only, nothing cropped.
+test("PDP main image auto-fit: box follows the image shape, contain kept, same image request, PDP only", () => {
+  const text = (path) => readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const app = text("../src/StorefrontApp.tsx");
+  const css = text("../src/styles.css");
+  // Ratio from the stored media size (no jump), corrected by the loaded image; limited to 1:2 .. 2:1.
+  assert.match(app, /Math\.min\(2, Math\.max\(0\.5, ratio\)\)/);
+  assert.match(app, /pdpImageRatio\(selectedMedia\?\.width, selectedMedia\?\.height\)/);
+  assert.match(app, /className=\{`pdp-main-image\$\{mainImageRatio \? " has-image-ratio" : ""\}\$\{mainImageBackdrop \? " has-image-backdrop" : ""\}\$\{pdpBackground\.style \? " has-global-background" : ""\}`\}/);
+  assert.match(app, /"--pdp-image-ratio": \(1 \/ \(1 \/ mainImageRatio \+ 0\.05\)\)\.toFixed\(4\)/);
+  // Same delivery request as before (1400 px main, 240 px thumbnails, trim rule unchanged).
+  assert.match(app, /pdpGalleryImage\(selectedMedia, 1400, trimGallery\)/);
+  assert.match(app, /pdpGalleryImage\(item, 240, trimGallery\)/);
+  assert.equal((app.match(/has-image-ratio/g) ?? []).length, 1, "only the PDP main image uses it");
+  // CSS: scoped to the PDP main image, height limited, contain kept (base rules), no stretch / cover.
+  const block = css.slice(css.indexOf("/* PDP main image auto-fit"));
+  assert.match(block, /\.pdp-showcase \.pdp-main-image\.has-image-ratio \{\n  width:100%;\n  height:auto;\n  aspect-ratio:var\(--pdp-image-ratio\);/);
+  assert.match(block, /max-height:min\(84vh,820px\)/);
+  assert.doesNotMatch(block, /object-fit:\s*(cover|fill)|\.product-image|\.product-card|\.pdp-thumbnails/);
+  assert.match(css, /\.pdp-main-image img \{ object-fit:contain;/);
+});
+
+// PDP image backdrop (2026-11-21): even, non-white image edges colour the box; PDP main image only.
+test("PDP image backdrop: tiny same-image sample, even non-white gap edges only, safe fallbacks, PDP only", () => {
+  const text = (path) => readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const app = text("../src/StorefrontApp.tsx");
+  const css = text("../src/styles.css");
+  // A 32 px PNG copy of the same Cloudinary image; anything else (fallback URL) is skipped. Cached per image.
+  assert.ok(app.includes('src.replace(/\\/c_limit,w_\\d+,q_auto,f_auto\\//, "/c_scale,w_32,f_png/")'), "32 px PNG copy of the same image");
+  assert.match(app, /sampleSrc\.startsWith\("https:\/\/res\.cloudinary\.com\/"\)/);
+  assert.match(app, /pdpBackdropCache\.set\(sampleSrc, result\)/);
+  assert.match(app, /sample\.crossOrigin = "anonymous"/);
+  // Gap edges first (left/right for portrait + square, top/bottom for landscape); uneven -> other pair; transparent,
+  // white and busy edges keep the box colour.
+  assert.match(app, /const \[first, second\] = width > height \? \[ends, sides\] : \[sides, ends\];/);
+  assert.match(app, /if \(spread > 12\) return "uneven";/);
+  assert.match(app, /mean\.every\(\(value\) => value >= 250\) \? "white"/);
+  assert.match(app, /resolve\(colour\.startsWith\("rgb\("\) \? colour : null\)/);
+  // Applied only to the matching image (a late answer for another image is ignored); main image only.
+  assert.match(app, /const mainImageBackdrop = !pdpBackground\.style && mainImage && imageBackdrop\?\.src === mainImage\.src \? imageBackdrop\.color : null;/);
+  assert.equal((app.match(/has-image-backdrop/g) ?? []).length, 1);
+  const block = css.slice(css.indexOf("/* PDP image backdrop"));
+  assert.match(block, /\.pdp-showcase \.pdp-main-image\.has-image-backdrop \{ background:var\(--pdp-image-backdrop\);/);
+  assert.match(block, /\.pdp-showcase \.pdp-main-image\.has-image-backdrop img \{ mix-blend-mode:normal; \}/);
+  assert.doesNotMatch(block, /object-fit|\.product-image|\.pdp-thumbnails/);
+});

@@ -12,7 +12,16 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
-import { adminProductMatchesQuery } from "../lib/adminProductSearch";
+import {
+  NO_CATEGORY_FILTER,
+  adminProductMatchesCategory,
+  adminProductMatchesQuery,
+  countBy,
+  subcategoriesForCategory,
+  withCategory,
+  type AdminCategoryFilter,
+  type AdminSubcategoryOption,
+} from "../lib/adminProductSearch";
 import {
   formatPkrMinor,
   parsePkrMajorToMinor,
@@ -50,6 +59,9 @@ type ProductRow = {
   data_class: "development" | "real";
   brand: { name: string } | null;
   category: { name: string } | null;
+  category_id: string | null;
+  /** Absent when the database has no subcategory column (migration 202611090001 not applied). */
+  subcategory_id?: string | null;
   product_variants: { id: string; sku: string | null; storage_display: string | null; color_finish: string | null }[];
   product_media: { is_primary: boolean; cloudinary_public_id: string | null }[];
 };
@@ -148,6 +160,10 @@ const emptyDraft: Draft = {
 export function Phase4ProductList() {
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [query, setQuery] = useState("");
+  // Category + Subcategory filter (existing categories / product_subcategories tables; "" = all).
+  const [filter, setFilter] = useState<AdminCategoryFilter>(NO_CATEGORY_FILTER);
+  const [categoryOptions, setCategoryOptions] = useState<Option[]>([]);
+  const [subcategoryOptions, setSubcategoryOptions] = useState<AdminSubcategoryOption[]>([]);
   const [error, setError] = useState("");
   // Draft products ticked for Bulk publish (ids; across categories).
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -156,12 +172,12 @@ export function Phase4ProductList() {
       setError("Supabase is not configured.");
       return;
     }
-    const { data, error } = await supabase
-      .from("products")
-      .select(
-        "id,title,slug,publication_status,data_class,brand:brands(name),category:categories(name),product_variants(id,sku,storage_display,color_finish),product_media(is_primary,cloudinary_public_id)",
-      )
-      .order("updated_at", { ascending: false });
+    const columns =
+      "id,title,slug,publication_status,data_class,category_id,brand:brands(name),category:categories(name),product_variants(id,sku,storage_display,color_finish),product_media(is_primary,cloudinary_public_id)";
+    const read = (select: string) => supabase!.from("products").select(select).order("updated_at", { ascending: false });
+    let { data, error } = await read(`${columns},subcategory_id`);
+    // A database without the subcategory column (202611090001 not applied) still lists products.
+    if (error && /subcategory_id/.test(error.message)) ({ data, error } = await read(columns));
     if (error) setError(error.message);
     else {
       const rows = (data ?? []) as unknown as ProductRow[];
@@ -171,6 +187,18 @@ export function Phase4ProductList() {
   }, []);
   useEffect(() => {
     void loadProducts();
+    if (!supabase) return;
+    void supabase
+      .from("categories")
+      .select("id,name,slug,data_class,is_active")
+      .order("sort_order")
+      .order("name")
+      .then(({ data }) => setCategoryOptions((data ?? []) as Option[]));
+    void supabase
+      .from("product_subcategories")
+      .select("id,name,category_id,is_active,sort_order")
+      .order("sort_order")
+      .then(({ data, error }) => setSubcategoryOptions(error ? [] : ((data ?? []) as AdminSubcategoryOption[])));
   }, [loadProducts]);
   const afterBulkPublish = useCallback(async () => {
     setSelected(new Set());
@@ -183,9 +211,20 @@ export function Phase4ProductList() {
   const shown = products.filter(
     (p) =>
       adminProductMatchesQuery(p, query) &&
+      adminProductMatchesCategory(p, filter) &&
       (!missingImagesOnly ||
         !p.product_media.some((media) => media.is_primary && media.cloudinary_public_id)),
   );
+  const categoryCounts = countBy(products, "category_id");
+  const subcategoryCounts = countBy(products, "subcategory_id");
+  // Categories with products first-class; empty categories still listed (inactive ones only if they hold products).
+  const filterCategories = categoryOptions.filter((c) => c.is_active || categoryCounts.has(c.id));
+  const filterSubcategories = subcategoriesForCategory(filter.categoryId, subcategoryOptions, products);
+  const filtersActive = Boolean(query.trim() || filter.categoryId || filter.subcategoryId);
+  const clearFilters = () => {
+    setQuery("");
+    setFilter(NO_CATEGORY_FILTER);
+  };
   const shownDrafts = shown.filter(isDraft);
   const allShownDraftsSelected = shownDrafts.length > 0 && shownDrafts.every((p) => selected.has(p.id));
   return (
@@ -219,6 +258,38 @@ export function Phase4ProductList() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search title, brand, SKU, storage or colour"
           />
+        </div>
+        <div className="catalog-filters">
+          <select
+            aria-label="Filter by category"
+            value={filter.categoryId}
+            onChange={(e) => setFilter((current) => withCategory(current, e.target.value, subcategoryOptions))}
+          >
+            <option value="">All categories</option>
+            {filterCategories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} ({categoryCounts.get(c.id) ?? 0})
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Filter by subcategory"
+            value={filter.subcategoryId}
+            disabled={filterSubcategories.length === 0}
+            onChange={(e) => setFilter((current) => ({ ...current, subcategoryId: e.target.value }))}
+          >
+            <option value="">{filter.categoryId && filterSubcategories.length === 0 ? "No subcategories" : "All subcategories"}</option>
+            {filterSubcategories.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({subcategoryCounts.get(s.id) ?? 0})
+              </option>
+            ))}
+          </select>
+          {filtersActive && (
+            <button type="button" className="admin-secondary" onClick={clearFilters}>
+              <X /> Clear filters
+            </button>
+          )}
         </div>
         <a className="admin-secondary" href="/admin/taxonomy">
           Brands & categories
@@ -307,6 +378,14 @@ export function Phase4ProductList() {
           </div>
         ))}
       </section>
+      {shown.length === 0 && products.length > 0 && (
+        <div className="catalog-empty" role="status">
+          No products match these filters.{" "}
+          <button type="button" className="admin-secondary" onClick={clearFilters}>
+            Clear filters
+          </button>
+        </div>
+      )}
       <div className="table-foot">
         {shown.length} records · Development records remain public-invisible
       </div>
@@ -2101,7 +2180,7 @@ export function Phase4ProductEditor() {
                   <strong>Validated publication only</strong>
                   <p>
                     Real class, active real brand/category, explicit resolved
-                    variants, warranty, delivery, and complete primary
+                    variants, warranty (where the category needs it), delivery, and complete primary
                     Cloudinary media are required.
                   </p>
                 </div>

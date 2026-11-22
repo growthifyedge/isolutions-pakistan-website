@@ -55,6 +55,8 @@ export type IphoneLine = {
   listedPta: IphonePta | null;
   /** SIM written on the heading or line ("Physical Dual" = dual_physical_sim); SIM information, never colour or model. */
   listedSim: IphoneSim | null;
+  /** Market wording written in the list ("HK Approved"), kept as written; never read as PTA Approved or Non-PTA. */
+  listedMarket?: string | null;
   /** Owner-confirmed spelling applied to this colour ("Blaxk" read as "Black"). */
   colorNote: string | null;
   /** Problems found while reading (no heading, unreadable price, ...). */
@@ -78,7 +80,10 @@ const COLOURS_WITHOUT_PRICE = "Colours without a price — not used; write the p
  */
 export type IphoneSim = "dual_physical_sim";
 
-type Tags = { condition: IphoneCondition | null; pta: IphonePta | null; sim: IphoneSim | null; problems: string[]; rest: string };
+type Tags = { condition: IphoneCondition | null; pta: IphonePta | null; sim: IphoneSim | null; market: string | null; problems: string[]; rest: string };
+
+/** "HK Approved" / "HK -Approved" / "Hong Kong Approved": a market label, kept as written and never mapped to PTA. */
+const HK_APPROVED = /\b(?:hk|hong[\s-]*kong)\s*[-–]?\s*approved\b/gi;
 
 /** Lifts New / Used / PTA / Non-PTA words out of a piece of text (the shared reader would read a trailing "PTA" as a colour). */
 function liftTags(text: string): Tags {
@@ -90,6 +95,7 @@ function liftTags(text: string): Tags {
     return found;
   };
   const physicalDual = take(/\bphysical[\s-]*dual(?:[\s-]*sim)?\b/gi);
+  const hkApproved = take(HK_APPROVED);
   const nonPta = take(/\bnon[\s-]*pta\b/gi);
   const pta = take(/\bpta(?:\s*approved)?\b/gi);
   const used = take(/\bused\b/gi);
@@ -101,6 +107,7 @@ function liftTags(text: string): Tags {
     condition: used && !isNew ? "used" : isNew && !used ? "brand_new" : null,
     pta: nonPta && !pta ? "not_approved" : pta && !nonPta ? "approved" : null,
     sim: physicalDual ? "dual_physical_sim" : null,
+    market: hkApproved ? "HK Approved" : null,
     problems,
     rest: rest.replace(/\s+/g, " ").trim(),
   };
@@ -170,7 +177,9 @@ function readColors(text: string): ListedColor[] {
   });
 }
 
-type Heading = { baseTitle: string; storage: string; condition: IphoneCondition | null; pta: IphonePta | null; sim: IphoneSim | null; problems: string[] };
+type Heading = { baseTitle: string; storage: string; condition: IphoneCondition | null; pta: IphonePta | null; sim: IphoneSim | null; market: string | null; problems: string[] };
+
+const HEADING_NO_STORAGE = "This heading has no storage (for example 256GB)";
 
 /** "IPhone 15Pro Max 512Gb" / "14Pro 512Gb Physical Dual" -> model + storage (the shared model reader does the naming). */
 function readHeading(text: string, brands: BrandReference[]): Heading | string {
@@ -178,11 +187,11 @@ function readHeading(text: string, brands: BrandReference[]): Heading | string {
   const model = IPHONE_WORD.test(tags.rest) ? tags.rest : `iPhone ${tags.rest}`;
   const row = normalizeStockLines(model, { brands }).rows[0];
   if (!row || (row.brand ?? "").toLowerCase() !== "apple" || !row.productTitle) return "This heading could not be read as an iPhone model";
-  if (!row.storage) return "This heading has no storage (for example 256GB)";
+  if (!row.storage) return HEADING_NO_STORAGE;
   if (row.productType !== "Mobile Phone") return "This heading could not be read as an iPhone model";
   if (row.ram) return "This heading has a RAM size; iPhone variants are stored without RAM — write only the storage";
   if (row.color) return `This heading could not be read fully (“${row.color}” is left over)`;
-  return { baseTitle: row.productTitle, storage: row.storage, condition: tags.condition, pta: tags.pta, sim: tags.sim, problems: tags.problems };
+  return { baseTitle: row.productTitle, storage: row.storage, condition: tags.condition, pta: tags.pta, sim: tags.sim, market: tags.market, problems: tags.problems };
 }
 
 const isHeadingLike = (text: string) => IPHONE_WORD.test(text) || BARE_MODEL_HEADING.test(text.trim());
@@ -195,6 +204,17 @@ function colourOnly(line: string): boolean {
   if (/[0-9@]/.test(line)) return false;
   return readColors(liftTags(line).rest).length > 0;
 }
+
+/**
+ * Supplier block form (2026-11-17): a model heading without storage ("IPhone 18Pro Max"), its colour on the line just
+ * above or below it ("HK -Approved Burgundy"), then one "storage @ price" line per storage ("256Gb @578,500").
+ */
+function isModelOnlyHeading(line: string, brands: BrandReference[]): boolean {
+  if (!line || splitPrice(line) || !isHeadingLike(line)) return false;
+  return readHeading(line, brands) === HEADING_NO_STORAGE && typeof readHeading(`${line} 128GB`, brands) !== "string";
+}
+
+const STORAGE_TOKEN = /\b(\d{1,4})\s*(gb|tb)\b/gi;
 
 /**
  * Raw list text -> one IphoneLine per colour (a line with three colours gives three). A colour-only line takes its price
@@ -215,17 +235,54 @@ export function parseIphoneList(text: string, brands: BrandReference[]): ParsedI
     pending = null;
   };
 
-  text
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .forEach((raw, index) => {
+  type BlockLine = { lineNumber: number; line: string };
+  type Block = { model: BlockLine; colour: BlockLine | null };
+  /** The open supplier block: model heading without storage, and its colour line (above or below it). */
+  let block: Block | null = null;
+  /** A colour line written just above a model heading without storage. */
+  let lead: BlockLine | null = null;
+  const allLines = text.replace(/\r\n?/g, "\n").split("\n").map((raw) => raw.trim());
+  const nextIndex = (index: number) => allLines.findIndex((line, at) => at > index && Boolean(line));
+  /** A storage-less model heading opens a block only when a "storage @ price" line follows (after at most one colour line). */
+  const opensBlock = (index: number) => {
+    if (index < 0 || !isModelOnlyHeading(allLines[index], brands)) return false;
+    let at = nextIndex(index);
+    if (at >= 0 && colourOnly(allLines[at])) at = nextIndex(at);
+    const price = at >= 0 ? splitPrice(allLines[at]) : null;
+    return Boolean(price && new RegExp(STORAGE_TOKEN.source, "i").test(liftTags(price.text).rest));
+  };
+
+  allLines.forEach((line, index) => {
       const lineNumber = index + 1;
-      const line = raw.trim();
       if (!line) return;
       const price = splitPrice(line);
 
+      if (!price && opensBlock(index)) {
+        dropPending();
+        heading = null;
+        headingProblem = null;
+        block = { model: { lineNumber, line }, colour: lead };
+        lead = null;
+        return;
+      }
+      if (!price && colourOnly(line) && opensBlock(nextIndex(index))) {
+        dropPending();
+        lead = { lineNumber, line };
+        return;
+      }
+      const open = block as Block | null;
+      if (open && !price && !isHeadingLike(line) && colourOnly(line)) {
+        open.colour = { lineNumber, line };
+        return;
+      }
+      if (open && price) {
+        readBlockPrice(open, { lineNumber, line }, price);
+        return;
+      }
+
       if (!price && isHeadingLike(line)) {
         dropPending();
+        block = null;
         const read = readHeading(line, brands);
         if (typeof read === "string") {
           heading = null;
@@ -266,6 +323,7 @@ export function parseIphoneList(text: string, brands: BrandReference[]): ParsedI
       let condition: IphoneCondition | null = null;
       let pta: IphonePta | null = null;
       let sim: IphoneSim | null = null;
+      let headingMarket: string | null = null;
       if (isHeadingLike(tags.rest)) {
         // One-line form: "iPhone 15 Pro Max 256GB Blue @ 280,000".
         const model = IPHONE_WORD.test(tags.rest) ? tags.rest : `iPhone ${tags.rest}`;
@@ -289,6 +347,7 @@ export function parseIphoneList(text: string, brands: BrandReference[]): ParsedI
         condition = current.condition;
         pta = current.pta;
         sim = current.sim;
+        headingMarket = current.market;
         problems.push(...current.problems);
       } else {
         const problem = headingProblem as { lineNumber: number; reason: string } | null;
@@ -300,11 +359,12 @@ export function parseIphoneList(text: string, brands: BrandReference[]): ParsedI
       condition = tags.condition ?? condition;
       pta = tags.pta ?? pta;
       sim = tags.sim ?? sim;
+      const market = tags.market ?? headingMarket;
       const priceMinor = priceToMinor(price.digits);
       if (priceMinor === null) problems.push("The price could not be read");
       const colors = readColors(tags.rest);
       const sourceLine = joined ? `${joined.line} ${line} (lines ${joined.lineNumber}–${lineNumber})` : line;
-      const shared = { lineNumber: joined?.lineNumber ?? lineNumber, sourceLine, baseTitle: base, storage, priceMinor, listedCondition: condition, listedPta: pta, listedSim: sim };
+      const shared = { lineNumber: joined?.lineNumber ?? lineNumber, sourceLine, baseTitle: base, storage, priceMinor, listedCondition: condition, listedPta: pta, listedSim: sim, listedMarket: market };
       const keyLine = shared.lineNumber;
 
       if (!colors.length) {
@@ -323,6 +383,51 @@ export function parseIphoneList(text: string, brands: BrandReference[]): ParsedI
       });
     });
   dropPending();
+
+  /** One "256Gb @578,500" line of an open block: storage from the line, model from the heading, colour from the block. */
+  function readBlockPrice(open: Block, at: BlockLine, price: { text: string; digits: string }) {
+    const lineTags = liftTags(price.text);
+    const colourTags = open.colour ? liftTags(open.colour.line) : null;
+    const storages = [...lineTags.rest.matchAll(STORAGE_TOKEN)];
+    const ownColours = storages.length === 1 ? lineTags.rest.replace(storages[0][0], " ").replace(/\s+/g, " ").trim() : lineTags.rest;
+    if (!lineTags.rest && !colourTags) {
+      skipped.push({ lineNumber: at.lineNumber, line: at.line, model: null, reason: SKIPPED_NO_COLOUR });
+      return;
+    }
+    const problems: string[] = [...lineTags.problems, ...(colourTags?.problems ?? [])];
+    let read: Heading | null = null;
+    if (storages.length === 1) {
+      const result = readHeading(`${open.model.line} ${storages[0][1]}${storages[0][2]}`, brands);
+      if (typeof result === "string") problems.push(result);
+      else read = result;
+    } else {
+      problems.push(storages.length ? "More than one storage is written on this line" : "No storage is written on this price line (for example “256GB @ 578,500”)");
+    }
+    problems.push(...(read?.problems ?? []));
+    // Line words win over the colour line, which wins over the model heading; a clash between them is never guessed.
+    const pick = <T,>(name: string, values: (T | null | undefined)[]): T | null => {
+      const written = values.filter((value): value is T => value !== null && value !== undefined);
+      if (new Set(written).size > 1) problems.push(`${name} is written differently on the lines of this block`);
+      return written[0] ?? null;
+    };
+    const condition = pick<IphoneCondition>("New / Used", [lineTags.condition, colourTags?.condition, read?.condition]);
+    const pta = pick<IphonePta>("PTA", [lineTags.pta, colourTags?.pta, read?.pta]);
+    const sim = lineTags.sim ?? colourTags?.sim ?? read?.sim ?? null;
+    const market = lineTags.market ?? colourTags?.market ?? read?.market ?? null;
+    const priceMinor = priceToMinor(price.digits);
+    if (priceMinor === null) problems.push("The price could not be read");
+    const colors = ownColours ? readColors(ownColours) : colourTags ? readColors(colourTags.rest) : [];
+    const used = [open.colour, open.model, at].filter((item): item is BlockLine => Boolean(item));
+    const sourceLine = `${used.map((item) => item.line).join(" · ")} (lines ${used.map((item) => item.lineNumber).join(", ")})`;
+    const shared = { lineNumber: at.lineNumber, sourceLine, baseTitle: read?.baseTitle ?? null, storage: read?.storage ?? null, priceMinor, listedCondition: condition, listedPta: pta, listedSim: sim, listedMarket: market };
+    if (!colors.length) {
+      lines.push({ ...shared, lineKey: `${at.lineNumber}:${sourceLine}`, colorWritten: null, colorKnown: false, colorNote: null, problems: [...problems, "This line has no colour"] });
+      return;
+    }
+    colors.forEach((color, colorIndex) => {
+      lines.push({ ...shared, lineKey: colors.length === 1 ? `${at.lineNumber}:${sourceLine}` : `${at.lineNumber}:${colorIndex}:${sourceLine}`, colorWritten: color.color, colorKnown: color.known, colorNote: color.note, problems: [...problems] });
+    });
+  }
 
   return { lines, unread: unread.sort((a, b) => a.lineNumber - b.lineNumber), skipped };
 }
@@ -442,6 +547,7 @@ export function compareIphoneList(parsed: ParsedIphoneList, catalog: readonly Ca
     let color = line.colorWritten;
     let colorDecision: IphoneEntry["colorDecision"] = null;
     if (line.colorNote) notes.push(line.colorNote);
+    if (line.listedMarket) notes.push(`“${line.listedMarket}” written in the list — kept as written; PTA comes from your choice or a PTA word in the list`);
     if (line.colorWritten && !line.colorKnown) {
       const chosen = decisions.colors[line.lineKey];
       if (chosen?.trim()) {

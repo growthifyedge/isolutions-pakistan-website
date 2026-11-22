@@ -66,6 +66,19 @@ import { parsePkrMajorToMinor } from "./lib/money";
 import { cloudinaryDeliveryUrl } from "./lib/cloudinary";
 import { supabase } from "./lib/supabase";
 import { fetchHomepageBundles, type HomepageBundle } from "./lib/bundles";
+import { loadPreviewImageUrls } from "./lib/bannerPreviewStore";
+import {
+  PDP_BACKGROUND_CACHE_STORAGE_KEY,
+  PDP_BACKGROUND_PREVIEW_PARAM,
+  PDP_BACKGROUND_PREVIEW_STORAGE_KEY,
+  parsePdpGalleryBackground,
+  pdpBackgroundPreviewKeys,
+  pdpBackgroundStyle,
+  type PdpGalleryBackground,
+} from "./lib/pdpGalleryBackground";
+import { fetchPublishedPdpBackground } from "./lib/pdpGalleryBackgroundDb";
+// Rollout 2026-11-21: Global PDP Background only (Homepage Banner Editor HOLD — homepage carousel unchanged).
+const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME as string | undefined;
 import {
   addStorefrontCartItem,
   clearStorefrontCart,
@@ -3435,7 +3448,131 @@ const pdpGalleryImage = (media: CatalogProduct["media"][number], width: number, 
     },
   };
 };
+// PDP main image auto-fit: the image box takes the image's own shape (portrait taller, landscape shorter, square square)
+// within the CSS height limits, so the whole image shows larger with less empty space. object-fit stays "contain":
+// nothing is stretched or cropped. Extreme shapes are limited to 1:2 .. 2:1.
+const pdpImageRatio = (width: number | null | undefined, height: number | null | undefined) => {
+  const ratio = width && height ? width / height : NaN;
+  return Number.isFinite(ratio) && ratio > 0 ? Math.min(2, Math.max(0.5, ratio)) : null;
+};
+// PDP image backdrop: when the main image's edges are one even, non-white colour (Apple light grey-blue, light blue,
+// a plain studio colour), the image box takes that colour, so the space beside a portrait image (or above/below a landscape one)
+// blends into the image instead of showing a different-coloured gap. Read from a 32 px PNG copy of the same image
+// (~2-3 KB, after the main image has loaded, once per image). Transparent edges, photos with busy edges or any failure
+// keep the normal box colour. The image itself is never changed, cropped or stretched.
+const pdpBackdropCache = new Map<string, Promise<string | null>>();
+const pdpImageBackdrop = (src: string): Promise<string | null> => {
+  const sampleSrc = src.replace(/\/c_limit,w_\d+,q_auto,f_auto\//, "/c_scale,w_32,f_png/");
+  if (sampleSrc === src || !sampleSrc.startsWith("https://res.cloudinary.com/")) return Promise.resolve(null);
+  const cached = pdpBackdropCache.get(sampleSrc);
+  if (cached) return cached;
+  const result = new Promise<string | null>((resolve) => {
+    const sample = new Image();
+    sample.crossOrigin = "anonymous";
+    sample.decoding = "async";
+    sample.onerror = () => resolve(null);
+    sample.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = sample.naturalWidth;
+        canvas.height = sample.naturalHeight;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context || canvas.width < 4 || canvas.height < 4) return resolve(null);
+        context.drawImage(sample, 0, 0);
+        const { width, height } = canvas;
+        const { data } = context.getImageData(0, 0, width, height);
+        const pixel = (x: number, y: number) => Array.from(data.subarray((y * width + x) * 4, (y * width + x) * 4 + 4));
+        // The edges where the empty space appears: left + right for portrait / square, top + bottom for landscape.
+        const sides = Array.from({ length: height }, (_, y) => [0, 1, width - 2, width - 1].map((x) => pixel(x, y))).flat();
+        const ends = Array.from({ length: width }, (_, x) => [0, 1, height - 2, height - 1].map((y) => pixel(x, y))).flat();
+        /** "transparent" | "uneven" | "white" | an rgb() colour. */
+        const evenColour = (band: number[][]) => {
+          if (band.some((value) => value[3] < 250)) return "transparent";
+          const mean = [0, 1, 2].map((channel) => band.reduce((sum, value) => sum + value[channel], 0) / band.length);
+          const spread = Math.max(...[0, 1, 2].map((channel) => Math.sqrt(band.reduce((sum, value) => sum + (value[channel] - mean[channel]) ** 2, 0) / band.length)));
+          if (spread > 12) return "uneven";
+          return mean.every((value) => value >= 250) ? "white" : `rgb(${mean.map(Math.round).join(",")})`;
+        };
+        const [first, second] = width > height ? [ends, sides] : [sides, ends];
+        // The gap edges decide; the other pair is used only when the product touches the gap edges ("uneven").
+        // Transparent or white edges keep the existing box colour (white already blends in with multiply blending).
+        const found = evenColour(first);
+        const colour = found === "uneven" ? evenColour(second) : found;
+        resolve(colour.startsWith("rgb(") ? colour : null);
+      } catch {
+        resolve(null);
+      }
+    };
+    sample.src = sampleSrc;
+  });
+  pdpBackdropCache.set(sampleSrc, result);
+  return result;
+};
+// Global PDP Background (src/lib/pdpGalleryBackground.ts): the published setting is read once per visit (cached for
+// the next one); ?pdpBackgroundPreview=1 shows the Admin's unsaved choice from this browser only.
+let publishedPdpBackground: Promise<PdpGalleryBackground | null | undefined> | null = null;
+function readCachedPdpBackground() {
+  try {
+    const raw = window.localStorage.getItem(PDP_BACKGROUND_CACHE_STORAGE_KEY);
+    return raw ? parsePdpGalleryBackground(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+function usePdpGalleryBackground() {
+  const [isPreview] = useState(() => new URLSearchParams(window.location.search).get(PDP_BACKGROUND_PREVIEW_PARAM) === "1");
+  const [state, setState] = useState<{ value: PdpGalleryBackground | null; urls: Map<string, string>; loaded?: boolean }>(() => ({
+    value: isPreview ? null : readCachedPdpBackground(),
+    urls: new Map(),
+  }));
+  useEffect(() => {
+    let active = true;
+    if (isPreview) {
+      const refresh = async () => {
+        let value: PdpGalleryBackground | null;
+        try {
+          const raw = window.localStorage.getItem(PDP_BACKGROUND_PREVIEW_STORAGE_KEY);
+          value = raw ? parsePdpGalleryBackground(JSON.parse(raw), { allowLocalPreview: true }) : null;
+        } catch {
+          value = null;
+        }
+        const keys = value ? pdpBackgroundPreviewKeys(value) : [];
+        const urls = keys.length ? await loadPreviewImageUrls(keys) : new Map<string, string>();
+        if (active) setState({ value, urls, loaded: true });
+      };
+      void refresh();
+      const onStorage = (event: StorageEvent) => {
+        if (event.key === PDP_BACKGROUND_PREVIEW_STORAGE_KEY) void refresh();
+      };
+      window.addEventListener("storage", onStorage);
+      return () => {
+        active = false;
+        window.removeEventListener("storage", onStorage);
+      };
+    }
+    publishedPdpBackground ??= fetchPublishedPdpBackground().catch(() => undefined);
+    void publishedPdpBackground.then((value) => {
+      if (!active || value === undefined) return; // read failed: keep what is shown
+      try {
+        if (value) window.localStorage.setItem(PDP_BACKGROUND_CACHE_STORAGE_KEY, JSON.stringify(value));
+        else window.localStorage.removeItem(PDP_BACKGROUND_CACHE_STORAGE_KEY);
+      } catch {
+        // Storage blocked: the next visit simply reads again.
+      }
+      setState({ value, urls: new Map() });
+    });
+    return () => {
+      active = false;
+    };
+  }, [isPreview]);
+  const style = pdpBackgroundStyle(state.value, CLOUDINARY_CLOUD_NAME, state.urls);
+  // Preview data lives in one browser + address only (e.g. not on a phone opening the LAN address): say so.
+  return { style, isPreview, previewEmpty: isPreview && Boolean(state.loaded) && !style };
+}
 function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
+  const pdpBackground = usePdpGalleryBackground();
+  const [loadedImageRatio, setLoadedImageRatio] = useState<{ src: string; ratio: number } | null>(null);
+  const [imageBackdrop, setImageBackdrop] = useState<{ src: string; color: string | null } | null>(null);
   const [product, setProduct] = useState<CatalogProduct | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -3493,6 +3630,12 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
   // Mobile phones (Android + iPhone, New + Used) get the premium PDP styling; other categories keep theirs.
   const isPhonePdp = product.category?.slug === "mobile-phones";
   const selectedMedia = gallery.find((item) => item.url === image) ?? gallery[0] ?? primaryMedia(product);
+  const mainImage = selectedMedia ? pdpGalleryImage(selectedMedia, 1400, trimGallery) : null;
+  // Stored media size first (known before loading: no jump); the loaded image's real size wins (e.g. trimmed images).
+  const mainImageRatio =
+    mainImage && loadedImageRatio?.src === mainImage.src ? loadedImageRatio.ratio : pdpImageRatio(selectedMedia?.width, selectedMedia?.height);
+  // A published global background wins over the per-image edge colour.
+  const mainImageBackdrop = !pdpBackground.style && mainImage && imageBackdrop?.src === mainImage.src ? imageBackdrop.color : null;
   const configurations = [...new Set(product.variants.map(configurationLabel))];
   const selectedConfiguration = configurationLabel(variant);
   const colors = [...new Set(product.variants
@@ -3713,9 +3856,32 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
                 </button>
               ))}
             </div>
-            <div className="pdp-main-image">
-              {selectedMedia && (
-                <img {...pdpGalleryImage(selectedMedia, 1400, trimGallery)} alt={selectedMedia.alt} />
+            <div
+              className={`pdp-main-image${mainImageRatio ? " has-image-ratio" : ""}${mainImageBackdrop ? " has-image-backdrop" : ""}${pdpBackground.style ? " has-global-background" : ""}`}
+              // The image's padding (2.5% of the width on every side) is added to the box height, so the image itself
+              // fills the full width whenever the height limit allows.
+              style={
+                mainImageRatio || mainImageBackdrop || pdpBackground.style
+                  ? ({
+                      ...(mainImageRatio ? { "--pdp-image-ratio": (1 / (1 / mainImageRatio + 0.05)).toFixed(4) } : {}),
+                      ...(mainImageBackdrop ? { "--pdp-image-backdrop": mainImageBackdrop } : {}),
+                      ...(pdpBackground.style ?? {}),
+                    } as React.CSSProperties)
+                  : undefined
+              }
+            >
+              {selectedMedia && mainImage && (
+                <img
+                  {...mainImage}
+                  alt={selectedMedia.alt}
+                  onLoad={(event) => {
+                    const loaded = event.currentTarget;
+                    const ratio = pdpImageRatio(loaded.naturalWidth, loaded.naturalHeight);
+                    const src = loaded.getAttribute("src") ?? "";
+                    if (ratio && (loadedImageRatio?.src !== src || loadedImageRatio.ratio !== ratio)) setLoadedImageRatio({ src, ratio });
+                    if (src && imageBackdrop?.src !== src) void pdpImageBackdrop(src).then((color) => setImageBackdrop({ src, color }));
+                  }}
+                />
               )}
               {gallery.length > 1 && (
                 <>
@@ -3723,8 +3889,18 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
                   <button type="button" className="pdp-gallery-arrow next" onClick={() => moveGallery(1)} aria-label="Next product image"><ChevronRight /></button>
                 </>
               )}
-              <span className="pdp-image-label">ISOLUTIONS SELECTED</span>
             </div>
+            {pdpBackground.isPreview && (
+              <div className={`banner-preview-label pdp-bg-preview-label${pdpBackground.previewEmpty ? " is-empty" : ""}`} role="status">
+                <strong>Preview</strong>
+                <span>
+                  {pdpBackground.previewEmpty
+                    ? "No preview background is saved in this browser. Choose it in Admin → Media on this device."
+                    : "PDP background from this browser only — not published. The live website is unchanged."}
+                </span>
+                <a href={window.location.pathname}>Exit Preview</a>
+              </div>
+            )}
           </div>
           <div className="pdp-purchase">
             <div className="pdp-product-heading">

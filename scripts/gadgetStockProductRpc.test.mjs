@@ -294,7 +294,10 @@ test("every other category keeps its rules: Android, New / Used iPhone, accessor
     ["Apple 20W Charger", "mobile-accessories", "Apple", "nationwide"],
   ]) {
     assert.deepEqual((await env.validate(await listing(title, category, brand, { ...unset, scope }))).errors, [COMMERCIAL], `${title}: unset facts still block`);
-    assert.deepEqual((await env.validate(await listing(`${title} W`, category, brand, { pta: "approved", condition: "brand_new", scope }))).errors, [COMMERCIAL], `${title}: warranty still required`);
+    // Accessories need no warranty since 202611060001 (Owner 2026-11-06); New iPhones since 202611190001 (Owner 2026-11-18);
+    // Android phones still do.
+    const noWarranty = category === "mobile-accessories" || brand === "Apple" ? [] : [COMMERCIAL];
+    assert.deepEqual((await env.validate(await listing(`${title} W`, category, brand, { pta: "approved", condition: "brand_new", scope }))).errors, noWarranty, `${title}: warranty rule`);
     assert.deepEqual((await env.validate(await listing(`${title} OK`, category, brand, { pta: "approved", condition: "brand_new", scope, warranty: "1 Year" }))).errors, [], `${title}: complete facts publish`);
   }
   // Tablets & MacBooks (Gadgets children, migration 202610270001): warranty optional; unset PTA / condition still block.

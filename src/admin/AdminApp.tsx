@@ -53,6 +53,8 @@ import { IphoneStockUpdate } from "./IphoneStockUpdate";
 import { GadgetStockUpdate } from "./GadgetStockUpdate";
 import { TabletStockUpdate } from "./TabletStockUpdate";
 import { SpecificationBulkUpload } from "./SpecificationBulkUpload";
+import { IphoneModelSpecs } from "./IphoneModelSpecs";
+import { PdpBackgroundSetting } from "./PdpBackgroundSetting";
 import { DescriptionBulkUpload } from "./DescriptionBulkUpload";
 import { SubcategoryAssignment } from "./SubcategoryAssignment";
 import { AddProduct } from "./AddProduct";
@@ -633,6 +635,31 @@ function Future({ title }: { title: string }) {
     </AdminLayout>
   );
 }
+/**
+ * Spec Upload: Single Product = the existing Specifications Bulk Upload (unchanged); Same Model = iPhone + Android
+ * shared specifications (unchanged). Only one is mounted at a time; the choice is kept in the address (?mode=model).
+ */
+function SpecUploadModes({ initial }: { initial: "single" | "model" }) {
+  const [mode, setMode] = useState<"single" | "model">(initial);
+  useEffect(() => {
+    const target = mode === "model" ? "/admin/spec-upload?mode=model" : "/admin/spec-upload";
+    if (`${location.pathname}${location.search}` !== target) history.replaceState(history.state, "", target);
+  }, [mode]);
+  return (
+    <>
+      <div className="spec-upload-modes" role="tablist" aria-label="Specification upload option">
+        <button type="button" role="tab" aria-selected={mode === "single"} className={mode === "single" ? "active" : ""} onClick={() => setMode("single")}>
+          <FileSearch /> Single Product
+        </button>
+        <button type="button" role="tab" aria-selected={mode === "model"} className={mode === "model" ? "active" : ""} onClick={() => setMode("model")}>
+          <Smartphone /> Same Model <small>iPhone + Android</small>
+        </button>
+      </div>
+      {mode === "single" ? <SpecificationBulkUpload /> : <IphoneModelSpecs />}
+    </>
+  );
+}
+
 export function AdminApp() {
   useEffect(() => {
     document.body.classList.add("admin-body");
@@ -684,10 +711,11 @@ export function AdminApp() {
         <SubcategoryAssignment />
       </AdminLayout>
     );
-  else if (path === "/admin/spec-upload")
+  else if (path === "/admin/spec-upload" || path === "/admin/iphone-model-specs")
+    // One page, two options. The old Model Specs address opens the Same Model option.
     page = (
       <AdminLayout section="Spec Upload">
-        <SpecificationBulkUpload />
+        <SpecUploadModes initial={path === "/admin/iphone-model-specs" || new URLSearchParams(location.search).get("mode") === "model" ? "model" : "single"} />
       </AdminLayout>
     );
   else if (path === "/admin/catalog-readiness")
@@ -728,6 +756,7 @@ export function AdminApp() {
             </p>
           </div>
         </div>
+        <PdpBackgroundSetting />
         <BulkProductImages />
         <MediaLibrary />
       </AdminLayout>

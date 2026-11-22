@@ -86,7 +86,7 @@ async function blocked(sql, params = []) {
 
 const PRIVATE_TABLES = ["orders", "order_items", "inventory_movements", "contact_messages", "newsletter_subscribers",
   "product_recommendations", "bundles", "bundle_items", "product_media_variant_assignments", "coupons", "coupon_redemptions", "vendor_order_notifications",
-  "admin_order_notifications"];
+  "admin_order_notifications", "model_common_specifications"];
 const ALL_TABLES = (await all(`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind in ('r', 'p') order by 1`)).map((r) => r.relname);
 const rowCounts = async () => Object.fromEntries(await Promise.all(ALL_TABLES.map(async (t) =>
@@ -113,7 +113,8 @@ test("SECURITY DEFINER RPCs callable by visitors are exactly the reviewed set", 
     where n.nspname = 'public' and p.prosecdef and p.prorettype <> 'trigger'::regtype
       and has_function_privilege($1, p.oid, 'EXECUTE') order by 1`, [role])).map((r) => r.proname);
   // Public storefront RPCs, plus admin RPCs that refuse non-admins themselves (catalog_admin_required).
-  const reviewed = ["create_storefront_order", "delete_product_variant", "frequently_bought_together", "homepage_bundles",
+  // get_published_site_content (202611200001): published Website Editor content only, enabled banners only.
+  const reviewed = ["create_storefront_order", "delete_product_variant", "frequently_bought_together", "get_published_site_content", "homepage_bundles",
     "homepage_featured_products", "is_catalog_admin", "public_catalog_taxonomy", "search_public_catalog",
     "set_product_media_color_assignment", "submit_contact_message", "subscribe_newsletter", "validate_storefront_coupon"];
   assert.deepEqual(await callable("anon"), reviewed);
@@ -132,7 +133,15 @@ test("SECURITY DEFINER RPCs callable by visitors are exactly the reviewed set", 
       "admin_claim_vendor_notifications", "admin_complete_vendor_notification", "admin_retry_vendor_notification",
       // Admin New Order Alert outbox (202611170001): same guard (Admin session or service role).
       // Covered by scripts/adminOrderNotifications.test.mjs.
-      "admin_claim_admin_order_notifications", "admin_complete_admin_order_notification", "admin_has_due_admin_order_notifications"].sort());
+      "admin_claim_admin_order_notifications", "admin_complete_admin_order_notification", "admin_has_due_admin_order_notifications",
+      // Website Editor — Homepage Banners (202611200001): refuse anyone but the active Owner (owner_required);
+      // is_site_owner only answers for the caller. Covered by scripts/homepageBanners.test.mjs.
+      "get_site_content_admin", "is_site_owner", "publish_site_content", "register_site_asset", "restore_site_content_version",
+      "save_site_content_draft",
+      // Model Shared Specifications (202611200002): is_catalog_owner only answers for the caller; the write RPC
+      // apply_model_common_specifications refuses anyone but the active Owner (owner required) and is add-only.
+      // Covered by scripts/iphoneModelSpecs.test.mjs.
+      "apply_model_common_specifications", "is_catalog_owner"].sort());
 });
 
 test("visitors, customers and inactive admins cannot read Admin, order, stock or contact data", async () => {
