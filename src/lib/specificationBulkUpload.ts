@@ -97,10 +97,21 @@ export async function rowsFromXlsx(bytes: ArrayBuffer) {
   try {
     await workbook.xlsx.load(bytes);
   } catch {
-    return { rows: [], fileErrors: ["The file could not be read as an .xlsx workbook."] };
+    // A valid workbook ExcelJS cannot open (e.g. written by the Open XML SDK with "x:"-prefixed XML, as ChatGPT does):
+    // read its cell text with the minimal reader, under the same sheet rules.
+    try {
+      const { readXlsxTables } = await import("./xlsxTableReader.ts");
+      const tables = await readXlsxTables(bytes);
+      const table = tables.find((entry) => key(entry.name) === "specifications") ?? tables.find((entry) => !isInstructionsSheet(entry.name));
+      if (!table) return { rows: [], fileErrors: ["The workbook has no sheet."] };
+      return rowsFromTable(table.rows);
+    } catch {
+      return { rows: [], fileErrors: ["The file could not be read as an .xlsx workbook."] };
+    }
   }
-  // The Instructions sheet (and its example) is never read as data.
-  const sheet = workbook.worksheets.find((entry) => key(entry.name) === "specifications") ?? workbook.worksheets.find((entry) => key(entry.name) !== "instructions");
+  // The Instructions and GPT Instructions sheets (and the example) are never read as data: any sheet whose name contains
+  // "instructions" is skipped even when the Specifications sheet was renamed or moved.
+  const sheet = workbook.worksheets.find((entry) => key(entry.name) === "specifications") ?? workbook.worksheets.find((entry) => !isInstructionsSheet(entry.name));
   if (!sheet) return { rows: [], fileErrors: ["The workbook has no sheet."] };
   const table: string[][] = [];
   sheet.eachRow({ includeEmpty: true }, (row) => {
@@ -129,17 +140,96 @@ export async function specUploadTemplateXlsx(): Promise<ArrayBuffer> {
   const help = workbook.addWorksheet("Instructions");
   [
     ["One row = one specification of one product."],
-    ["Product Slug or Product ID must be the exact slug or id; Product Name must equal that product's title."],
+    ["Single product: choose the product in Admin first; then Product Slug or Product ID may be left blank (Admin uses the chosen product's ID) and Product Name must be that product's title."],
+    ["A file for several products: Product Slug or Product ID must be the exact slug or id; Product Name must equal that product's title."],
     [`Section must be one of: ${SPEC_SECTIONS.join(", ")}.`],
     ["Do not put RAM / storage / colour here: they belong to variants."],
+    ["Keep it concise: up to 4 General Features (Section Other), 4 Display, 2 Performance + 2 Memory (Section Performance), 4 Camera, 3 Battery, 4 Connectivity, 2 Software and 3 Build rows. No N/A or repeated values, and no PTA, price, stock, condition, warranty, delivery or colour."],
     ["Default upload adds missing specifications only; a different stored value is shown as a Conflict."],
     [""],
     ["EXAMPLE — for reference only, NOT imported. Type your rows on the Specifications sheet:"],
     [SPEC_UPLOAD_HEADERS.map((header, index) => `${header}: ${SPEC_UPLOAD_EXAMPLE[index]}`).join("  ·  ")],
   ].forEach((row) => help.addRow(row));
   help.getColumn(1).width = 110;
+  // GPT Instructions (Owner-approved 2026-11-23): the reusable research prompt, text only, never imported.
+  const gpt = workbook.addWorksheet(GPT_INSTRUCTIONS_SHEET);
+  gpt.getColumn(1).width = 120;
+  SPEC_GPT_PROMPT_LINES.forEach((line, index) => {
+    const row = gpt.addRow([line]);
+    row.getCell(1).alignment = { wrapText: true, vertical: "top" };
+    if (index === 0) row.font = { bold: true, size: 14 };
+    else if (SPEC_GPT_PROMPT_HEADINGS.includes(line)) row.font = { bold: true, size: 12 };
+  });
   return (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
 }
+
+export const GPT_INSTRUCTIONS_SHEET = "GPT Instructions";
+const isInstructionsSheet = (name: string) => key(name).includes("instructions");
+
+const SPEC_GPT_PROMPT_HEADINGS: readonly string[] = ["Mandatory Research Rules", "Excel Rules", "Row Limits", "Verification and Final Output"];
+/**
+ * The Owner's research prompt, exactly as approved (one line per row on the GPT Instructions sheet).
+ * 2026-11-24 (Owner-approved, localhost): "Row Limits" block (maximum rows per section, mapped to the template's
+ * section names; no N/A / repeats / commercial facts / colour); the numbered rules are unchanged.
+ * 2026-11-24 (Owner-approved): rule 21 added — GPT leaves Product Slug or Product ID blank; Admin's selected product
+ * supplies it. The research / no-guessing rules are unchanged; later rules renumbered 22–26.
+ */
+export const SPEC_GPT_PROMPT_LINES: readonly string[] = [
+  "ISOLUTIONS PAKISTAN — GPT PRODUCT SPECIFICATIONS RESEARCHER",
+  "You are an expert Product Specifications Researcher and Excel Data Specialist for iSolutions Pakistan.",
+  "Product Model: [OWNER WILL PROVIDE EXACT MODEL NAME]",
+  "Your objective: Research the exact product model, verify its technical specifications, fill the attached Excel template, and return a completed upload-ready Excel file.",
+  "",
+  "Mandatory Research Rules",
+  "1. Read the attached Excel workbook completely, including its GPT Instructions worksheet.",
+  "2. Research the exact manufacturer, model, generation and regional variant specified by the Owner.",
+  "3. Prioritize official manufacturer specification pages, official product documentation and trustworthy technical sources.",
+  "4. Cross-check uncertain specifications against independent reliable sources.",
+  "5. Never guess or fabricate specifications.",
+  "6. Never copy specifications from similar models, older generations, Plus/Pro/Ultra variants or different regional versions.",
+  "7. If any specification cannot be verified reliably, leave its value blank.",
+  "8. Do not substitute general product-family specifications for model-specific facts.",
+  "9. Respect differences in chipset, RAM, storage, cameras, display, battery, charging, SIM, network and connectivity.",
+  "10. Never invent PTA status, warranty, prices, stock, availability or product condition.",
+  "11. If the exact model identification is ambiguous, explicitly flag the ambiguity rather than selecting a model without evidence.",
+  "",
+  "Excel Rules",
+  "12. Preserve the existing workbook format, worksheet names, column headers, identifiers and required upload structure.",
+  "13. Fill only the intended specification-value cells.",
+  "14. Do not delete, rename or reorder existing upload columns.",
+  "15. Do not create duplicate specification rows.",
+  "16. Do not overwrite verified existing values with uncertain information.",
+  "17. Keep unsupported or unknown specification values blank.",
+  "18. Ensure values are concise, technically accurate and suitable for a customer-facing product page.",
+  "19. Never insert research notes, citations or explanations into cells reserved for specification values.",
+  "20. Do not alter SKU, product identifiers or model references unless explicitly instructed by the Owner.",
+  "21. Leave the \"Product Slug or Product ID\" column blank: never fill an internal product ID or slug. The Owner selects the exact product in Admin, which supplies its database ID. Put only the exact product name in \"Product Name\" on every row.",
+  "",
+  "Row Limits",
+  "Keep the sheet concise. Maximum rows per section (the Section column must use the template's section names shown in brackets):",
+  "- General Features: up to 4 rows (Section \"Other\")",
+  "- Display: up to 4 rows (Section \"Display\")",
+  "- Performance: up to 2 rows, chipset / processor (Section \"Performance\")",
+  "- Memory: up to 2 rows, memory type or card slot only (Section \"Performance\", in addition to the 2 performance rows); RAM and storage sizes belong to the variants, not here",
+  "- Camera: up to 4 rows (Section \"Camera\")",
+  "- Battery: up to 3 rows, capacity and charging (Section \"Battery\")",
+  "- Connectivity: up to 4 rows (Section \"Connectivity\")",
+  "- Software: up to 2 rows (Section \"Software\")",
+  "- Build / Design: up to 3 rows (Section \"Build\")",
+  "- Audio and Security are not part of this list: leave them out.",
+  "- Leave out N/A, unknown or empty values, values repeated under another label, and minor technical details.",
+  "- Never include PTA status, price, stock, condition, warranty, delivery or colour.",
+  "- These limits apply to the full specification sheet (at most 28 rows). The website's Top 7 compact view is chosen automatically from these rows; do not limit the sheet to 7.",
+  "",
+  "Verification and Final Output",
+  "22. Review all completed specifications for factual accuracy, consistency and correct units.",
+  "23. Validate that the workbook remains compatible with the original iSolutions specification upload template.",
+  "24. Return the completed .xlsx file, ready for Admin → Spec Upload.",
+  "25. Provide a brief research summary, official source links and any unresolved specifications separately in the chat.",
+  "26. Do not claim successful website upload or publication. The Owner controls the final Apply action.",
+  "",
+  "Approval Rule: The final ChatGPT-verified specification sheet is considered business-approved under the existing Owner workflow. No additional individual specification approval checklist is required; unverified fields must remain blank.",
+];
 
 // ---------------- plan (pure, read-only) ----------------
 
@@ -155,6 +245,23 @@ function rowProblems(row: UploadRow): string[] {
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(`${row.label}${row.value}`)) problems.push("Contains control characters.");
   return problems;
+}
+
+/**
+ * Single Product with a product chosen in Admin (Owner-approved 2026-11-24): every row of the file belongs to that
+ * product, whose real database id is used; the file's Product Slug or Product ID may be blank. The WHOLE file is refused
+ * (nothing previewed, nothing saved) when it names another product: a key that is not the chosen product's id or slug,
+ * more than one product name, or a name that is not the chosen product's title. Nothing is silently re-assigned.
+ */
+export function assignSelectedProduct(rows: readonly UploadRow[], product: CatalogSpecProduct): { rows: UploadRow[]; fileErrors: string[] } {
+  const fileErrors: string[] = [];
+  const otherKeys = [...new Set(rows.map((row) => row.productKey).filter((value) => value && value !== product.id && value !== product.slug))];
+  if (otherKeys.length) fileErrors.push(`This file names ${otherKeys.length === 1 ? "another product" : `${otherKeys.length} other products`} (${otherKeys.map((value) => `“${value}”`).join(", ")}), not “${product.title}” (${product.slug}). Nothing was uploaded — choose the right product or fix the file.`);
+  const names = [...new Map(rows.filter((row) => row.productName).map((row) => [key(row.productName), row.productName])).values()];
+  if (names.length > 1) fileErrors.push(`This file names ${names.length} different products (${names.map((value) => `“${value}”`).join(", ")}). Upload one product per file.`);
+  else if (names.length === 1 && key(names[0]) !== key(product.title)) fileErrors.push(`This file is for “${names[0]}”, but you chose “${product.title}”. Nothing was uploaded — choose the right product or fix the Product Name.`);
+  if (fileErrors.length) return { rows: [], fileErrors };
+  return { rows: rows.map((row) => ({ ...row, productName: product.title, productKey: product.id })), fileErrors: [] };
 }
 
 /** Exact product only: id or slug must match exactly one product, and the name must equal its title. */

@@ -1,9 +1,10 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Boxes,
   ChevronRight,
   CircleDollarSign,
+  Megaphone,
   Image,
   ListPlus,
   LayoutDashboard,
@@ -63,29 +64,60 @@ import { ContactEnquiries } from "./ContactEnquiries";
 import { BundleManager } from "./BundleManager";
 import { AdminOrders } from "./AdminOrders";
 import { AdminPromotions } from "./AdminPromotions";
+import { PromoPopupSetting } from "./PromoPopupSetting";
 import "./admin.css";
 
+// Admin menu (Owner-approved 2026-11-23): 10 sidebar options. Navigation only — every page keeps its own address
+// (old links still open the same page), and the tools of a group are one click away in its tab bar (Owner decision:
+// tools are shown only as tabs at the top, never as a nested sidebar sub-menu).
+type NavItem = readonly [string, string, LucideIcon];
 // An empty href renders a disabled "Later" item.
-const nav: ReadonlyArray<readonly [string, string, LucideIcon]> = [
+const nav: ReadonlyArray<NavItem> = [
   ["Dashboard", "/admin", LayoutDashboard],
-  ["Catalog", "/admin/products", Boxes],
+  ["Products & Inventory", "/admin/products", Boxes],
   ["Add Product", "/admin/products/add", PackagePlus],
-  ["Media", "/admin/media", Image],
-  ["Bulk Import", "/admin/bulk-import", ListPlus],
-  ["Stock Update", "/admin/stock-update", PackageCheck],
-  ["iPhone Stock", "/admin/iphone-stock-update", Smartphone],
-  ["Gadgets Stock", "/admin/gadget-stock-update", PackageCheck],
-  ["Tablets & MacBooks", "/admin/tablet-stock-update", Tablet],
-  ["Spec Upload", "/admin/spec-upload", FileSearch],
-  ["Descriptions", "/admin/description-upload", FileText],
-  ["Subcategories", "/admin/subcategory-upload", FolderTree],
-  ["Readiness", "/admin/catalog-readiness", ClipboardCheck],
-  ["Enquiries", "/admin/contact-enquiries", MessageSquareText],
-  ["Homepage", "/admin/homepage", Sparkles],
   ["Orders", "/admin/orders", ShoppingBag],
+  ["Media", "/admin/media", Image],
   ["Promotions", "/admin/promotions", CircleDollarSign],
+  ["Promotional Popup", "/admin/promotional-popup", Megaphone],
+  ["Homepage", "/admin/homepage", Sparkles],
+  ["Enquiries", "/admin/contact-enquiries", MessageSquareText],
   ["Settings", "/admin/settings", Settings],
 ];
+// The tools inside a menu option. Each label is the page's own section name (shown as active on that page).
+const navChildren: Readonly<Record<string, ReadonlyArray<NavItem>>> = {
+  "Products & Inventory": [
+    ["Catalog", "/admin/products", Boxes],
+    ["Readiness", "/admin/catalog-readiness", ClipboardCheck],
+    ["Bulk Import", "/admin/bulk-import", ListPlus],
+    ["Stock Update", "/admin/stock-update", PackageCheck],
+    ["iPhone Stock", "/admin/iphone-stock-update", Smartphone],
+    ["Gadgets Stock", "/admin/gadget-stock-update", PackageCheck],
+    ["Tablets & MacBooks", "/admin/tablet-stock-update", Tablet],
+    ["Spec Upload", "/admin/spec-upload", FileSearch],
+    ["Descriptions", "/admin/description-upload", FileText],
+    ["Subcategories", "/admin/subcategory-upload", FolderTree],
+  ],
+};
+// What the Owner sees for a tool whose page section has a shorter name.
+const navDisplayName: Readonly<Record<string, string>> = { "Stock Update": "Android Stock Update" };
+/** The menu option a page belongs to: its own name, or the option whose tools include it. */
+function navGroupFor(section: string): string | null {
+  if (nav.some(([label]) => label === section)) return section;
+  return Object.keys(navChildren).find((group) => navChildren[group].some(([label]) => label === section)) ?? null;
+}
+function NavLinks({ items, section, className }: { items: ReadonlyArray<NavItem>; section: string; className?: string }) {
+  return (
+    <>
+      {items.map(([label, href, Icon]) => (
+        <a className={[className, section === label ? "active" : ""].filter(Boolean).join(" ")} href={href} key={label} aria-current={section === label ? "page" : undefined}>
+          <Icon />
+          {navDisplayName[label] ?? label}
+        </a>
+      ))}
+    </>
+  );
+}
 function EnvironmentBadge() {
   return (
     <div
@@ -117,6 +149,15 @@ function AdminLayout({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const email = useSignedInEmail();
+  const group = navGroupFor(section);
+  const tools = group ? navChildren[group] : undefined;
+  const subnavRef = useRef<HTMLElement>(null);
+  // On a narrow screen the tab bar scrolls sideways: keep the current tool in view.
+  useEffect(() => {
+    const bar = subnavRef.current;
+    const active = bar?.querySelector<HTMLElement>("a.active");
+    if (bar && active) bar.scrollLeft = Math.max(0, active.offsetLeft - (bar.clientWidth - active.offsetWidth) / 2);
+  }, [section]);
   return (
     <div className="admin-shell">
       <aside className={menuOpen ? "admin-sidebar open" : "admin-sidebar"}>
@@ -135,9 +176,10 @@ function AdminLayout({
           {nav.map(([label, href, Icon]) =>
             href ? (
               <a
-                className={section === label ? "active" : ""}
+                className={group === label ? "active" : ""}
                 href={href}
                 key={label}
+                aria-current={section === label ? "page" : undefined}
               >
                 <Icon />
                 {label}
@@ -178,6 +220,11 @@ function AdminLayout({
             </div>
           </div>
         </header>
+        {group && tools && (
+          <nav className="admin-subnav" aria-label={`${group} tools`} ref={subnavRef}>
+            <NavLinks items={tools} section={section} />
+          </nav>
+        )}
         <main className="admin-main">{children}</main>
       </div>
     </div>
@@ -777,6 +824,12 @@ export function AdminApp() {
     page = (
       <AdminLayout section="Promotions">
         <AdminPromotions />
+      </AdminLayout>
+    );
+  else if (path === "/admin/promotional-popup")
+    page = (
+      <AdminLayout section="Promotional Popup">
+        <PromoPopupSetting />
       </AdminLayout>
     );
   else if (path === "/admin/settings") page = <Future title="Settings" />;

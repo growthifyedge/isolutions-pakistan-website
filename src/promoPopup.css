@@ -1,0 +1,124 @@
+/* Promotional Popup (src/PromoPopup.tsx; Admin preview in src/admin/PromoPopupSetting.tsx). Loaded with the popup chunk only.
+ *
+ * Size (Owner instruction 2026-11-23): about 900 px wide on desktop (never wider than 92% of the screen), 94% of the
+ * screen width on phones, and never taller than the screen. The box takes the image's own proportions (--promo-ratio =
+ * width / height, set from the loaded image), so the width is the smallest of: the target width, the side limit, and
+ * the available height × ratio. The image fills the box exactly: no cropping, no stretching, no empty bands.
+ *
+ * Controls (Owner instruction 2026-11-23, after the real-phone review): the × button and the "Preview" label sit in a
+ * slim strip just above the image (--promo-bar tall), never on top of the promotion. The strip's height is taken from
+ * the available height, so the whole popup (strip + image) still fits the screen.
+ */
+.promo-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(9, 15, 28, 0.62);
+  animation: promo-popup-fade 0.22s ease-out;
+}
+.promo-popup {
+  --promo-target: 900px;
+  --promo-side: 92vw;
+  --promo-close: 40px;
+  --promo-bar: calc(var(--promo-close) + 8px);
+  --promo-max-h: calc(100vh - 48px - var(--promo-bar));
+  position: relative;
+  width: min(var(--promo-target), var(--promo-side), calc(var(--promo-max-h) * var(--promo-ratio, 1)));
+  padding-top: var(--promo-bar);
+  box-sizing: content-box;
+  animation: promo-popup-rise 0.26s ease-out;
+}
+@supports (height: 100dvh) {
+  .promo-popup { --promo-max-h: calc(100dvh - 48px - var(--promo-bar)); }
+}
+.promo-popup-link {
+  display: block;
+  width: 100%;
+  line-height: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+}
+.promo-popup-link:focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: 3px;
+}
+/* Width from the box, height from the image's own proportions: the whole image always shows. */
+.promo-popup-link img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+/* × in the strip above the image's top-right corner: outside the promotion, never covering it. */
+.promo-popup-close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: var(--promo-close);
+  height: var(--promo-close);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+/* Larger invisible tap area (about 48 px) around the visible button. */
+.promo-popup-close::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
+.promo-popup-close svg { width: 55%; height: 55%; stroke-width: 2.5; }
+.promo-popup-close:hover { transform: scale(1.06); }
+/* Focus ring only for keyboard users (the popup moves focus here on open without showing a ring). */
+.promo-popup-close:focus { outline: none; }
+.promo-popup-close:focus-visible { outline: 3px solid #ffffff; outline-offset: 2px; }
+/* Preview label in the same strip, left side: outside the promotion. Preview mode only (PromoPopup.tsx). */
+.promo-popup-preview-tag {
+  position: absolute;
+  left: 0;
+  top: calc((var(--promo-close) - 24px) / 2);
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+  font: 600 12px/1 system-ui, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* Phones: 94% of the screen width (3% each side), a little more height, 34 px ×. */
+@media (max-width: 600px) {
+  .promo-popup {
+    --promo-target: 94vw;
+    --promo-side: 94vw;
+    --promo-close: 34px;
+    --promo-max-h: calc(100vh - 32px - var(--promo-bar));
+  }
+  @supports (height: 100dvh) {
+    .promo-popup { --promo-max-h: calc(100dvh - 32px - var(--promo-bar)); }
+  }
+  .promo-popup-link { border-radius: 12px; }
+  .promo-popup-preview-tag { font-size: 11px; height: 22px; top: calc((var(--promo-close) - 22px) / 2); }
+}
+
+/* Admin preview frames: the same popup drawn inside a desktop / mobile screen. The Admin sets --promo-target,
+   --promo-side and --promo-max-h on .promo-popup, scaled to the frame. */
+.promo-popup-backdrop.is-frame { position: absolute; z-index: 1; animation: none; }
+.promo-popup-backdrop.is-frame .promo-popup { --promo-close: 18px; --promo-bar: 22px; animation: none; }
+.promo-popup-backdrop.is-frame .promo-popup-link { border-radius: 6px; }
+
+@keyframes promo-popup-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes promo-popup-rise { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .promo-popup-backdrop, .promo-popup { animation: none; }
+}

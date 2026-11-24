@@ -1,6 +1,6 @@
 import { EXTENDED_RAM, canonicalModel, catalogSlug, type CatalogSheetRow } from "./catalogSheet.ts";
 import { normalizeColor } from "./catalogColors.ts";
-import type { ExcludedLine, ParsedStockList, RowDecision } from "./stockListDelta.ts";
+import { CHOSEN_FROM_ALL_COLOURS, isAllColours, type ExcludedLine, type ListFacts, type ParsedStockList, type RowDecision, type UpdateMode } from "./stockListDelta.ts";
 
 // Durable Owner working state for Admin "Stock List Update": the raw list, the Owner's decisions
 // (ambiguity resolutions, checkbox overrides) and nothing else. Pure functions plus an injectable
@@ -19,9 +19,19 @@ const MAX_TEXT_LENGTH = 2_000_000;
 // Resolutions
 // ---------------------------------------------------------------------------
 
-// There is no "skip": every Android line in the latest list must be fixed (or corrected in the list text), because a skipped
-// line would leave that phone hidden or at its old price. Skip decisions in older saved drafts are dropped on load.
-export type ResolutionType = "accept_color_as_entered" | "replace_color" | "set_physical_ram" | "move_token_to_model" | "accept_correction" | "confirm_new_phone";
+// In "complete" mode there is no "skip": every Android line in the latest list must be fixed (or corrected in the list
+// text), because a skipped line would leave that phone hidden or at its old price. Old "skip_row" decisions in saved drafts
+// are dropped on load. "skip_listed_row" (Owner decision 2026-11-23) exists ONLY for "Only products in this list" mode,
+// where nothing is ever hidden: the row is simply left out. In "complete" mode it is never applied.
+export type ResolutionType =
+  | "accept_color_as_entered"
+  | "replace_color"
+  | "set_physical_ram"
+  | "move_token_to_model"
+  | "accept_correction"
+  | "confirm_new_phone"
+  | "select_colours"
+  | "skip_listed_row";
 
 export type Resolution =
   | { type: "accept_color_as_entered" }
@@ -32,7 +42,11 @@ export type Resolution =
    *  accepts it while that phone is still the one spelling suggestion for the line, otherwise the row needs attention again. */
   | { type: "accept_correction"; productId: string; productTitle: string }
   /** "This line is a new phone", although its name looks like an existing one. Applies to every colour of the line. */
-  | { type: "confirm_new_phone" };
+  | { type: "confirm_new_phone" }
+  /** An "All Colours" line: the existing colours the Owner ticked; the line becomes one row per colour. */
+  | { type: "select_colours"; colors: string[] }
+  /** "Only products in this list" mode only: leave this row out of the update. */
+  | { type: "skip_listed_row" };
 
 /** One Owner decision about one source row. Keyed by a content-based row key, so it survives re-parsing and line shifts. */
 export type ResolutionRecord = { rowKey: string; resolution: Resolution; sourceLine: string; label: string; decidedAt: string };
@@ -51,6 +65,10 @@ export type StockDraft = {
   resolutions: Record<string, ResolutionRecord>;
   /** Owner checkbox choices by row key (true = apply, false = leave out). Rows never toggled follow the defaults. */
   selectionOverrides: Record<string, boolean>;
+  /** The update mode chosen on the page ("listed" when absent: the safe default). */
+  mode?: UpdateMode;
+  /** The list-wide PTA / condition choice (PTA Approved + Brand New when absent). */
+  listFacts?: ListFacts;
 };
 
 export const emptyDraft = (): StockDraft => ({
@@ -90,6 +108,10 @@ export function describeResolution(resolution: Resolution): string {
       return `Matched to “${resolution.productTitle}”`;
     case "confirm_new_phone":
       return "Confirmed as a new phone";
+    case "select_colours":
+      return `Colours chosen: ${resolution.colors.join(", ")}`;
+    case "skip_listed_row":
+      return "Skipped — this row is not changed";
   }
 }
 
@@ -147,7 +169,8 @@ const removeToken = (color: string, token: string) =>
     .join(" ");
 
 /** Applies the Owner's decisions to a freshly parsed list. Pure: the input is never mutated. Decisions that cannot apply cleanly are reported, never forced. */
-export function applyResolutions(parsed: ParsedStockList, resolutions: Readonly<Record<string, ResolutionRecord>>): ResolvedStockList {
+export function applyResolutions(parsed: ParsedStockList, resolutions: Readonly<Record<string, ResolutionRecord>>, options: { mode?: UpdateMode } = {}): ResolvedStockList {
+  const listedMode = (options.mode ?? "complete") === "listed";
   const baseKeys = buildRowKeys(parsed.rows);
   const keyIndex = new Map(baseKeys.map((key, index) => [key, index] as const));
   const handled = new Set<string>();
@@ -210,6 +233,24 @@ export function applyResolutions(parsed: ParsedStockList, resolutions: Readonly<
           next = finish(row, withoutColorReasons(row), { color: normalizeColor(color).color }, { color: "explicit" });
           ownResolution = true;
         }
+      } else if (resolution.type === "skip_listed_row" && listedMode) {
+        // "Only products in this list": the row is simply left out (nothing is hidden in this mode).
+        skipped.push({ lineNumber: row.lineNumber, line: row.sourceLine, reason: "Skipped by you — not changed" });
+        handled.add(key);
+        applied.push(key);
+        next = null;
+      } else if (resolution.type === "select_colours" && isAllColours(row.color) && resolution.colors.length) {
+        // "All Colours": one row per colour the Owner ticked (each is then compared like any listed colour).
+        const reasons = withoutColorReasons(row);
+        resolution.colors.forEach((color, position) => {
+          const chosen = finish(row, reasons, { color, notes: [...row.notes, `${CHOSEN_FROM_ALL_COLOURS}: ${color}`] }, { color: "explicit" });
+          rows.push(chosen);
+          rowKeys.push(`${key}#${position}`);
+          rowDecisions.push(lineDecision.get(`${row.lineNumber}|${row.sourceLine}`));
+        });
+        handled.add(key);
+        applied.push(key);
+        next = null;
       }
       // Otherwise the row no longer fits this decision (the list was edited): leave it untouched; it is reported as unmatched.
       if (ownResolution) {
@@ -270,6 +311,15 @@ function readResolution(value: unknown): Resolution | null {
         : null;
     case "confirm_new_phone":
       return { type: "confirm_new_phone" };
+    case "select_colours":
+      return Array.isArray(value.colors) &&
+        value.colors.length > 0 &&
+        value.colors.length <= 20 &&
+        value.colors.every((color) => typeof color === "string" && color.trim() && color.length <= 40)
+        ? { type: "select_colours", colors: [...new Set((value.colors as string[]).map((color) => color.trim()))] }
+        : null;
+    case "skip_listed_row":
+      return { type: "skip_listed_row" };
     default:
       return null;
   }
@@ -309,6 +359,12 @@ export function sanitizeDraft(value: unknown): StockDraft | null {
     lastComparedAt: typeof value.lastComparedAt === "string" ? value.lastComparedAt : null,
     resolutions,
     selectionOverrides,
+    ...(value.mode === "listed" || value.mode === "complete" ? { mode: value.mode } : {}),
+    ...(isRecord(value.listFacts) &&
+    (value.listFacts.ptaStatus === "approved" || value.listFacts.ptaStatus === "not_approved") &&
+    (value.listFacts.condition === "brand_new" || value.listFacts.condition === "used")
+      ? { listFacts: { ptaStatus: value.listFacts.ptaStatus, condition: value.listFacts.condition } }
+      : {}),
   };
 }
 
@@ -414,6 +470,8 @@ export function draftFromState(state: {
   lastComparedAt: string | null;
   resolutions: Record<string, ResolutionRecord>;
   selectionOverrides: Record<string, boolean>;
+  mode?: UpdateMode;
+  listFacts?: ListFacts;
 }): StockDraft {
   return { version: DRAFT_VERSION, savedAt: "", sourceFingerprint: fingerprintText(state.text), ...state };
 }

@@ -141,7 +141,14 @@ test("SECURITY DEFINER RPCs callable by visitors are exactly the reviewed set", 
       // Model Shared Specifications (202611200002): is_catalog_owner only answers for the caller; the write RPC
       // apply_model_common_specifications refuses anyone but the active Owner (owner required) and is add-only.
       // Covered by scripts/iphoneModelSpecs.test.mjs.
-      "apply_model_common_specifications", "is_catalog_owner"].sort());
+      "apply_model_common_specifications", "is_catalog_owner",
+      // Promotional Popup (202611230001, prepared): read-only probe; answers only "installed" and whether the caller
+      // is the Owner. Writes reuse the Owner-only site-content RPCs above. Covered by scripts/promoPopup.test.mjs.
+      "promo_popup_installed",
+      // Variant editor (202611240001): refuses anyone but the active Owner (variant_editor_owner_required); all or
+      // nothing, stale / duplicate / unpublishable changes refused, never deletes. Its field helper
+      // variant_editor_field is not executable by anon or authenticated. Covered by scripts/productVariantEditorRpc.test.mjs.
+      "apply_product_variant_edits"].sort());
 });
 
 test("visitors, customers and inactive admins cannot read Admin, order, stock or contact data", async () => {

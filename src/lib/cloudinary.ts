@@ -52,10 +52,17 @@ export async function validateSourceImage(file: File) {
   return null;
 }
 
+// canvas (PDP gallery): the uniform margin is trimmed; only when that really removed a margin (more than 3% of the width
+// or height: a product cut-out) is the product padded onto one transparent 4:5 canvas, so every colour of a phone shows
+// at the same size in the same box and the PDP background shows around it. A photo without such a margin (lifestyle /
+// in-store shot) is delivered exactly as uploaded. Delivery only: never cropped or stretched, and the original upload is
+// never changed.
+const PRODUCT_CANVAS = "$ow_iw_mul_0.97,$oh_ih_mul_0.97/e_trim:10/if_w_lt_$ow_or_h_lt_$oh/c_pad,ar_4:5,b_transparent/if_end/";
+
 export function cloudinaryDeliveryUrl(
   publicId: string,
   width: number,
-  options: { trim?: boolean } = {},
+  options: { trim?: boolean; canvas?: boolean } = {},
 ) {
   const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
   if (!cloudName || !publicId) return "";
@@ -63,7 +70,7 @@ export function cloudinaryDeliveryUrl(
   // trim: removes the uniform white/transparent margin around a product shot so listing cards
   // can show the product itself large (CSS still contain-fits it: never cropped or stretched).
   const trim = options.trim ? "e_trim:10/" : "";
-  return `https://res.cloudinary.com/${cloudName}/image/upload/${trim}c_limit,w_${safeWidth},q_auto,f_auto/${publicId}`;
+  return `https://res.cloudinary.com/${cloudName}/image/upload/${options.canvas ? PRODUCT_CANVAS : trim}c_limit,w_${safeWidth},q_auto,f_auto/${publicId}`;
 }
 
 export function containsBinaryMediaData(value: unknown): boolean {

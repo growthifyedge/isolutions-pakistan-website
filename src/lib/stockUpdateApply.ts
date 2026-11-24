@@ -21,7 +21,7 @@
  */
 import { ANDROID_MOBILE_WARRANTY } from "./catalogSheet.ts";
 import { CANONICAL_CONDITION, CANONICAL_PTA, commercialWriteTarget } from "./commercialDefaults.ts";
-import { STOCK_UPDATE_TARGET, identityKey, isAndroidCatalogProduct, needsStockTarget, willHide, type CatalogDeltaProduct, type CatalogDeltaVariant, type DeltaEntry, type StockDelta } from "./stockListDelta.ts";
+import { STOCK_UPDATE_TARGET, choiceVersusPhone, effectiveFacts, identityKey, isAndroidCatalogProduct, lineVersusChoice, needsStockTarget, statedFactsConflict, willHide, type CatalogDeltaProduct, type CatalogDeltaVariant, type DeltaEntry, type StockDelta, type UpdateMode } from "./stockListDelta.ts";
 
 // ---------------------------------------------------------------------------
 // Plan
@@ -38,7 +38,8 @@ export type NewPhoneVariantPayload = {
   stock: number;
   pta_status: string;
   condition: string;
-  warranty: string;
+  /** "1 Year" for a Brand New Android phone (Owner rule); null for a Used phone (never assumed). */
+  warranty: string | null;
   delivery_scope: string;
 };
 
@@ -155,12 +156,23 @@ export function buildWritePlan(delta: StockDelta, catalog: readonly CatalogDelta
         blocked.push({ entryId: entry.id, productTitle: entry.productTitle, label: entry.label, reason: facts });
         continue;
       }
+      // Never save a PTA / condition other than the one the line states or the Owner chose (the comparison already holds such rows).
+      const variantConflict = statedFactsConflict(entry.row, facts, "new variant") ?? (delta.listFacts ? choiceVersusPhone(effectiveFacts(entry.row, delta.listFacts), facts) : null);
+      if (variantConflict) {
+        blocked.push({ entryId: entry.id, productTitle: entry.productTitle, label: entry.label, reason: variantConflict });
+        continue;
+      }
       steps.push({ kind: "add_variant", entryId: entry.id, productId: entry.productId, productTitle: entry.productTitle, ram: entry.row.ram, storage: entry.row.storage, color: entry.row.color, priceMinor: entry.newPriceMinor, stock: STOCK_UPDATE_TARGET, inherited: facts, label: entry.label });
     }
     if (entry.kind === "new_product" && entry.newPriceMinor !== null) {
       const brand = entry.row.brand?.trim();
       if (!brand || !entry.row.ram || !entry.row.storage || !entry.row.color) {
         blocked.push({ entryId: entry.id, productTitle: entry.productTitle, label: entry.label, reason: "A new phone needs brand, RAM, storage and color" });
+        continue;
+      }
+      const phoneConflict = delta.listFacts ? lineVersusChoice(entry.row, delta.listFacts) : statedFactsConflict(entry.row, { ptaStatus: CANONICAL_PTA, condition: CANONICAL_CONDITION }, "new phone");
+      if (phoneConflict) {
+        blocked.push({ entryId: entry.id, productTitle: entry.productTitle, label: entry.label, reason: phoneConflict });
         continue;
       }
       // One unknown brand would make the import reject every new phone at once, so it is stopped per row here.
@@ -171,18 +183,26 @@ export function buildWritePlan(delta: StockDelta, catalog: readonly CatalogDelta
       const key = entry.productSlug || entry.productTitle.toLowerCase();
       const step = phones.get(key) ?? { kind: "create_phone" as const, entryIds: [], productTitle: entry.productTitle, payload: { source: `Android Stock Update: ${entry.productTitle}`, action: "Create" as const, product_type: "Mobile Phone" as const, brand, category: "Mobile Phones" as const, title: entry.productTitle, variants: [] } };
       step.entryIds.push(entry.id);
-      step.payload.variants.push({ source: `Line ${entry.row.lineNumber}: ${entry.label}`, ram: entry.row.ram, storage: entry.row.storage, color: entry.row.color, price_minor: entry.newPriceMinor, stock: STOCK_UPDATE_TARGET, pta_status: CANONICAL_PTA, condition: CANONICAL_CONDITION, warranty: ANDROID_MOBILE_WARRANTY, delivery_scope: "karachi_only" });
+      // With the Owner's list choice: the line's own words, else the choice. Without one: the original Android defaults.
+      const chosen = delta.listFacts ? effectiveFacts(entry.row, delta.listFacts) : { ptaStatus: CANONICAL_PTA, condition: CANONICAL_CONDITION };
+      const ptaStatus = chosen.ptaStatus ?? CANONICAL_PTA;
+      const condition = chosen.condition ?? CANONICAL_CONDITION;
+      step.payload.variants.push({ source: `Line ${entry.row.lineNumber}: ${entry.label}`, ram: entry.row.ram, storage: entry.row.storage, color: entry.row.color, price_minor: entry.newPriceMinor, stock: STOCK_UPDATE_TARGET, pta_status: ptaStatus, condition, warranty: condition === CANONICAL_CONDITION ? ANDROID_MOBILE_WARRANTY : null, delivery_scope: "karachi_only" });
       phones.set(key, step);
     }
   }
   steps.push(...phones.values());
 
-  for (const entry of delta.entries) {
+  // "Only products in this list" (delta.mode "listed"): the stock of existing variants is kept and nothing is hidden.
+  // New variants / new phones still open at stock 30 (the database rule for a new variant).
+  const listedMode = delta.mode === "listed";
+
+  for (const entry of listedMode ? [] : delta.entries) {
     if (!needsStockTarget(entry)) continue;
     steps.push({ kind: "set_stock", entryId: entry.id, productId: entry.productId as string, productTitle: entry.productTitle, variantId: entry.variantId as string, sku: entry.sku ?? "", label: entry.label, fromStock: entry.stock ?? 0, toStock: STOCK_UPDATE_TARGET });
   }
 
-  for (const entry of delta.missing) {
+  for (const entry of listedMode ? [] : delta.missing) {
     if (!willHide(entry) || !entry.variantIds.length) continue;
     steps.push({ kind: "hide", entryId: entry.id, productId: entry.productId, productTitle: entry.productTitle, variantIds: [...entry.variantIds], label: entry.label, scope: entry.scope });
   }
@@ -403,18 +423,45 @@ export function buildPhonePlan(delta: StockDelta, catalog: readonly CatalogDelta
 export const confirmationPhrase = (plan: PhonePlan) => `UPDATE ${plan.changeCount} CHANGES`;
 
 /** Every condition Update Website needs. Returns the first reason it must stay off, or null. Held phones never stop the others. */
+/** Phones a plan would hide completely, and phones it really updates (anything but a hide). */
+export function hideCounts(plan: PhonePlan) {
+  const hiddenPhones = plan.phones.filter((phone) => phone.steps.some((step) => step.kind === "hide" && step.scope === "product")).length;
+  const listedPhones = plan.phones.filter((phone) => phone.steps.some((step) => step.kind !== "hide")).length;
+  return { hiddenPhones, listedPhones, hiddenVariants: plan.counts.hiddenVariants };
+}
+
+/** A complete-list update that would hide at least this many phones AND more phones than it lists is refused as a likely partial list. */
+export const MASS_HIDE_MIN_PHONES = 5;
+
+export function massHideProblem(plan: PhonePlan): string | null {
+  const { hiddenPhones, listedPhones } = hideCounts(plan);
+  if (hiddenPhones >= MASS_HIDE_MIN_PHONES && hiddenPhones > listedPhones)
+    return `This list would hide ${hiddenPhones} phones but updates only ${listedPhones}. It looks like a partial list, so updating is switched off. Choose “Only products in this list”, or paste the complete stock list.`;
+  return null;
+}
+
 export function updateWebsiteBlocker(input: {
   supabaseUrl: string | undefined | null;
   buildMode: string | undefined | null;
   checkIsCurrent: boolean;
   plan: PhonePlan | null;
   confirmation: string;
+  /** The page's update mode. "complete" turns on the hide safety checks below. */
+  mode?: UpdateMode;
+  /** "complete" mode: the Owner ticked “I understand these phones will be hidden” (required when the plan hides anything). */
+  hideAcknowledged?: boolean;
 }): string | null {
   const target = commercialWriteTarget(input.supabaseUrl, input.buildMode);
   if (!target.allowed) return target.reason ?? "The website environment could not be confirmed.";
   if (!input.plan) return "Click Check List first.";
   if (!input.checkIsCurrent) return "You changed something since the last check. Click Check List again.";
   if (!input.plan.phones.length) return input.plan.held.length ? "Every phone in this list needs attention. Fix them first." : "Nothing to update.";
+  if (input.mode === "listed" && input.plan.counts.hiddenVariants > 0) return "This mode never hides anything, but the plan would hide variants. Click Check List again.";
+  if (input.mode === "complete" && input.plan.counts.hiddenVariants > 0) {
+    const mass = massHideProblem(input.plan);
+    if (mass) return mass;
+    if (input.hideAcknowledged !== true) return `Tick the box to confirm that ${input.plan.counts.hiddenVariants} variant(s) will be hidden from the website.`;
+  }
   if (input.confirmation.trim() !== confirmationPhrase(input.plan)) return `Type ${confirmationPhrase(input.plan)} to confirm.`;
   return null;
 }

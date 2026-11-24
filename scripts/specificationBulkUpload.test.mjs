@@ -48,7 +48,7 @@ test("XLSX template: Specifications sheet = headers only; the Instructions examp
   const ExcelJS = await loadExcelJs();
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(bytes);
-  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ["Specifications", "Instructions"]);
+  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ["Specifications", "Instructions", "GPT Instructions"]);
   const specs = workbook.getWorksheet("Specifications");
   assert.equal(specs.actualRowCount, 1);
   assert.deepEqual(specs.getRow(1).values.slice(1), [...SPEC_UPLOAD_HEADERS]);
@@ -290,7 +290,12 @@ test("the uploader writes only through apply_product_specifications and never de
   assert.doesNotMatch(adapter, /\.from\(|\.delete\(|\.insert\(|\.update\(|\.upsert\(/);
   const page = readFileSync(new URL("../src/admin/SpecificationBulkUpload.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(page, /insertSpecs|updateSpecValue|overwriteConfirmed/, "no direct per-row writes or second overwrite confirmation");
-  assert.match(page, /typedConfirmation && \(/, "the typed phrase input is shown only for PRODUCTION");
+  // Owner decision 2026-11-24: no typed phrase input — Save opens a Confirm/Cancel dialog with the count; Confirm hands the runner its phrase.
+  assert.doesNotMatch(page, /typedConfirmation|setTyped\(/, "no typed phrase input");
+  assert.match(page, /onClick=\{\(\) => setConfirmOpen\(true\)\}/);
+  assert.match(page, /Save \{writes\.total\} specification/);
+  assert.match(page, /onClick=\{\(\) => void apply\(\)\}>Confirm</);
+  assert.match(page, /const phrase = specUploadConfirmationPhrase\(writes\.total\);/);
 });
 
 test("navigation: Spec Upload is in the Admin menu; no deprecated Specs & Images entry", () => {

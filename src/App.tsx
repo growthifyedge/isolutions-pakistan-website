@@ -1,5 +1,27 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { StorefrontApp } from "./StorefrontApp";
+
+// Promotional Popup: its own small chunk, requested only on the homepage and only after the page has finished loading.
+// A failed download renders nothing (the homepage is never affected).
+const PromoPopup = lazy(() => import("./PromoPopup").catch(() => ({ default: () => null })));
+
+function HomepagePromoPopup() {
+  const [load, setLoad] = useState(false);
+  useEffect(() => {
+    const start = () => setLoad(true);
+    if (document.readyState === "complete") {
+      const timer = window.setTimeout(start, 0);
+      return () => window.clearTimeout(timer);
+    }
+    window.addEventListener("load", start, { once: true });
+    return () => window.removeEventListener("load", start);
+  }, []);
+  return load ? (
+    <Suspense fallback={null}>
+      <PromoPopup />
+    </Suspense>
+  ) : null;
+}
 
 const AdminApp = lazy(() =>
   import("./admin/AdminApp").then((module) => ({ default: module.AdminApp })),
@@ -25,5 +47,12 @@ export function App() {
       </Suspense>
     );
   }
+  if (location.pathname === "/")
+    return (
+      <>
+        <StorefrontApp />
+        <HomepagePromoPopup />
+      </>
+    );
   return <StorefrontApp />;
 }

@@ -3,16 +3,20 @@ import { supabase, supabaseEnvironmentLabel } from "../lib/supabase";
 import { csvRows } from "../lib/bulkCatalog";
 import { loadExcelJs } from "../lib/catalogWorkbook";
 import {
+  DEFAULT_LIST_FACTS,
   buildStockDelta,
   formatDiff,
   formatMinor,
   parseStockList,
   tableToStockText,
+  type ColourChoice,
   type DeltaEntry,
   type MissingEntry,
   type ParsedStockList,
   type CatalogDeltaProduct,
   type StockDelta,
+  type ListFacts,
+  type UpdateMode,
 } from "../lib/stockListDelta";
 import { loadActiveBrands, loadCatalogForDelta } from "../lib/stockListDeltaDb";
 import {
@@ -36,7 +40,7 @@ import { buildPhonePlan, confirmationPhrase, heldKeyOf, reportCsv, runStockUpdat
 import { installUnloadGuard } from "../lib/unloadGuard";
 import { stockUpdateDbDeps } from "../lib/stockUpdateApplyDb";
 import { buildStockExcelRows, buildStockExcelWorkbook, isStockExcelTable, newPhoneResolutions, readStockExcel } from "../lib/stockListExcel";
-import { ACTION, CATEGORY_LABEL, HIDE_LABEL, KIND_LABEL, PAGE_HELP, PAGE_TITLE, SHOW_AGAIN_LABEL, STATUS_LABEL, STEP, TOKEN_EXPLANATION, WORDING, explainReason, explainSaveError } from "../lib/stockUpdateWording";
+import { ACTION, CATEGORY_LABEL, HIDE_LABEL, HIDE_WARNING, KIND_LABEL, LIST_FACTS, MODE, PAGE_HELP, PAGE_TITLE, PREVIEW, SHOW_AGAIN_LABEL, STATUS_LABEL, STEP, TOKEN_EXPLANATION, WORDING, explainReason, explainSaveError } from "../lib/stockUpdateWording";
 
 // Admin "Android Stock Update": Paste List -> Check List -> Review Changes -> Update Website.
 // Update Website writes ONLY through stockUpdateApply.runStockUpdate, and only after: matching build/project pair,
@@ -101,6 +105,12 @@ export function StockListUpdate() {
   const [fileName, setFileName] = useState(restored?.fileName ?? "");
   const [resolutions, setResolutions] = useState<Record<string, ResolutionRecord>>(restored?.resolutions ?? {});
   const [overrides, setOverrides] = useState<Record<string, boolean>>(restored?.selectionOverrides ?? {});
+  // "Only products in this list" is the safe default; "Complete stock list" is the original hide-what-is-missing update.
+  const [mode, setMode] = useState<UpdateMode>(restored?.mode ?? "listed");
+  // List-wide PTA / condition (like iPhone Stock): fills lines that do not state their own; default PTA Approved + Brand New.
+  const [listFacts, setListFacts] = useState<ListFacts>(restored?.listFacts ?? DEFAULT_LIST_FACTS);
+  // Complete mode: the Owner must tick that the planned hides are intended (reset by every new check or mode change).
+  const [hideAcknowledged, setHideAcknowledged] = useState(false);
   const [parsed, setParsed] = useState<ParsedStockList | null>(null);
   const [catalog, setCatalog] = useState<CatalogDeltaProduct[] | null>(null);
   const [stamp, setStamp] = useState<ComparisonStamp | null>(null);
@@ -116,7 +126,6 @@ export function StockListUpdate() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [activeBrands, setActiveBrands] = useState<string[] | null>(null);
   const [confirming, setConfirming] = useState(false);
-  const [confirmText, setConfirmText] = useState("");
   const [writing, setWriting] = useState(false);
   const [result, setResult] = useState<StockUpdateResult | null>(null);
   const [progress, setProgress] = useState<StockUpdateProgress | null>(null);
@@ -124,8 +133,8 @@ export function StockListUpdate() {
   const running = useRef(false);
 
   // The Owner's fixes are applied to the parsed rows, then compared against the website data from the last live Check.
-  const resolved = useMemo(() => (parsed ? applyResolutions(parsed, resolutions) : null), [parsed, resolutions]);
-  const delta = useMemo(() => (resolved && catalog ? buildStockDelta(resolved.parsed, catalog, resolved.rowDecisions) : null), [resolved, catalog]);
+  const resolved = useMemo(() => (parsed ? applyResolutions(parsed, resolutions, { mode }) : null), [parsed, resolutions, mode]);
+  const delta = useMemo(() => (resolved && catalog ? buildStockDelta(resolved.parsed, catalog, resolved.rowDecisions, { mode, listFacts }) : null), [resolved, catalog, mode, listFacts]);
   // Ticks are REVIEW MARKS only (saved with the list). They never change what is updated: the latest list is the final truth.
   const isReviewed = (key: string | undefined) => key !== undefined && overrides[key] === true;
   // The exact writes Update Website would make, phone by phone (same truth as `plan`, plus inherited facts, the brand check and held phones).
@@ -135,16 +144,15 @@ export function StockListUpdate() {
   const isHeldEntry = (entry: DeltaEntry) => entry.kind !== "ambiguous" && entry.kind !== "blocked" && heldKeys.has(heldKeyOf(entry));
   // A future Update Website must require this to be true. It is false after any reload (the stamp is memory-only) and after any later edit.
   const checkIsCurrent = comparisonAuthorizesApply(stamp, text, resolutions);
-  const gate = { supabaseUrl: SUPABASE_URL, buildMode: BUILD_MODE, checkIsCurrent, plan: phonePlan };
-  // Everything except the typed phrase: decides whether the Update Website button can open the confirmation.
+  const gate = { supabaseUrl: SUPABASE_URL, buildMode: BUILD_MODE, checkIsCurrent, plan: phonePlan, mode, hideAcknowledged };
+  // Every safety check (environment, fresh Check List, plan, hide acknowledgement). Clicking Confirm in the dialog is the confirmation,
+  // so the gate receives the exact phrase for this plan — no typing is required (Owner decision 2026-11-24).
   const openBlocker = updateWebsiteBlocker({ ...gate, confirmation: phonePlan ? confirmationPhrase(phonePlan) : "" });
-  // Everything including the typed phrase: decides whether the final "Yes" button can run.
-  const finalBlocker = updateWebsiteBlocker({ ...gate, confirmation: confirmText });
 
   // Autosave (debounced) + a final flush when the page is hidden or the screen unmounts.
   const wasParsed = parsed !== null;
-  const latest = useRef(draftFromState({ text, fileName, wasParsed, lastComparedAt, resolutions, selectionOverrides: overrides }));
-  const currentDraft = draftFromState({ text, fileName, wasParsed, lastComparedAt, resolutions, selectionOverrides: overrides });
+  const latest = useRef(draftFromState({ text, fileName, wasParsed, lastComparedAt, resolutions, selectionOverrides: overrides, mode, listFacts }));
+  const currentDraft = draftFromState({ text, fileName, wasParsed, lastComparedAt, resolutions, selectionOverrides: overrides, mode, listFacts });
   useEffect(() => {
     latest.current = currentDraft;
   });
@@ -164,7 +172,7 @@ export function StockListUpdate() {
       if (ok) setSavedAt(hasDraftContent(latest.current) ? new Date().toISOString() : null);
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [text, fileName, wasParsed, lastComparedAt, resolutions, overrides]);
+  }, [text, fileName, wasParsed, lastComparedAt, resolutions, overrides, mode, listFacts]);
   useEffect(() => {
     const flush = () => {
       if (touched.current) saveDraft(browserStorage(), latest.current);
@@ -243,7 +251,7 @@ export function StockListUpdate() {
     try {
       const brands = await loadActiveBrands(supabase);
       setConfirming(false);
-      setConfirmText("");
+      setHideAcknowledged(false);
       setResult(null);
       setActiveBrands(brands.map((brand) => brand.name));
       const parsedNow = parseStockList(textNow, brands);
@@ -255,8 +263,8 @@ export function StockListUpdate() {
         return;
       }
       const fresh = await loadCatalogForDelta(supabase);
-      const resolvedNow = applyResolutions(parsedNow, resolutionsNow);
-      const next = buildStockDelta(resolvedNow.parsed, fresh, resolvedNow.rowDecisions);
+      const resolvedNow = applyResolutions(parsedNow, resolutionsNow, { mode });
+      const next = buildStockDelta(resolvedNow.parsed, fresh, resolvedNow.rowDecisions, { mode, listFacts });
       setParsed(parsedNow);
       setCatalog(fresh);
       const now = new Date();
@@ -279,7 +287,7 @@ export function StockListUpdate() {
   async function runUpdate() {
     if (running.current) return;
     if (!supabase || !phonePlan) return;
-    const blocker = updateWebsiteBlocker({ ...gate, confirmation: confirmText });
+    const blocker = updateWebsiteBlocker({ ...gate, confirmation: confirmationPhrase(phonePlan) });
     if (blocker) return setError(plainReason(blocker));
     running.current = true;
     const client = supabase;
@@ -300,7 +308,6 @@ export function StockListUpdate() {
       setResult(outcome);
       setProgress(null);
       setConfirming(false);
-      setConfirmText("");
       // After any attempt the old check is out of date: a fresh Check List is required before anything else.
       setCatalog(null);
       setStamp(null);
@@ -310,7 +317,6 @@ export function StockListUpdate() {
       setCatalog(null);
       setStamp(null);
       setConfirming(false);
-      setConfirmText("");
       setError(problem instanceof Error ? problem.message : "The update could not finish. Click Check List to see the current website.");
     } finally {
       running.current = false;
@@ -326,6 +332,36 @@ export function StockListUpdate() {
   function resolve(rowKey: string, entry: DeltaEntry, resolution: Resolution) {
     const label = [entry.productTitle, entry.label].filter(Boolean).join(" · ");
     setResolutions((current) => ({ ...current, [rowKey]: { rowKey, resolution, sourceLine: entry.row.sourceLine, label, decidedAt: new Date().toISOString() } }));
+  }
+
+  /** Switching mode changes what Update Website would do, so the last check no longer authorises it: Check List again. */
+  function changeMode(next: UpdateMode) {
+    if (next === mode) return;
+    setMode(next);
+    setStamp(null);
+    setHideAcknowledged(false);
+    setConfirming(false);
+  }
+
+  /** A new PTA / condition choice changes what would be saved, so the last check no longer authorises Update Website. */
+  function changeListFacts(next: ListFacts) {
+    setListFacts(next);
+    setStamp(null);
+    setHideAcknowledged(false);
+    setConfirming(false);
+  }
+
+  /** "Skip" in the preview: an ordinary row is left out; a colour chosen from "All Colours" is removed from that choice. */
+  function skipEntry(entry: DeltaEntry) {
+    const key = rowKeyOf(entry);
+    if (key === undefined) return;
+    const [baseKey, chosen] = key.split("#");
+    if (chosen === undefined) return resolve(key, entry, { type: "skip_listed_row" });
+    const record = resolutions[baseKey];
+    if (!record || record.resolution.type !== "select_colours") return;
+    const colors = record.resolution.colors.filter((color) => color.toLowerCase() !== (entry.row.color ?? "").toLowerCase());
+    if (!colors.length) return undoResolution(baseKey);
+    setResolutions((current) => ({ ...current, [baseKey]: { ...record, resolution: { type: "select_colours", colors }, decidedAt: new Date().toISOString() } }));
   }
 
   function undoResolution(rowKey: string) {
@@ -443,6 +479,66 @@ export function StockListUpdate() {
                 )}
               </tr>
             ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  /** "Only products in this list": one table of every listed Android row, with an action per row (default or Skip). */
+  function previewRows() {
+    if (!delta) return null;
+    const rows = delta.entries
+      .filter((entry) => entry.category === "smartphone")
+      .sort((a, b) => a.productTitle.localeCompare(b.productTitle) || a.row.lineNumber - b.row.lineNumber);
+    if (!rows.length) return <p className="stock-empty">{WORDING.nothingHere}</p>;
+    const defaultAction = (entry: DeltaEntry) =>
+      entry.kind === "price_change" ? PREVIEW.actionOverride
+        : entry.kind === "unchanged" ? PREVIEW.actionSame
+          : entry.kind === "new_variant" ? PREVIEW.actionAddVariant
+            : entry.kind === "new_product" ? PREVIEW.actionNewPhone
+              : PREVIEW.actionChoose;
+    return (
+      <div className="bulk-images-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Phone</th>
+              <th>{PREVIEW.variant}</th>
+              <th>SKU</th>
+              <th>{PREVIEW.existingPrice}</th>
+              <th>{PREVIEW.newPrice}</th>
+              <th>{PREVIEW.action}</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((entry) => {
+              const key = rowKeyOf(entry);
+              return (
+                <tr key={entry.id} className={entry.kind === "ambiguous" ? "stock-attention" : isHeldEntry(entry) ? "stock-muted" : undefined}>
+                  <td><strong>{entry.productTitle}</strong></td>
+                  <td>{entry.label}</td>
+                  <td>{entry.sku ? <code>{entry.sku}</code> : PREVIEW.newLabel}</td>
+                  <td>{entry.currentPriceMinor === null ? PREVIEW.newLabel : formatMinor(entry.currentPriceMinor)}</td>
+                  <td>{formatMinor(entry.newPriceMinor)}</td>
+                  <td className="stock-resolve">
+                    <select
+                      aria-label={`Action for ${entry.productTitle} ${entry.label}`}
+                      value="do"
+                      onChange={(event) => {
+                        if (event.target.value === "skip") skipEntry(entry);
+                      }}
+                    >
+                      <option value="do">{defaultAction(entry)}</option>
+                      <option value="skip">{PREVIEW.actionSkip}</option>
+                    </select>
+                    {entry.kind === "ambiguous" && key !== undefined && <ResolverActions entry={entry} onResolve={(resolution) => resolve(key, entry, resolution)} />}
+                  </td>
+                  <td>{entryNotes(entry, rows, entry.kind === "ambiguous" ? "attention" : entry.kind === "new_product" ? "product" : "price")}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -571,6 +667,36 @@ export function StockListUpdate() {
           {fileName && <small>Loaded {fileName}</small>}
         </label>
 
+        <div className="stock-list-facts">
+          <label>
+            <span>{LIST_FACTS.pta}</span>
+            <select value={listFacts.ptaStatus} disabled={busy || writing} onChange={(event) => changeListFacts({ ...listFacts, ptaStatus: event.target.value === "not_approved" ? "not_approved" : "approved" })}>
+              <option value="approved">{LIST_FACTS.ptaOptions.approved}</option>
+              <option value="not_approved">{LIST_FACTS.ptaOptions.not_approved}</option>
+            </select>
+          </label>
+          <label>
+            <span>{LIST_FACTS.condition}</span>
+            <select value={listFacts.condition} disabled={busy || writing} onChange={(event) => changeListFacts({ ...listFacts, condition: event.target.value === "used" ? "used" : "brand_new" })}>
+              <option value="brand_new">{LIST_FACTS.conditionOptions.brand_new}</option>
+              <option value="used">{LIST_FACTS.conditionOptions.used}</option>
+            </select>
+          </label>
+          <small>{LIST_FACTS.help}</small>
+        </div>
+
+        <fieldset className="stock-mode" disabled={busy || writing}>
+          <legend>{MODE.title}</legend>
+          <label className={mode === "listed" ? "selected" : undefined}>
+            <input type="radio" name="stock-update-mode" value="listed" checked={mode === "listed"} onChange={() => changeMode("listed")} />
+            <span><strong>{MODE.listed}</strong><small>{MODE.listedHelp}</small></span>
+          </label>
+          <label className={mode === "complete" ? "selected" : undefined}>
+            <input type="radio" name="stock-update-mode" value="complete" checked={mode === "complete"} onChange={() => changeMode("complete")} />
+            <span><strong>{MODE.complete}</strong><small>{MODE.completeHelp}</small></span>
+          </label>
+        </fieldset>
+
         <div className="bulk-images-bulk">
           <button type="button" className="admin-primary" disabled={busy || !text.trim()} onClick={() => void runCheck()}>{busy ? "Checking…" : STEP.check}</button>
           {confirmClear ? (
@@ -618,7 +744,16 @@ export function StockListUpdate() {
               ))}
             </div>
 
-            <div className="stock-tabs" role="tablist">
+            {mode === "listed" && (
+              <>
+                <h4 className="stock-preview-title">{PREVIEW.title}</h4>
+                <p className="stock-hint">{PREVIEW.help} {MODE.untouched(delta.untouchedPhones)}</p>
+                {previewRows()}
+                <p className="stock-hint">{PREVIEW.skippedNote}</p>
+              </>
+            )}
+
+            <div className="stock-tabs" role="tablist" hidden={mode === "listed"}>
               {tabs.map((item) => (
                 <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>
                   {item.label} <span>{item.total}</span>
@@ -626,23 +761,24 @@ export function StockListUpdate() {
               ))}
             </div>
 
-            {tab === "price_change" && entryRows("price_change", "price")}
-            {tab === "new_variant" && entryRows("new_variant", "variant")}
-            {tab === "new_product" && entryRows("new_product", "product")}
-            {tab === "hide" && (
+            {mode === "listed" && counts.notAndroid > 0 && notAndroidRows()}
+            {mode === "complete" && tab === "price_change" && entryRows("price_change", "price")}
+            {mode === "complete" && tab === "new_variant" && entryRows("new_variant", "variant")}
+            {mode === "complete" && tab === "new_product" && entryRows("new_product", "product")}
+            {mode === "complete" && tab === "hide" && (
               <>
                 <p className="stock-hint">Android phones on the website that are not in this list. They are hidden, not deleted, and come back when they are in a later list.</p>
                 {hideRows()}
               </>
             )}
-            {tab === "show_again" && showAgainRows()}
-            {tab === "ambiguous" && (
+            {mode === "complete" && tab === "show_again" && showAgainRows()}
+            {mode === "complete" && tab === "ambiguous" && (
               <>
                 <p className="stock-hint">{WORDING.attentionHelp}</p>
                 {entryRows("ambiguous", "attention")}
               </>
             )}
-            {tab === "blocked" && notAndroidRows()}
+            {mode === "complete" && tab === "blocked" && notAndroidRows()}
 
             {Object.keys(resolutions).length > 0 && (
               <div className="bulk-images-devreport stock-decisions" aria-label="Your fixes">
@@ -670,8 +806,24 @@ export function StockListUpdate() {
                 {WORDING.changesWritten}: {phonePlan.counts.priceUpdates} price update(s) · {phonePlan.counts.stockUpdates} stock set to 30 · {phonePlan.counts.newVariants} new variant(s) · {phonePlan.counts.newPhones} new phone(s) with {phonePlan.counts.newPhoneVariants} variant(s) · {phonePlan.counts.hiddenVariants} variant(s) hidden · {phonePlan.counts.shownVariants} shown again — {phonePlan.changeCount} change(s) in total. {WORDING.heldNotCounted}
               </p>
             )}
-            <p className="stock-hint">{WORDING.listIsTruth}</p>
-            <p className="stock-hint">{WORDING.nothingDeleted}</p>
+            {mode === "listed" ? (
+              <p className="stock-hint">{MODE.listedHelp}</p>
+            ) : (
+              <>
+                <p className="stock-hint">{WORDING.listIsTruth}</p>
+                <p className="stock-hint">{WORDING.nothingDeleted}</p>
+              </>
+            )}
+            {mode === "complete" && phonePlan && phonePlan.counts.hiddenVariants > 0 && (
+              <div className="stock-hide-warning" role="alert">
+                <strong>{HIDE_WARNING.title(phonePlan.counts.hiddenVariants)}</strong>
+                <span>{HIDE_WARNING.body}</span>
+                <label>
+                  <input type="checkbox" checked={hideAcknowledged} onChange={(event) => setHideAcknowledged(event.target.checked)} />
+                  {HIDE_WARNING.acknowledge(phonePlan.counts.hiddenVariants)}
+                </label>
+              </div>
+            )}
             {phonePlan && (
               <>
                 <p className="stock-hint">
@@ -697,22 +849,16 @@ export function StockListUpdate() {
             )}
             <p className={`stock-hint${openBlocker ? " stock-warning" : ""}`} aria-live="polite">{openBlocker ? plainReason(openBlocker) : WORDING.updateReady}</p>
             <div className="bulk-images-bulk">
-              <button type="button" className="admin-primary" disabled={Boolean(openBlocker) || writing || confirming} onClick={() => { setConfirming(true); setConfirmText(""); }}>{STEP.update}</button>
+              <button type="button" className="admin-primary" disabled={Boolean(openBlocker) || writing || confirming} onClick={() => setConfirming(true)}>{STEP.update}</button>
             </div>
             {confirming && !openBlocker && phonePlan && (
               <div className="stock-confirm" role="alertdialog" aria-labelledby="stock-confirm-title">
                 <strong id="stock-confirm-title">{WORDING.confirmTitle(supabaseEnvironmentLabel.toUpperCase())}</strong>
                 <p>{WORDING.confirmBody(phonePlan.changeCount, phonePlan.phones.length, phonePlan.held.length, supabaseEnvironmentLabel.toUpperCase())}</p>
                 {writing && progress && <UpdateProgress progress={progress} />}
-                {!writing && (
-                  <label className="stock-field">
-                    <span>{WORDING.confirmType(confirmationPhrase(phonePlan))}</span>
-                    <input type="text" value={confirmText} autoComplete="off" spellCheck={false} aria-label="Confirmation phrase" onChange={(event) => setConfirmText(event.target.value)} />
-                  </label>
-                )}
                 <div className="bulk-images-bulk">
-                  <button type="button" className="admin-primary" disabled={Boolean(finalBlocker) || writing} onClick={() => void runUpdate()}>{writing ? WORDING.updating : WORDING.confirmYes}</button>
-                  <button type="button" className="admin-secondary" disabled={writing} onClick={() => { setConfirming(false); setConfirmText(""); }}>{WORDING.confirmCancel}</button>
+                  <button type="button" className="admin-primary" disabled={Boolean(openBlocker) || writing} onClick={() => void runUpdate()}>{writing ? WORDING.updating : WORDING.confirmYes}</button>
+                  <button type="button" className="admin-secondary" disabled={writing} onClick={() => setConfirming(false)}>{WORDING.confirmCancel}</button>
                 </div>
               </div>
             )}
@@ -808,10 +954,35 @@ function resolutionOutcome(delta: StockDelta, record: ResolutionRecord) {
   );
 }
 
+/** "All Colours": the existing colours of the listed storage as checkboxes. Nothing is ticked for the Owner. */
+function ColourPicker({ choices, onResolve }: { choices: ColourChoice[]; onResolve: (resolution: Resolution) => void }) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const colours = [...new Set(choices.map((choice) => choice.color))];
+  const toggleColour = (color: string, on: boolean) => setPicked((current) => (on ? [...current, color] : current.filter((item) => item !== color)));
+  return (
+    <div className="stock-resolver stock-colour-picker" role="group" aria-label={PREVIEW.coloursTitle}>
+      <strong>{PREVIEW.coloursTitle}</strong>
+      <small className="plain">{PREVIEW.coloursHelp}</small>
+      {choices.map((choice) => (
+        <label key={choice.variantId}>
+          <input type="checkbox" checked={picked.includes(choice.color)} onChange={(event) => toggleColour(choice.color, event.target.checked)} />
+          {choice.color} · <code>{choice.sku}</code> · {formatMinor(choice.priceMinor)}
+          {!choice.isActive && <small className="plain"> ({PREVIEW.hiddenColour})</small>}
+        </label>
+      ))}
+      <span className="bulk-images-bulk">
+        <button type="button" className="admin-secondary" onClick={() => setPicked(colours)}>{ACTION.selectAllColours}</button>
+        <button type="button" className="admin-secondary" disabled={!picked.length} onClick={() => onResolve({ type: "select_colours", colors: colours.filter((color) => picked.includes(color)) })}>{ACTION.useColours(picked.length)}</button>
+      </span>
+    </div>
+  );
+}
+
 function ResolverActions({ entry, onResolve }: { entry: DeltaEntry; onResolve: (resolution: Resolution) => void }) {
   const [replacement, setReplacement] = useState("");
   const options = resolutionOptions(entry.row);
   const suggestion = entry.suggestion;
+  if (entry.attention === "all_colours" && entry.colourChoices?.length) return <ColourPicker choices={entry.colourChoices} onResolve={onResolve} />;
   return (
     <div className="stock-resolver">
       {options.token && <button type="button" className="admin-secondary" onClick={() => onResolve({ type: "move_token_to_model", token: options.token as string })}>{ACTION.addToken(options.token)}</button>}

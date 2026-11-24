@@ -7447,6 +7447,10 @@ body:has(.pdp-page) header.storefront-navbar {
    (--pdp-image-backdrop) so the space beside the image blends in. Normal blending keeps the image's own colours exact. */
 .pdp-showcase .pdp-main-image.has-image-backdrop { background:var(--pdp-image-backdrop); transition:background-color .25s ease; }
 .pdp-showcase .pdp-main-image.has-image-backdrop img { mix-blend-mode:normal; }
+/* PDP product inset (2026-11-24): a product cut-out is shown ~12% smaller (--pdp-product-scale, measured per image)
+   so it has even space on all four sides. The box size, 4:5 canvas and background are unchanged; photos are never scaled.
+   "scale" is separate from the hover "transform", so both still apply. */
+.pdp-main-image.has-product-inset img { scale:var(--pdp-product-scale,1); transition:transform .5s ease, scale .25s ease; }
 
 /* Global PDP Background (2026-11-21, Admin → Media): one solid colour or background image behind every product's main
    gallery image. Desktop/tablet use the landscape image, phones (up to 600 px) the portrait one (falls back to the
@@ -7488,4 +7492,34 @@ body:has(.pdp-page) header.storefront-navbar {
   .pdp-bg-preview-label a { flex:none; padding:6px 12px; font-size:12px; white-space:nowrap; min-height:32px; display:inline-flex; align-items:center; }
   .pdp-bg-preview-label.is-empty { flex-wrap:wrap; border-radius:14px; }
   .pdp-bg-preview-label.is-empty span { position:static; width:auto; height:auto; overflow:visible; clip:auto; clip-path:none; white-space:normal; flex:1 1 100%; order:3; font-size:11.5px; }
+}
+
+/* Phone PDP specifications — Top 7 + Show more / Show less (2026-11-24, localhost). Phone pages only.
+   Centered 1000px block; white cards with simple bold headings and tight label / value rows; card height follows its
+   content; 2 cards per row on desktop, 1 column on mobile. */
+.pdp-page--phone .pdp-specifications .pdp-section-heading { max-width:1000px; margin-left:auto; margin-right:auto; }
+.pdp-page--phone .pdp-spec-view { max-width:1000px; margin:0 auto; }
+/* Row by row, left to right: 2 cards per row; each card keeps its own content height (no stretching). */
+.pdp-page--phone .pdp-spec-groups { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px; align-items:start; column-count:auto; margin-bottom:14px; }
+.pdp-page--phone .pdp-spec-groups:has(> .pdp-spec-group:only-child) { grid-template-columns:minmax(0,1fr); max-width:493px; }
+.pdp-page--phone .pdp-spec-group { display:block; width:auto; margin:0; padding:12px 14px 6px; border:1px solid var(--phone-line); border-radius:10px; background:#FFFFFF; box-shadow:none; }
+.pdp-page--phone .pdp-spec-group h3 { margin:0 0 4px; padding:0 0 8px; border-bottom:0; color:var(--phone-ink); font:750 16px/1.25 Manrope,sans-serif; letter-spacing:-.01em; text-transform:none; }
+.pdp-page--phone .pdp-spec-group h3::before { content:none; }
+.pdp-page--phone .pdp-spec-group dl > div { grid-template-columns:minmax(0,40%) minmax(0,1fr); gap:12px; align-items:baseline; padding:7px 4px; border-bottom:1px solid #EEF1F5; }
+.pdp-page--phone .pdp-spec-group dl > div:last-child { border-bottom:0; }
+.pdp-page--phone .pdp-spec-group dt { color:var(--phone-muted); font:500 12.5px/1.4 Manrope,sans-serif; }
+.pdp-page--phone .pdp-spec-group dd { color:var(--phone-ink); font:550 13.5px/1.4 Manrope,sans-serif; }
+.pdp-page--phone .pdp-specifications:has(.pdp-spec-view--compactable) { scroll-margin-top:60px; }
+.pdp-page--phone .pdp-spec-toggle { display:flex; justify-content:center; margin-top:4px; }
+.pdp-page--phone .pdp-spec-toggle button { display:inline-flex; align-items:center; gap:7px; min-height:38px; padding:0 16px; border:0; border-radius:8px; background:transparent; color:var(--phone-navy); font:750 14px/1 Manrope,sans-serif; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
+.pdp-page--phone .pdp-spec-toggle button:hover { background:#EEF3F8; }
+.pdp-page--phone .pdp-spec-toggle button:focus-visible { outline:3px solid rgba(240,100,58,.35); outline-offset:2px; }
+.pdp-page--phone .pdp-spec-toggle svg { width:16px; height:16px; }
+.pdp-page--phone .pdp-spec-count { padding:2px 7px; border-radius:999px; background:#EEF3F8; color:var(--phone-navy); font-size:11.5px; font-weight:800; text-decoration:none; }
+@media (max-width:700px) {
+  .pdp-page--phone .pdp-spec-groups { grid-template-columns:minmax(0,1fr); gap:10px; }
+  .pdp-page--phone .pdp-spec-groups:has(> .pdp-spec-group:only-child) { max-width:none; }
+}
+@media (max-width:380px) {
+  .pdp-page--phone .pdp-spec-group dl > div { grid-template-columns:minmax(0,1fr); gap:1px; }
 }

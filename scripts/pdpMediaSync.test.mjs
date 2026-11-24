@@ -97,11 +97,13 @@ test("PDP main image auto-fit: box follows the image shape, contain kept, same i
   // Ratio from the stored media size (no jump), corrected by the loaded image; limited to 1:2 .. 2:1.
   assert.match(app, /Math\.min\(2, Math\.max\(0\.5, ratio\)\)/);
   assert.match(app, /pdpImageRatio\(selectedMedia\?\.width, selectedMedia\?\.height\)/);
-  assert.match(app, /className=\{`pdp-main-image\$\{mainImageRatio \? " has-image-ratio" : ""\}\$\{mainImageBackdrop \? " has-image-backdrop" : ""\}\$\{pdpBackground\.style \? " has-global-background" : ""\}`\}/);
+  assert.match(app, /className=\{`pdp-main-image\$\{mainImageRatio \? " has-image-ratio" : ""\}\$\{mainImageBackdrop \? " has-image-backdrop" : ""\}\$\{pdpBackground\.style \? " has-global-background" : ""\}\$\{mainImageInset < 1 \? " has-product-inset" : ""\}`\}/);
   assert.match(app, /"--pdp-image-ratio": \(1 \/ \(1 \/ mainImageRatio \+ 0\.05\)\)\.toFixed\(4\)/);
-  // Same delivery request as before (1400 px main, 240 px thumbnails, trim rule unchanged).
-  assert.match(app, /pdpGalleryImage\(selectedMedia, 1400, trimGallery\)/);
-  assert.match(app, /pdpGalleryImage\(item, 240, trimGallery\)/);
+  // Same delivery sizes as before (1400 px main, 240 px thumbnails), now on the product canvas for every product.
+  assert.match(app, /pdpGalleryImage\(selectedMedia, 1400\)/);
+  assert.match(app, /pdpGalleryImage\(item, 240\)/);
+  // Before the main image loads, the thumbnail's real shape is used (no jump when switching colours).
+  assert.match(app, /\(selectedMedia && thumbnailRatios\[selectedMedia\.id\]\) \|\| pdpImageRatio\(selectedMedia\?\.width, selectedMedia\?\.height\)/);
   assert.equal((app.match(/has-image-ratio/g) ?? []).length, 1, "only the PDP main image uses it");
   // CSS: scoped to the PDP main image, height limited, contain kept (base rules), no stretch / cover.
   const block = css.slice(css.indexOf("/* PDP main image auto-fit"));
@@ -109,6 +111,21 @@ test("PDP main image auto-fit: box follows the image shape, contain kept, same i
   assert.match(block, /max-height:min\(84vh,820px\)/);
   assert.doesNotMatch(block, /object-fit:\s*(cover|fill)|\.product-image|\.product-card|\.pdp-thumbnails/);
   assert.match(css, /\.pdp-main-image img \{ object-fit:contain;/);
+});
+
+// PDP product canvas (2026-11-24): trimmed product cut-outs on one 4:5 canvas; photos without a margin untouched.
+test("PDP product canvas: trim, pad to 4:5 only when a margin was trimmed, original fallback, PDP gallery only", () => {
+  const text = (path) => readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const cloud = text("../src/lib/cloudinary.ts");
+  const app = text("../src/StorefrontApp.tsx");
+  assert.ok(cloud.includes('const PRODUCT_CANVAS = "$ow_iw_mul_0.97,$oh_ih_mul_0.97/e_trim:10/if_w_lt_$ow_or_h_lt_$oh/c_pad,ar_4:5,b_transparent/if_end/";'));
+  // The canvas sits before the unchanged final delivery step, so the backdrop sample still finds it.
+  assert.match(cloud, /\$\{options\.canvas \? PRODUCT_CANVAS : trim\}c_limit,w_\$\{safeWidth\},q_auto,f_auto\//);
+  assert.doesNotMatch(cloud, /c_fill|c_crop|c_thumb|c_scale,w_\$\{/);
+  assert.match(app, /cloudinaryDeliveryUrl\(media\.publicId, width, \{ canvas: true \}\) \|\| original/);
+  assert.match(app, /if \(fallback && image\.src !== fallback\) image\.src = fallback;/);
+  assert.equal((app.match(/canvas: true/g) ?? []).length, 1, "PDP gallery only");
+  assert.doesNotMatch(app, /PDP_TRIMMED_GALLERY_SLUGS|trimGallery/);
 });
 
 // PDP image backdrop (2026-11-21): even, non-white image edges colour the box; PDP main image only.

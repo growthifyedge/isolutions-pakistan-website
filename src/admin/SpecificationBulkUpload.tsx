@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Download, Upload, XCircle } from "lucide-react";
 import { supabase, supabaseEnvironmentLabel } from "../lib/supabase";
 import { commercialWriteTarget } from "../lib/commercialDefaults";
@@ -7,13 +7,13 @@ import { specificationUploadSaveDeps } from "../lib/specificationBulkUploadDb";
 import type { CatalogSpecProduct } from "../lib/specificationApply";
 import {
   ROW_CATEGORIES,
+  assignSelectedProduct,
   planSpecificationUpload,
   rowsFromCsv,
   rowsFromXlsx,
   runSpecificationUpload,
   selectWrites,
   specUploadConfirmationPhrase,
-  specUploadNeedsTypedConfirmation,
   specUploadTemplateCsv,
   specUploadTemplateXlsx,
   summarizeUpload,
@@ -21,11 +21,11 @@ import {
   type SpecUploadResult,
   type SpecUploadSummary,
   type UploadPlan,
+  type UploadRow,
 } from "../lib/specificationBulkUpload";
 
 const BUILD_MODE: string = import.meta.env.MODE;
 const target = commercialWriteTarget(import.meta.env.VITE_SUPABASE_URL, BUILD_MODE);
-const typedConfirmation = specUploadNeedsTypedConfirmation(target.environment);
 const tone: Record<RowCategory, string> = { "New Spec": "ready", "Already Present": "muted", Conflict: "blocked", "Product Not Found": "warning", "Invalid Row": "warning" };
 const SUMMARY_LABELS: (keyof SpecUploadSummary)[] = ["New", "Updated", "Already Present", "Skipped", "Failed"];
 
@@ -41,7 +41,7 @@ function download(name: string, data: BlobPart, type: string) {
 /**
  * Specifications Bulk Upload: Download Template → Fill Excel → Upload → Save Specifications. The check after upload is
  * read-only. Saving adds new specifications and overwrites only the Conflict rows the Owner ticks; each product is
- * saved all or nothing. Nothing is ever deleted. PRODUCTION also needs the typed phrase.
+ * saved all or nothing. Nothing is ever deleted. Saving opens a Confirm/Cancel dialog with the count (no typed phrase, Owner decision 2026-11-24).
  */
 export function SpecificationBulkUpload() {
   const [fileName, setFileName] = useState("");
@@ -52,16 +52,78 @@ export function SpecificationBulkUpload() {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<RowCategory | "All">("All");
   const [overwrite, setOverwrite] = useState<Set<number>>(new Set());
-  const [typed, setTyped] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [result, setResult] = useState<SpecUploadResult | null>(null);
   const [summary, setSummary] = useState<SpecUploadSummary | null>(null);
   const [progress, setProgress] = useState("");
   const running = useRef(false);
+  // Single Product (Owner-approved 2026-11-24): the Owner chooses the product first; a GPT file without Product Slug or
+  // Product ID is then checked against that product only. No choice = the previous behaviour (a file for several products).
+  const [products, setProducts] = useState<CatalogSpecProduct[]>([]);
+  const [productQuery, setProductQuery] = useState("");
+  const [selectedId, setSelectedId] = useState("");
+  const [parsedRows, setParsedRows] = useState<UploadRow[] | null>(null);
+  const selected = products.find((product) => product.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (!supabase) return;
+    let active = true;
+    void loadSpecificationCatalog(supabase)
+      .then(({ catalog: all }) => active && setProducts([...all].sort((a, b) => a.title.localeCompare(b.title))))
+      .catch((reason) => active && setError(reason instanceof Error ? reason.message : String(reason)));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  /** Read-only: the file's rows (for the chosen product, if any) → preview. Nothing is saved here. */
+  const preview = async (rows: UploadRow[], product: CatalogSpecProduct | null) => {
+    if (!supabase) return;
+    setPlan(null);
+    setOverwrite(new Set());
+    setConfirmOpen(false);
+    setSummary(null);
+    setResult(null);
+    setFileErrors([]);
+    let planned = rows;
+    if (product) {
+      const assigned = assignSelectedProduct(rows, product);
+      if (assigned.fileErrors.length) {
+        setFileErrors(assigned.fileErrors);
+        return;
+      }
+      planned = assigned.rows;
+    } else if (rows.some((row) => !row.productKey)) {
+      setFileErrors(["Choose the product above first: this file has no Product Slug or Product ID, so it is checked against the product you choose."]);
+      return;
+    }
+    const { catalog: all } = await loadSpecificationCatalog(supabase);
+    const keys = new Set(planned.map((row) => row.productKey));
+    const ids = all.filter((item) => keys.has(item.id) || keys.has(item.slug)).map((item) => item.id);
+    const existing = await loadExistingSpecs(supabase, ids);
+    setCatalog(all);
+    setPlan(planSpecificationUpload(planned, all, existing));
+  };
+
+  const chooseProduct = async (id: string) => {
+    setSelectedId(id);
+    if (!parsedRows) return;
+    setBusy(true);
+    try {
+      await preview(parsedRows, products.find((product) => product.id === id) ?? null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const productQueryKey = productQuery.trim().toLowerCase();
+  const productChoices = products.filter((product) => !productQueryKey || product.title.toLowerCase().includes(productQueryKey) || product.slug.includes(productQueryKey) || product.id === selectedId).slice(0, 200);
 
   const reset = () => {
     setPlan(null);
     setOverwrite(new Set());
-    setTyped("");
+    setConfirmOpen(false);
     setSummary(null);
     setResult(null);
     setError("");
@@ -75,16 +137,13 @@ export function SpecificationBulkUpload() {
     setBusy(true);
     try {
       const parsed = /\.xlsx$/i.test(file.name) ? await rowsFromXlsx(await file.arrayBuffer()) : /\.csv$/i.test(file.name) ? rowsFromCsv(await file.text()) : { rows: [], fileErrors: ["Upload a .csv or .xlsx file."] };
+      setParsedRows(null);
       if (parsed.fileErrors.length) {
         setFileErrors(parsed.fileErrors);
         return;
       }
-      const { catalog: products } = await loadSpecificationCatalog(supabase);
-      const keys = new Set(parsed.rows.map((row) => row.productKey));
-      const ids = products.filter((product) => keys.has(product.id) || keys.has(product.slug)).map((product) => product.id);
-      const existing = await loadExistingSpecs(supabase, ids);
-      setCatalog(products);
-      setPlan(planSpecificationUpload(parsed.rows, products, existing));
+      setParsedRows(parsed.rows);
+      await preview(parsed.rows, selected);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -102,17 +161,17 @@ export function SpecificationBulkUpload() {
         ? "Saved. Upload the file again to see the new state."
         : writes.total === 0
           ? "Nothing to save."
-          : typedConfirmation && typed !== phrase
-            ? `Type ${phrase} to confirm saving to PRODUCTION.`
-            : null;
+          : null;
 
   const apply = async () => {
     if (!plan || !supabase || applyBlocker || running.current) return;
+    setConfirmOpen(false);
     running.current = true;
     setBusy(true);
     try {
       const { readSpecs, readProduct, readSnapshot } = specificationApplyDbDeps(supabase);
-      const outcome = await runSpecificationUpload(plan, { overwrite, typed }, catalog, {
+      // Clicking Confirm in the dialog is the confirmation: the runner's PRODUCTION gate receives the exact phrase for this save.
+      const outcome = await runSpecificationUpload(plan, { overwrite, typed: phrase }, catalog, {
         supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
         buildMode: BUILD_MODE,
         readSpecs,
@@ -123,7 +182,6 @@ export function SpecificationBulkUpload() {
       });
       setResult(outcome);
       if (outcome.products.length) setSummary(summarizeUpload(plan, overwrite, outcome));
-      setTyped("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -142,15 +200,34 @@ export function SpecificationBulkUpload() {
           <span className="admin-kicker">CATALOG · SPECIFICATIONS BULK UPLOAD</span>
           <h1>Specifications bulk upload</h1>
           <p>
-            Download the template, fill in specifications, upload it and save. Works for every category, New and Used. Products are matched
-            only by exact Product ID or Slug, and the Product Name must match. New specifications are added; a stored value changes only when
+            Choose the product, download the template, fill in specifications (or let ChatGPT fill it), upload it and save. Works for every
+            category, New and Used. With a product chosen, every row belongs to that product and a file naming any other product is refused;
+            without one, products are matched only by exact Product ID or Slug, and the Product Name must match. New specifications are added; a stored value changes only when
             you tick Overwrite. Each product is saved all or nothing, and nothing is deleted. Connected to {supabaseEnvironmentLabel}.
           </p>
         </div>
       </div>
 
       <div className="spec-upload-step">
-        <h3>1 · Download template</h3>
+        <h3>1 · Choose the product (for one product, e.g. a ChatGPT file)</h3>
+        <div className="spec-upload-product">
+          <input type="search" aria-label="Search products" placeholder="Search by name or slug" value={productQuery} disabled={busy} onChange={(event) => setProductQuery(event.target.value)} />
+          <select aria-label="Product for this file" value={selectedId} disabled={busy} onChange={(event) => void chooseProduct(event.target.value)}>
+            <option value="">No product chosen — the file names its products (several products)</option>
+            {productChoices.map((product) => (
+              <option key={product.id} value={product.id}>{product.title} · {product.slug}</option>
+            ))}
+          </select>
+        </div>
+        <small>
+          {selected
+            ? `Every specification in the file is checked against “${selected.title}” (${selected.slug}). Product Slug or Product ID may be blank; a file that names any other product is refused.`
+            : "Choose the product first when the file is for one product and has no Product Slug or Product ID."}
+        </small>
+      </div>
+
+      <div className="spec-upload-step">
+        <h3>2 · Download template</h3>
         <div className="spec-upload-actions">
           <button type="button" onClick={async () => download("specifications-template.xlsx", await specUploadTemplateXlsx(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}>
             <Download /> Download XLSX template
@@ -163,7 +240,7 @@ export function SpecificationBulkUpload() {
       </div>
 
       <div className="spec-upload-step">
-        <h3>2 · Upload filled file (checked, nothing saved yet)</h3>
+        <h3>3 · Upload filled file (checked, nothing saved yet)</h3>
         <label className="spec-upload-file">
           <Upload /> {fileName || "Choose a .xlsx or .csv file"}
           <input type="file" accept=".xlsx,.csv" disabled={busy} onChange={(event) => { void onFile(event.target.files?.[0]); event.target.value = ""; }} />
@@ -211,7 +288,7 @@ export function SpecificationBulkUpload() {
                               if (event.target.checked) next.add(row.rowNumber);
                               else next.delete(row.rowNumber);
                               setOverwrite(next);
-                              setTyped("");
+                              setConfirmOpen(false);
                             }}
                           />
                         ) : "—"}
@@ -235,14 +312,27 @@ export function SpecificationBulkUpload() {
             not touched and are checked after.
           </p>
           <div className="spec-upload-actions">
-            {typedConfirmation && (
-              <input type="text" value={typed} placeholder={phrase} onChange={(event) => setTyped(event.target.value)} disabled={busy || writes.total === 0 || Boolean(result)} aria-label="PRODUCTION confirmation" />
-            )}
-            <button type="button" className="admin-primary" disabled={Boolean(applyBlocker) || busy} onClick={() => void apply()}>
+            <button type="button" className="admin-primary" disabled={Boolean(applyBlocker) || busy || confirmOpen} onClick={() => setConfirmOpen(true)}>
               Save Specifications to {target.environment ? target.environment.toUpperCase() : "—"}
             </button>
           </div>
           {applyBlocker && <small>{applyBlocker}</small>}
+          {confirmOpen && !applyBlocker && (
+            <div className="bulk-images-dialog-backdrop">
+              <div className={`bulk-images-dialog${target.environment === "production" ? " production" : ""}`} role="dialog" aria-modal="true" aria-labelledby="spec-upload-confirm-title">
+                {target.environment === "production" && <div className="bulk-images-prod-banner">PRODUCTION</div>}
+                <h3 id="spec-upload-confirm-title">Save {writes.total} specification{writes.total === 1 ? "" : "s"}?</h3>
+                <p>
+                  {writes.creates.length} new{writes.updates.length ? `, ${writes.updates.length} overwritten` : ""} on the {target.environment ? target.environment.toUpperCase() : "—"} website. Each
+                  product is saved all or nothing; nothing is deleted.
+                </p>
+                <div className="bulk-images-dialog-actions">
+                  <button type="button" className="admin-secondary" disabled={busy} onClick={() => setConfirmOpen(false)}>Cancel</button>
+                  <button type="button" className="admin-primary" disabled={busy} onClick={() => void apply()}>Confirm</button>
+                </div>
+              </div>
+            </div>
+          )}
           {progress && <p className="stock-hint">{progress}</p>}
           {result && (
             <div className="spec-upload-result">

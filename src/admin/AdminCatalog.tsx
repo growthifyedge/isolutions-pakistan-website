@@ -36,6 +36,18 @@ import {
   variantFacts,
 } from "../lib/variantFacts";
 import { MediaManager } from "./MediaManager";
+import { VariantManager } from "./VariantManager";
+
+/** The previous variant tools: shown as before for a new / development product, folded under the new table otherwise. */
+function LegacyVariantTools({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
+  if (!collapsed) return <>{children}</>;
+  return (
+    <details className="variant-legacy-tools">
+      <summary>More variant tools (battery health, SIM, grade, delete, commercial defaults)</summary>
+      {children}
+    </details>
+  );
+}
 import { commercialDbDeps } from "../lib/commercialDefaultsDb";
 import { commercialWriteTarget, planCommercialDefaults, runCommercialDefaults, type CommercialVariant } from "../lib/commercialDefaults";
 import { isDraft, pruneSelection, selectAllDrafts, toggleSelection } from "../lib/catalogBulkPublish";
@@ -700,6 +712,10 @@ export function Phase4ProductEditor() {
   // commercial facts change through the existing server-checked Stock Update pages, so no edit here can break it.
   const serverSafeLive = Boolean(productId) && !manualMode && draft.publication_status === "published";
   const stockPage = liveStockUpdatePage(loadedCategorySlug, brands.find((item) => item.id === draft.brand_id)?.name ?? null);
+  // Every saved real product (draft or published, any category): the fully editable variant table, saved by ONE
+  // Owner-only, server-checked call (apply_product_variant_edits). For a draft or a Gadget / Accessory the previous
+  // tools (battery, SIM, grade, delete, commercial defaults) stay available below, folded; a live phone shows none.
+  const variantManagerOn = Boolean(productId) && draft.data_class === "real";
   const serverSafeMessage = `This product is live. Prices, variants, PTA, condition, warranty and delivery are changed in ${stockPage ? stockPage.label : "the Stock Update page"}, which checks every change on the server. Here you can edit the description, SEO, homepage placement, specifications, stock and images.`;
   const liveProblemsAfter = async (
     change: (state: LiveProductState) => LiveProductState,
@@ -1672,6 +1688,11 @@ export function Phase4ProductEditor() {
                   unresolved and block publication.
                 </p>
               </div>
+              {variantManagerOn && productId && (
+                <VariantManager productId={productId} published={draft.publication_status === "published"} mobilePhone={loadedCategorySlug === "mobile-phones"} onSaved={() => void load()} />
+              )}
+              {variantManagerOn && serverSafeLive ? null : (
+              <LegacyVariantTools collapsed={variantManagerOn}>
               {serverSafeLive && (
                 <div className="validation-callout">
                   <ShieldCheck />
@@ -1975,6 +1996,8 @@ export function Phase4ProductEditor() {
                   </article>
                 ))}
               </div>
+              </LegacyVariantTools>
+              )}
             </>
           )}
           {tab === "Inventory" && (

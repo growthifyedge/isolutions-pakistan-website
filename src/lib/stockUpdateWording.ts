@@ -64,6 +64,10 @@ const EXPLANATIONS: Array<[RegExp, string]> = [
 
 /** Reasons the engine already writes as a plain sentence for the Owner (they name the phone it looks like). */
 const PLAIN_REASONS = [
+  /^“All Colours”/,
+  /^This line says /,
+  /^You chose /,
+  /^This line gives no RAM/,
   /^Looks like /,
   /^The phone you chose for this line /,
   // Why a whole phone is held (from the per-phone plan); these name the line, variant or phone already.
@@ -121,6 +125,8 @@ export const ACTION = {
   matchTo: (title: string) => `Yes, this is ${title}`,
   newPhone: "This is a new phone",
   undo: "Undo",
+  useColours: (count: number) => (count ? `Use these ${count} colour(s)` : "Tick at least one colour"),
+  selectAllColours: "Tick all",
 } as const;
 
 export const WORDING = {
@@ -183,4 +189,49 @@ export const WORDING = {
   alreadyHidden: "Already hidden — stays hidden",
   notPublished: "Not on the website yet — it needs an image and publishing",
   wouldBe: (label: string) => `Once fixed, this would be: ${label}`,
+} as const;
+
+/** Android Smart Stock Update (Owner decision 2026-11-23): the two update modes and the preview table. */
+export const MODE = {
+  title: "What should this list change?",
+  listed: "Only products in this list (recommended)",
+  listedHelp: "Only the phones and variants in this list change: new prices, new variants and new phones. Every other Android phone, and every variant you did not list, stays exactly as it is. Nothing is hidden and existing stock is kept.",
+  complete: "Complete stock list",
+  completeHelp: "Use only for your full Android stock list: phones not in the list are hidden from the website (not deleted), listed phones are shown with stock 30.",
+  untouched: (phones: number) => `${phones} other Android phone(s) on the website are not in this list and stay exactly as they are.`,
+} as const;
+
+export const PREVIEW = {
+  title: "Preview of changes",
+  help: "Check every row. Choose Skip for anything you do not want to change. Nothing changes until you click Update Website and confirm.",
+  variant: "Variant",
+  existingPrice: "Existing price",
+  newPrice: "New price",
+  action: "Action",
+  newLabel: "New",
+  actionOverride: "Override existing price",
+  actionSame: "No change (same price)",
+  actionAddVariant: "Add new variant",
+  actionNewPhone: "Create new phone (draft)",
+  actionChoose: "Needs your choice",
+  actionSkip: "Skip",
+  coloursTitle: "Choose the colours for this price",
+  coloursHelp: "Only the colours you tick get this price. Nothing is ticked for you.",
+  hiddenColour: "hidden on the website",
+  skippedNote: "Skipped rows are listed under Your fixes — click Undo to bring one back.",
+} as const;
+
+/** List-wide PTA / condition choice (like iPhone Stock). */
+export const LIST_FACTS = {
+  pta: "PTA",
+  condition: "Condition",
+  ptaOptions: { approved: "PTA Approved", not_approved: "Non-PTA" },
+  conditionOptions: { brand_new: "Brand New", used: "Used" },
+  help: "Applies to every line that does not say PTA / Non-PTA or New / Used itself. Existing variants only get their new price — their PTA and condition never change. New phones are created with these values; a new variant must match its phone's other variants.",
+} as const;
+
+export const HIDE_WARNING = {
+  title: (variants: number) => `Warning: ${variants} variant(s) will be hidden from the website`,
+  body: "This is a complete stock list, so every Android phone or variant that is not in it is hidden (not deleted). If this is only part of your stock, choose “Only products in this list” instead.",
+  acknowledge: (variants: number) => `I understand that ${variants} variant(s) will be hidden`,
 } as const;

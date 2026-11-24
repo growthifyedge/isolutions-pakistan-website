@@ -492,16 +492,18 @@ test("source: Update Website is wired ONLY through the gated runner — confirma
   const ui = readFileSync(new URL("../src/admin/StockListUpdate.tsx", import.meta.url), "utf8");
   assert.equal(ui.match(/runStockUpdate\(/g).length, 1);
   const runUpdate = ui.slice(ui.indexOf("async function runUpdate()"), ui.indexOf("function toggle("));
-  assert.match(runUpdate, /const blocker = updateWebsiteBlocker\(\{ \.\.\.gate, confirmation: confirmText \}\);\s*if \(blocker\) return/);
+  // Owner decision 2026-11-24: no typed phrase — clicking "Yes, update the website" in the confirmation is the confirmation.
+  assert.match(runUpdate, /const blocker = updateWebsiteBlocker\(\{ \.\.\.gate, confirmation: confirmationPhrase\(phonePlan\) \}\);\s*if \(blocker\) return/);
   assert.match(runUpdate, /supabaseUrl: SUPABASE_URL,\s*buildMode: BUILD_MODE/);
   assert.match(runUpdate, /phonePlan,\s*setProgress,\s*\);/, "runner reports straight into the progress state");
   assert.match(runUpdate, /setCatalog\(null\);\s*setStamp\(null\);/, "after any attempt a fresh Check List is required");
-  assert.match(ui, /onClick=\{\(\) => \{ setConfirming\(true\); setConfirmText\(""\); \}\}>\{STEP\.update\}/);
-  assert.match(ui, /disabled=\{Boolean\(finalBlocker\) \|\| writing\} onClick=\{\(\) => void runUpdate\(\)\}/);
-  assert.match(ui, /const finalBlocker = updateWebsiteBlocker\(\{ \.\.\.gate, confirmation: confirmText \}\);/);
+  assert.match(ui, /onClick=\{\(\) => setConfirming\(true\)\}>\{STEP\.update\}/);
+  assert.match(ui, /disabled=\{Boolean\(openBlocker\) \|\| writing\} onClick=\{\(\) => void runUpdate\(\)\}/);
+  assert.doesNotMatch(ui, /confirmText|setConfirmText|Confirmation phrase/, "no typed phrase input");
   assert.doesNotMatch(ui, /\.(insert|upsert)\s*\(|\.rpc\s*\(|from\("/);
   // The Owner's identity decisions reach the comparison, and the fix buttons exist.
-  assert.equal(ui.match(/rowDecisions\)/g).length, 2);
+  // (Smart Stock Update 2026-11-23: both comparisons also receive the page's update mode and PTA / condition choice.)
+  assert.equal(ui.match(/rowDecisions, \{ mode, listFacts \}\)/g).length, 2);
   assert.match(ui, /type: "accept_correction"/);
   assert.match(ui, /type: "confirm_new_phone"/);
   // Progress: double runs impossible, closing warned, no fake timers.

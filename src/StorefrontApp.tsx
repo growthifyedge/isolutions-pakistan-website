@@ -64,6 +64,7 @@ import { askSellerWhatsappUrl, isIphoneProduct, pdpProductInformation, pdpWarran
 import { descriptionParagraphs, gadgetDeliveryInfo, gadgetWhatsappOrderUrl, isGadgetProduct } from "./lib/pdpDescription";
 import { parsePkrMajorToMinor } from "./lib/money";
 import { cloudinaryDeliveryUrl } from "./lib/cloudinary";
+import { pdpProductInsetScale, type RgbaSample } from "./lib/pdpProductInset";
 import { supabase } from "./lib/supabase";
 import { fetchHomepageBundles, type HomepageBundle } from "./lib/bundles";
 import { loadPreviewImageUrls } from "./lib/bannerPreviewStore";
@@ -122,7 +123,7 @@ import {
 } from "./lib/collections";
 import { HOME_GADGET_SUBCATEGORIES, homeGadgetSubcategoryHref } from "./lib/homeGadgetSubcategories";
 import { storefrontContact } from "./lib/storefrontContact";
-import { groupSpecifications } from "./lib/specificationGroups";
+import { PdpSpecifications } from "./PdpSpecifications";
 import {
   createStorefrontOrder,
   readStorefrontOrderConfirmation,
@@ -3432,12 +3433,12 @@ const configurationLabel = (variant: CatalogVariant) =>
   [variant.ram, variant.storage].filter(Boolean).join(" / ") || variant.sku;
 const displayConfigurationLabel = (configuration: string) =>
   configuration.replace(/\s+GB/g, "GB").replace(/\s*\/\s*/g, "/");
-// PDP image sizing (Owner-approved, scoped): these products' gallery images are trimmed of their uniform margin so
-// every colour's product shows at a similar size. A trim Cloudinary cannot produce falls back to the original URL.
-const PDP_TRIMMED_GALLERY_SLUGS = new Set(["apple-iphone-13-used"]);
-const pdpGalleryImage = (media: CatalogProduct["media"][number], width: number, trim: boolean) => {
+// PDP image sizing (Owner-approved; every product since 2026-11-24, first only apple-iphone-13-used): a product cut-out's
+// uniform margin is trimmed and it is placed on one 4:5 canvas, so every colour's product shows at a similar size; a photo
+// without such a margin is shown as uploaded (cloudinaryDeliveryUrl "canvas"). A failed transformation falls back to the original URL.
+const pdpGalleryImage = (media: CatalogProduct["media"][number], width: number) => {
   const original = cloudinaryDeliveryUrl(media.publicId, width) || media.url;
-  const src = trim ? cloudinaryDeliveryUrl(media.publicId, width, { trim: true }) || original : original;
+  const src = cloudinaryDeliveryUrl(media.publicId, width, { canvas: true }) || original;
   return {
     src,
     "data-fallback-src": original,
@@ -3508,6 +3509,48 @@ const pdpImageBackdrop = (src: string): Promise<string | null> => {
   pdpBackdropCache.set(sampleSrc, result);
   return result;
 };
+// PDP product inset (src/lib/pdpProductInset.ts, 2026-11-24): a product cut-out is shown ~12% smaller so it does not
+// touch the box edges. Two 32 px PNG copies (~2 KB each): the ORIGINAL upload decides "cut-out or photo"; the displayed
+// canvas image gives how much of the frame the product fills (same URL as the backdrop sample, so it is cached).
+// Any failure → 1 (unchanged).
+const pdpSampleUrl = (src: string) => {
+  const sampleSrc = src.replace(/\/c_limit,w_\d+,q_auto,f_auto\//, "/c_scale,w_32,f_png/");
+  return sampleSrc !== src && sampleSrc.startsWith("https://res.cloudinary.com/") ? sampleSrc : null;
+};
+const readPdpSample = (url: string) =>
+  new Promise<RgbaSample | null>((resolve) => {
+    const sample = new Image();
+    sample.crossOrigin = "anonymous";
+    sample.decoding = "async";
+    sample.onerror = () => resolve(null);
+    sample.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = sample.naturalWidth;
+        canvas.height = sample.naturalHeight;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) return resolve(null);
+        context.drawImage(sample, 0, 0);
+        resolve({ data: context.getImageData(0, 0, canvas.width, canvas.height).data, width: canvas.width, height: canvas.height });
+      } catch {
+        resolve(null);
+      }
+    };
+    sample.src = url;
+  });
+const pdpInsetCache = new Map<string, Promise<number>>();
+const pdpProductInset = (src: string, originalSrc: string): Promise<number> => {
+  const displayedUrl = pdpSampleUrl(src);
+  const originalUrl = pdpSampleUrl(originalSrc);
+  if (!displayedUrl || !originalUrl || displayedUrl === originalUrl) return Promise.resolve(1);
+  const cached = pdpInsetCache.get(displayedUrl);
+  if (cached) return cached;
+  const result = Promise.all([readPdpSample(originalUrl), readPdpSample(displayedUrl)]).then(([original, displayed]) =>
+    original && displayed ? pdpProductInsetScale(original, displayed) : 1,
+  );
+  pdpInsetCache.set(displayedUrl, result);
+  return result;
+};
 // Global PDP Background (src/lib/pdpGalleryBackground.ts): the published setting is read once per visit (cached for
 // the next one); ?pdpBackgroundPreview=1 shows the Admin's unsaved choice from this browser only.
 let publishedPdpBackground: Promise<PdpGalleryBackground | null | undefined> | null = null;
@@ -3572,7 +3615,11 @@ function usePdpGalleryBackground() {
 function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
   const pdpBackground = usePdpGalleryBackground();
   const [loadedImageRatio, setLoadedImageRatio] = useState<{ src: string; ratio: number } | null>(null);
+  const [thumbnailRatios, setThumbnailRatios] = useState<Record<string, number>>({});
   const [imageBackdrop, setImageBackdrop] = useState<{ src: string; color: string | null } | null>(null);
+  // Product inset per main-image URL. Every gallery image is measured as soon as the product loads (tiny PNGs), so the
+  // scale is normally known before the large image appears and switching colours does not jump.
+  const [productInsets, setProductInsets] = useState<Record<string, number>>({});
   const [product, setProduct] = useState<CatalogProduct | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -3608,6 +3655,19 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
       .catch(() => setError("This product could not be loaded."))
       .finally(() => setLoading(false));
   }, [slug]);
+  useEffect(() => {
+    if (!product) return;
+    let active = true;
+    for (const media of product.media) {
+      const delivered = pdpGalleryImage(media, 1400);
+      void pdpProductInset(delivered.src, delivered["data-fallback-src"]).then((scale) => {
+        if (active) setProductInsets((current) => (current[delivered.src] === scale ? current : { ...current, [delivered.src]: scale }));
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [product]);
   if (loading)
     return (
       <Layout taxonomy={taxonomy}>
@@ -3626,14 +3686,17 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
     ? Math.round(((compareAt - variant.priceMinor) / compareAt) * 100)
     : null;
   const gallery = product.media;
-  const trimGallery = PDP_TRIMMED_GALLERY_SLUGS.has(product.slug);
   // Mobile phones (Android + iPhone, New + Used) get the premium PDP styling; other categories keep theirs.
   const isPhonePdp = product.category?.slug === "mobile-phones";
   const selectedMedia = gallery.find((item) => item.url === image) ?? gallery[0] ?? primaryMedia(product);
-  const mainImage = selectedMedia ? pdpGalleryImage(selectedMedia, 1400, trimGallery) : null;
-  // Stored media size first (known before loading: no jump); the loaded image's real size wins (e.g. trimmed images).
+  const mainImage = selectedMedia ? pdpGalleryImage(selectedMedia, 1400) : null;
+  // The loaded image's real size wins; before it loads, the same image's thumbnail shape (same canvas, already loaded:
+  // no jump when switching colours), then the stored media size.
   const mainImageRatio =
-    mainImage && loadedImageRatio?.src === mainImage.src ? loadedImageRatio.ratio : pdpImageRatio(selectedMedia?.width, selectedMedia?.height);
+    mainImage && loadedImageRatio?.src === mainImage.src
+      ? loadedImageRatio.ratio
+      : (selectedMedia && thumbnailRatios[selectedMedia.id]) || pdpImageRatio(selectedMedia?.width, selectedMedia?.height);
+  const mainImageInset = mainImage ? productInsets[mainImage.src] ?? 1 : 1;
   // A published global background wins over the per-image edge colour.
   const mainImageBackdrop = !pdpBackground.style && mainImage && imageBackdrop?.src === mainImage.src ? imageBackdrop.color : null;
   const configurations = [...new Set(product.variants.map(configurationLabel))];
@@ -3852,18 +3915,26 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
                   aria-label={`View product image ${index + 1}`}
                   key={item.id}
                 >
-                  <img {...pdpGalleryImage(item, 240, trimGallery)} alt={item.alt} />
+                  <img
+                    {...pdpGalleryImage(item, 240)}
+                    alt={item.alt}
+                    onLoad={(event) => {
+                      const ratio = pdpImageRatio(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight);
+                      if (ratio && thumbnailRatios[item.id] !== ratio) setThumbnailRatios((current) => ({ ...current, [item.id]: ratio }));
+                    }}
+                  />
                 </button>
               ))}
             </div>
             <div
-              className={`pdp-main-image${mainImageRatio ? " has-image-ratio" : ""}${mainImageBackdrop ? " has-image-backdrop" : ""}${pdpBackground.style ? " has-global-background" : ""}`}
+              className={`pdp-main-image${mainImageRatio ? " has-image-ratio" : ""}${mainImageBackdrop ? " has-image-backdrop" : ""}${pdpBackground.style ? " has-global-background" : ""}${mainImageInset < 1 ? " has-product-inset" : ""}`}
               // The image's padding (2.5% of the width on every side) is added to the box height, so the image itself
               // fills the full width whenever the height limit allows.
               style={
-                mainImageRatio || mainImageBackdrop || pdpBackground.style
+                mainImageRatio || mainImageBackdrop || pdpBackground.style || mainImageInset < 1
                   ? ({
                       ...(mainImageRatio ? { "--pdp-image-ratio": (1 / (1 / mainImageRatio + 0.05)).toFixed(4) } : {}),
+                      ...(mainImageInset < 1 ? { "--pdp-product-scale": String(mainImageInset) } : {}),
                       ...(mainImageBackdrop ? { "--pdp-image-backdrop": mainImageBackdrop } : {}),
                       ...(pdpBackground.style ?? {}),
                     } as React.CSSProperties)
@@ -4078,23 +4149,8 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
           <section className="pdp-specifications">
             <div className="container">
               <div className="pdp-section-heading"><span className="eyebrow">SPECIFICATIONS</span><h2>{gadgetParagraphs ? "Technical Specifications" : "Everything you need to know."}</h2></div>
-              {(() => {
-                const groups = groupSpecifications(product.specifications);
-                return (
-                  <div className="pdp-spec-groups" style={{ "--spec-cols-3": Math.min(groups.length, 3), "--spec-cols-2": Math.min(groups.length, 2) } as CSSProperties}>
-                    {groups.map((group) => (
-                      <section className="pdp-spec-group" key={group.title}>
-                        <h3>{group.title}</h3>
-                        <dl>
-                          {group.rows.map((spec) => (
-                            <div key={`${group.title}-${spec.label}`}><dt>{spec.label}</dt><dd>{spec.value}</dd></div>
-                          ))}
-                        </dl>
-                      </section>
-                    ))}
-                  </div>
-                );
-              })()}
+              {/* Mobile phones: compact key specifications (Display, Battery, Camera) with Show more / Show less. */}
+              <PdpSpecifications specifications={product.specifications} compact={isPhonePdp} />
             </div>
           </section>
         )}
