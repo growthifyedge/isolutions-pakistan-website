@@ -8,9 +8,8 @@ import {
   buildGadgetWorkbook,
   compareGadgetSheet,
   gadgetSheetFingerprint,
-  gadgetTableFromWorksheet,
   parseGadgetList,
-  readGadgetSheet,
+  readGadgetFile,
   type GadgetComparison,
   type GadgetEntry,
   type GadgetSheetRow,
@@ -19,6 +18,7 @@ import {
 import { gadgetUpdateBlocker, runGadgetUpdate, type GadgetUpdateResult } from "../lib/gadgetStockApply";
 import { gadgetUpdateDbDeps, loadGadgetCatalog } from "../lib/gadgetStockUpdateDb";
 import { installUnloadGuard } from "../lib/unloadGuard";
+import { GadgetListFormatter } from "./GadgetListFormatter";
 
 // Admin "Gadgets Stock Update": Paste List -> Generate Excel -> fill Description -> Upload Excel -> Check Changes -> Update Website.
 // Generate Excel and Check Changes only read. Update Website writes gadget by gadget and only after a fresh check of exactly
@@ -126,11 +126,8 @@ export function GadgetStockUpdate() {
     setBusy(true);
     try {
       const ExcelJS = await loadExcelJs();
-      const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(await file.arrayBuffer());
-      const sheet = workbook.worksheets[0];
-      if (!sheet) throw new Error("The workbook has no sheets.");
-      const read = readGadgetSheet(gadgetTableFromWorksheet(sheet));
+      // ExcelJS first; a ChatGPT-saved workbook ExcelJS cannot open falls back to the shared cell-text reader.
+      const read = await readGadgetFile(ExcelJS, await file.arrayBuffer());
       if (!read.ok) setError(read.error);
       else setRows(read.rows);
     } catch (problem) {
@@ -235,6 +232,8 @@ export function GadgetStockUpdate() {
         <strong>{supabaseEnvironmentLabel.toUpperCase()}</strong>
         <small>Generate Excel and Check Changes only read the website.</small>
       </div>
+
+      <GadgetListFormatter />
 
       <div className="stock-step" aria-labelledby="gadget-step-1">
         <h3 id="gadget-step-1"><span className="stock-step-number">1</span> Paste List</h3>

@@ -170,8 +170,50 @@ export function buildGadgetWorkbook(ExcelJS: ExcelJsModule, lines: readonly Gadg
     "A blank Description keeps the description that is already on the website.",
     "Do not change the column headings. You may change a price. Then upload this file on the Gadgets Stock Update page.",
   ].forEach((text) => help.addRow([text]));
+  // Ready-to-use ChatGPT prompt (2026-11-24): upload this file to ChatGPT and it fills the blank Descriptions.
+  // Added AFTER the Gadgets sheet: the upload reads the first sheet only, so import is unchanged.
+  const gpt = workbook.addWorksheet(GADGET_GPT_SHEET);
+  gpt.getColumn(1).width = 120;
+  GADGET_GPT_PROMPT.forEach((text, index) => {
+    const row = gpt.addRow([text]);
+    row.getCell(1).alignment = { wrapText: true, vertical: "top" };
+    if (index === 0 || /^[A-Z][^.]*:$/.test(text)) row.font = { bold: true };
+  });
   return workbook;
 }
+
+export const GADGET_GPT_SHEET = "GPT Instructions";
+/** One prompt line per row. Lines ending in ":" are section headings. */
+export const GADGET_GPT_PROMPT: readonly string[] = [
+  "TASK FOR CHATGPT — complete this Excel file and return it. Do not ask questions; follow these rules exactly.",
+  "",
+  "Goal:",
+  "Fill every BLANK cell in column C (Description) of the \"Gadgets\" sheet with an accurate, professional, customer-friendly product description for the product named in column A of the same row.",
+  "",
+  "Research rules:",
+  "1. Research each product (column A, exactly as written) using reliable sources: the manufacturer's official website or product page first, then well-known retailers and trusted review sites.",
+  "2. Use only facts confirmed for that exact product (same brand, model and variant). Never invent or guess features, specifications, materials, sizes, capacities, compatibility, certifications or claims.",
+  "3. If a detail cannot be confirmed, leave it out. If the product itself cannot be identified reliably, leave its Description cell blank.",
+  "4. For an unbranded or generic product, describe only what the product name clearly states and the product's basic, commonly known use — no specific numbers or claims you cannot confirm.",
+  "",
+  "Writing rules:",
+  "5. English, plain text only: no HTML, Markdown, emojis, links or hashtags.",
+  "6. Structure: one short opening paragraph (2–3 sentences) saying what the product is and who it is for, then a blank line, then up to 6 key features, one per line, each starting with \"• \".",
+  "7. Professional, friendly and clear. No exaggeration (no \"best\", \"No. 1\", \"100% guaranteed\"), no comparisons with other brands or shops.",
+  "8. Do not mention price, discounts, stock, delivery, warranty, the seller or any shop name.",
+  "9. Keep each description under 1,200 characters. Use line breaks inside the cell (not new rows).",
+  "",
+  "Excel rules (the file is imported automatically — any structure change makes the import fail):",
+  "10. Only write into blank cells of column C on the \"Gadgets\" sheet. Never change a Description that already has text.",
+  "11. Do not change column A (Product Name) or column B (Price) in any row, not even spelling, spacing or number format.",
+  "12. Keep row 1 headings exactly: Product Name | Price | Description. Do not add, remove, rename, reorder or merge columns, rows or sheets.",
+  "13. Keep \"Gadgets\" as the FIRST sheet. Keep the \"How to fill\" and \"GPT Instructions\" sheets as they are.",
+  "14. Do not add notes, comments, colours, formulas or extra text anywhere in the file.",
+  "",
+  "Final output:",
+  "15. Return the completed file as a downloadable .xlsx with the same file name, ready to upload on the Gadgets Stock Update page.",
+  "16. In your chat reply (not in the file), list only the products you left blank and why, in one short line each. Nothing else is needed.",
+];
 
 /** Reads a worksheet into rows of cell texts (one string per cell; line breaks inside a cell are kept). */
 export function gadgetTableFromWorksheet(sheet: Worksheet): string[][] {
@@ -197,6 +239,30 @@ export type GadgetSheetRow = {
 };
 
 export type GadgetSheetRead = { ok: true; rows: GadgetSheetRow[] } | { ok: false; error: string };
+
+/**
+ * 4. Upload Excel: the FIRST sheet, validated by readGadgetSheet. ExcelJS reads the file as before; a valid workbook ExcelJS
+ * cannot open (ChatGPT saves with "x:"-prefixed XML: "Cannot read properties of undefined (reading 'sheets')") is read
+ * with the same minimal cell-text reader the Single Product Spec Upload uses. Same sheet rule, same validation.
+ */
+export async function readGadgetFile(ExcelJS: ExcelJsModule, bytes: ArrayBuffer | Uint8Array): Promise<GadgetSheetRead> {
+  const workbook = new ExcelJS.Workbook();
+  try {
+    await workbook.xlsx.load(bytes as ArrayBuffer);
+  } catch {
+    try {
+      const { readXlsxTables } = await import("./xlsxTableReader.ts");
+      const first = (await readXlsxTables(bytes))[0];
+      if (!first) return { ok: false, error: "The workbook has no sheets." };
+      return readGadgetSheet(first.rows);
+    } catch {
+      return { ok: false, error: "The file could not be read as an .xlsx workbook." };
+    }
+  }
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return { ok: false, error: "The workbook has no sheets." };
+  return readGadgetSheet(gadgetTableFromWorksheet(sheet));
+}
 
 export function readGadgetSheet(table: string[][]): GadgetSheetRead {
   const header = (table[0] ?? []).map((cell) => cell.trim().toLowerCase());
