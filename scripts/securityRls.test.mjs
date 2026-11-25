@@ -145,6 +145,9 @@ test("SECURITY DEFINER RPCs callable by visitors are exactly the reviewed set", 
       // Promotional Popup (202611230001, prepared): read-only probe; answers only "installed" and whether the caller
       // is the Owner. Writes reuse the Owner-only site-content RPCs above. Covered by scripts/promoPopup.test.mjs.
       "promo_popup_installed",
+      // Bundle Offers Editor (202611250002, prepared): same read-only probe shape as promo_popup_installed; writes reuse
+      // the Owner-only site-content RPCs above. Covered by scripts/bundleOffers.test.mjs.
+      "bundle_offers_installed",
       // Variant editor (202611240001): refuses anyone but the active Owner (variant_editor_owner_required); all or
       // nothing, stale / duplicate / unpublishable changes refused, never deletes. Its field helper
       // variant_editor_field is not executable by anon or authenticated. Covered by scripts/productVariantEditorRpc.test.mjs.

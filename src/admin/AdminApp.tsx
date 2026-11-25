@@ -26,6 +26,7 @@ import {
   ShoppingBag,
   SlidersHorizontal,
   Sparkles,
+  GalleryHorizontal,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -62,6 +63,8 @@ import { AddProduct } from "./AddProduct";
 import { CatalogReadiness } from "./CatalogReadiness";
 import { ContactEnquiries } from "./ContactEnquiries";
 import { BundleManager } from "./BundleManager";
+import { BannerManager } from "./BannerManager";
+import { BundleOffersEditor } from "./BundleOffersEditor";
 import { AdminOrders } from "./AdminOrders";
 import { AdminPromotions } from "./AdminPromotions";
 import { PromoPopupSetting } from "./PromoPopupSetting";
@@ -97,6 +100,11 @@ const navChildren: Readonly<Record<string, ReadonlyArray<NavItem>>> = {
     ["Spec Upload", "/admin/spec-upload", FileSearch],
     ["Descriptions", "/admin/description-upload", FileText],
     ["Subcategories", "/admin/subcategory-upload", FolderTree],
+  ],
+  Homepage: [
+    ["Homepage", "/admin/homepage", Sparkles],
+    ["Homepage Banners", "/admin/homepage-banners", GalleryHorizontal],
+    ["Bundle Offers", "/admin/bundle-offers", GalleryHorizontal],
   ],
 };
 // What the Owner sees for a tool whose page section has a shorter name.
@@ -812,6 +820,18 @@ export function AdminApp() {
     page = (
       <AdminLayout section="Homepage">
         <BundleManager />
+      </AdminLayout>
+    );
+  else if (path === "/admin/homepage-banners")
+    page = (
+      <AdminLayout section="Homepage Banners">
+        <BannerManager />
+      </AdminLayout>
+    );
+  else if (path === "/admin/bundle-offers")
+    page = (
+      <AdminLayout section="Bundle Offers">
+        <BundleOffersEditor />
       </AdminLayout>
     );
   else if (path === "/admin/orders")

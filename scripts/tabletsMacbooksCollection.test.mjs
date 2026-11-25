@@ -47,7 +47,7 @@ test("iPad and Android Tablets are unchanged", () => {
 
 test("Storefront menu: Tablets & MacBooks with iPad, Android Tablets and MacBooks; no Windows laptop brands", () => {
   const app = readFileSync(new URL("../src/StorefrontApp.tsx", import.meta.url), "utf8");
-  assert.match(app, /label="Tablets & MacBooks"/);
+  assert.match(app, /label="Tablets, MacBooks & Gaming"/);
   assert.match(app, /heading: "MacBooks", href: "\/collections\/laptops-tablets\?type=macbooks"/);
   assert.equal(/Laptops & Tablets|laptops &amp; tablets/i.test(app), false);
   assert.equal(/\{ label: "(?:Acer|HP|Dell)", slug:/.test(app), false);

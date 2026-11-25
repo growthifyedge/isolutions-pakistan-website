@@ -416,6 +416,18 @@ export function resolveCollection(
         available: Boolean(laptopCategory && apple && (!brandParam || brand === apple)),
       };
     }
+    // Gaming (menu "Tablets, MacBooks & Gaming"): no gaming category exists, so these match published product titles.
+    const gaming: Record<string, string> = { playstation: "PlayStation", xbox: "Xbox" };
+    if (gaming[type] && !brandParam) {
+      return {
+        ...common,
+        breadcrumbs: [{ label: "Home", href: "/" }, { label: "Tablets, MacBooks & Gaming" }],
+        title: gaming[type],
+        description: `Explore published ${gaming[type]} products.`,
+        filters: { categories: [], brands: [], search: gaming[type] },
+        available: true,
+      };
+    }
     return null;
   }
   if (collectionSlug === "macbook" && !requestedBrand) {

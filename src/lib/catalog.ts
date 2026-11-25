@@ -149,6 +149,21 @@ export async function fetchFrequentlyBoughtTogether(productId: string, limit = 4
   return (data ?? []) as FrequentlyBoughtTogetherProduct[];
 }
 
+/**
+ * Product-level Fast Delivery badge flag (products.is_fast_delivery, migration 202611250001).
+ * Any failure — including the column not existing before that migration is applied — means OFF.
+ */
+export async function fetchProductFastDelivery(productId: string) {
+  if (!supabase) return false;
+  const { data, error } = await supabase
+    .from("products")
+    .select("is_fast_delivery")
+    .eq("id", productId)
+    .maybeSingle();
+  if (error || !data) return false;
+  return (data as { is_fast_delivery?: unknown }).is_fast_delivery === true;
+}
+
 export function validCompareAt(variant: CatalogVariant) {
   return variant.compareAtPriceMinor !== null &&
     variant.compareAtPriceMinor > variant.priceMinor

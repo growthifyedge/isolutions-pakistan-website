@@ -2855,3 +2855,13 @@ p.bulk-images-error { padding-left: 14px; }
 .spec-upload-product input, .spec-upload-product select { height: 38px; padding: 0 10px; border: 1px solid var(--a-line); background: #fff; font: inherit; font-size: 13px; }
 .spec-upload-product input { flex: 0 1 240px; min-width: 0; }
 .spec-upload-product select { flex: 1 1 320px; min-width: 0; max-width: 100%; }
+
+/* Website Editor — Bundle Offers (reuses the Banner Manager layout; preview mirrors the homepage section shape). */
+.bundle-offer-images { grid-template-columns:minmax(0,1fr); }
+.bundle-offers-editor .bundle-offer-images .banner-thumb { height:170px; }
+.bundle-offers-preview { display:grid; grid-template-columns:minmax(0,55fr) minmax(0,45fr); gap:12px; align-items:start; }
+.bundle-offers-preview-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.bundle-offers-preview-grid a { display:block; aspect-ratio:4/3; overflow:hidden; border:1px solid #dde2de; border-radius:10px; background:#fff; }
+.bundle-offers-preview-grid img { width:100%; height:100%; display:block; object-fit:cover; }
+.bundle-offers-preview-promo { display:block; aspect-ratio:1315/1196; overflow:hidden; border:1px solid #dde2de; border-radius:10px; background:#f7f8f7; }
+.bundle-offers-preview-promo img { width:100%; height:100%; display:block; object-fit:contain; }

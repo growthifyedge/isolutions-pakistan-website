@@ -7417,6 +7417,95 @@ body:has(.pdp-page) header.storefront-navbar {
   .home-bundles-promo { grid-column:2; grid-row:2; }
 }
 
+/* Product-level Fast Delivery badge (fixed design/text): right side of the PDP price row. */
+.pdp-price .pdp-fast-delivery {
+  order:4;
+  display:inline-flex;
+  align-items:stretch;
+  flex:0 0 auto;
+  align-self:center;
+  margin-left:auto;
+  overflow:hidden;
+  border-radius:4px;
+  font:italic 800 11px/1 Manrope,sans-serif;
+  letter-spacing:0;
+  text-transform:none;
+  white-space:nowrap;
+  box-shadow:0 1px 2px rgba(11,27,43,.12);
+}
+.pdp-price .pdp-fast-delivery i {
+  display:inline-flex;
+  align-items:center;
+  width:auto;
+  padding:6px 9px;
+  font:inherit;
+  letter-spacing:inherit;
+  text-transform:none;
+}
+.pdp-price .pdp-fast-delivery i:first-child {
+  padding-right:12px;
+  background:#E5007E;
+  color:#FFFFFF;
+  clip-path:polygon(0 0,100% 0,calc(100% - 6px) 100%,0 100%);
+}
+.pdp-price .pdp-fast-delivery i:last-child {
+  margin-left:-6px;
+  padding-left:12px;
+  background:#FFE100;
+  color:#1B1B2F;
+  clip-path:polygon(6px 0,100% 0,100% 100%,0 100%);
+}
+@media (max-width:600px) {
+  .pdp-price .pdp-fast-delivery { font-size:10px; }
+  .pdp-price .pdp-fast-delivery i { padding:5px 8px; }
+  .pdp-price .pdp-fast-delivery i:first-child { padding-right:11px; }
+  .pdp-price .pdp-fast-delivery i:last-child { padding-left:11px; }
+}
+
+/* Product card hover image: the existing secondary image fades over the primary on mouse hover (pointer devices only). */
+.product-image > img.product-image-secondary { position:absolute; inset:0; width:100%; height:100%; opacity:0; pointer-events:none; }
+@media (hover:hover) {
+  .product-image.has-secondary > img:not(.product-image-secondary) { transition:opacity .35s ease, transform .4s ease; }
+  .product-image.has-secondary > img.product-image-secondary { transition:opacity .35s ease, transform .4s ease; }
+  .product-card:hover .product-image.has-secondary > img:not(.product-image-secondary) { opacity:0; }
+  .product-card:hover .product-image.has-secondary > img.product-image-secondary { opacity:1; }
+}
+
+/* Product card model name (Homepage, Shop, Category): Dark Navy Poppins SemiBold; underline on mouse hover only.
+   Font size / line height stay with the existing responsive rules. */
+.product-card .product-copy h3,
+.product-card .product-copy h3 a,
+.home-flash-card .home-flash-copy > strong,
+.home-featured-card .home-featured-copy > strong,
+.home-accessory-card .home-accessory-copy .home-accessory-title,
+.home-accessory-card:hover .home-accessory-copy .home-accessory-title,
+.home-accessory-card:focus-within .home-accessory-copy .home-accessory-title {
+  color:#003459;
+  font-family:Poppins,Manrope,sans-serif;
+  font-weight:600;
+  text-decoration:none;
+}
+.product-card .product-copy h3 a:hover,
+.home-flash-card .home-flash-copy:hover > strong,
+.home-featured-card .home-featured-copy:hover > strong,
+.home-accessory-card .home-accessory-copy:hover .home-accessory-title {
+  text-decoration:underline;
+  text-decoration-thickness:1px;
+  text-underline-offset:3px;
+}
+
+/* Mobile drawer: plain group label inside a category (Tablets, MacBooks & Gaming -> Gaming). */
+.drawer .drawer-collection-nav .drawer-submenu-inner .drawer-submenu-heading {
+  display:block;
+  margin-top:6px;
+  padding:10px 5px 4px;
+  border-top:1px solid rgba(16,26,23,.06);
+  color:#111614;
+  font:700 11px/1.3 Manrope,sans-serif;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+
 /* PDP main image auto-fit (2026-11-21): the image box takes the image's own shape (--pdp-image-ratio, set from the image
    size), so portrait images are shown taller and landscape images without empty bands. Width stays the gallery width;
    height is limited so the purchase panel stays near. object-fit stays contain: nothing is stretched or cropped.

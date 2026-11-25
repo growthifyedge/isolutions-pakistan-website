@@ -10,7 +10,9 @@ const carousel = storefront.slice(storefront.indexOf("function HomeHeroCarousel(
 const heroSource = carousel.slice(0, carousel.indexOf("\n}\n") + 2);
 
 const referenced = (pattern) => [...storefront.matchAll(pattern)].map((match) => match[1]);
-const banners = referenced(/(?:desktop|mobile)Src: "(\/assets\/banners\/[^"]+)"/g);
+// The built-in banners (default + fallback of the Website Editor) live in src/lib/homepageBanners.ts.
+const bannerLib = readText("../src/lib/homepageBanners.ts");
+const banners = [...bannerLib.matchAll(/"(\/assets\/banners\/[^"]+)"/g)].map((match) => match[1]);
 const categories = referenced(/image: "(\/assets\/categories\/[^"]+)"/g);
 const logos = referenced(/className="storefront-brand-logo" src="([^"]+)"/g);
 

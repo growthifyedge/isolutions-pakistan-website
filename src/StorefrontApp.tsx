@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Lottie } from "lottie-react";
 import {
   ArrowRight,
@@ -49,6 +49,7 @@ import {
   fetchPublicCatalog,
   fetchPublicTaxonomy,
   fetchFrequentlyBoughtTogether,
+  fetchProductFastDelivery,
   formatPkrMinor,
   hasVariablePrice,
   primaryMedia,
@@ -67,6 +68,19 @@ import { cloudinaryDeliveryUrl } from "./lib/cloudinary";
 import { pdpProductInsetScale, type RgbaSample } from "./lib/pdpProductInset";
 import { supabase } from "./lib/supabase";
 import { fetchHomepageBundles, type HomepageBundle } from "./lib/bundles";
+import { BUNDLE_OFFERS_CACHE_KEY, parseBundleOffers, resolveBundleOffers, type BundleOffersContent } from "./lib/bundleOffers";
+import { fetchPublishedBundleOffers } from "./lib/bundleOffersDb";
+import {
+  BANNER_CACHE_STORAGE_KEY,
+  BANNER_PREVIEW_STORAGE_KEY,
+  DEFAULT_HOMEPAGE_BANNERS,
+  bannersToSlides,
+  localPreviewKeys,
+  parseHomepageContent,
+  resolveLocalPreviewImages,
+  slidesSignature,
+  type HomeHeroSlide,
+} from "./lib/homepageBanners";
 import { loadPreviewImageUrls } from "./lib/bannerPreviewStore";
 import {
   PDP_BACKGROUND_CACHE_STORAGE_KEY,
@@ -78,8 +92,7 @@ import {
   type PdpGalleryBackground,
 } from "./lib/pdpGalleryBackground";
 import { fetchPublishedPdpBackground } from "./lib/pdpGalleryBackgroundDb";
-// Rollout 2026-11-21: Global PDP Background only (Homepage Banner Editor HOLD — homepage carousel unchanged).
-const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME as string | undefined;
+import { fetchPublishedHomepageBanners } from "./lib/homepageBannersDb";
 import {
   addStorefrontCartItem,
   clearStorefrontCart,
@@ -266,7 +279,8 @@ type NavbarMegaMenuProps = {
   links?: Array<{ label: string; href: string }>;
   groups?: Array<{
     heading: string;
-    href: string;
+    /** Omitted = the heading is a plain label (e.g. Gaming, which has no page of its own). */
+    href?: string;
     links: Array<{ label: string; href: string }>;
   }>;
   promoImage?: string;
@@ -319,7 +333,7 @@ function NavbarMegaMenu({
               >
                 {groups.map((group) => (
                   <section key={group.heading}>
-                    <h3><a href={group.href}>{group.heading}</a></h3>
+                    <h3>{group.href ? <a href={group.href}>{group.heading}</a> : group.heading}</h3>
                     {group.links.map((link) => <a key={link.href} href={link.href}>{link.label}</a>)}
                   </section>
                 ))}
@@ -922,9 +936,9 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
             showHeading={false}
           />
           <NavbarMegaMenu
-            label="Tablets & MacBooks"
+            label="Tablets, MacBooks & Gaming"
             href="/collections/laptops-tablets"
-            heading="Tablets & MacBooks"
+            heading="Tablets, MacBooks & Gaming"
             groups={[
               { heading: "iPad", href: "/collections/laptops-tablets?type=ipad", links: canonicalMenuLinks("ipad", [
                 { label: "Apple", slug: "apple", aliases: ["apple", "iphone"] },
@@ -936,13 +950,17 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
               { heading: "MacBooks", href: "/collections/laptops-tablets?type=macbooks", links: canonicalMenuLinks("macbooks", [
                 { label: "Apple", slug: "apple", aliases: ["apple", "iphone"] },
               ]) },
+              // Gaming (frontend-only): title-search collections, no category or database change.
+              { heading: "Gaming", links: [
+                { label: "PlayStation", href: "/collections/laptops-tablets?type=playstation" },
+                { label: "Xbox", href: "/collections/laptops-tablets?type=xbox" },
+              ] },
             ]}
             promoImage="/assets/studio-laptop.jpg"
             promoFit="contain"
             promoWidth={300}
             promoHeight={200}
             showHeading={false}
-            groupColumns={3}
           />
           <NavbarMegaMenu
             label="Home Gadgets"
@@ -1073,11 +1091,14 @@ function Header({ taxonomy }: { taxonomy: Taxonomy }) {
                   <a href="/collections/mobile-accessories?type=audio">Audio</a>
                   <a href="/collections/mobile-accessories?type=pc-gadgets">PC Gadgets</a>
                 </DrawerCategory>
-                <DrawerCategory label="Tablets &amp; MacBooks" icon={Laptop}>
+                <DrawerCategory label="Tablets, MacBooks &amp; Gaming" icon={Laptop}>
                   <a href="/collections/laptops-tablets">All tablets &amp; MacBooks</a>
                   <a href="/collections/laptops-tablets?type=ipad">iPad</a>
                   <a href="/collections/laptops-tablets?type=android-tablets">Android Tablets</a>
                   <a href="/collections/laptops-tablets?type=macbooks">MacBooks</a>
+                  <span className="drawer-submenu-heading">Gaming</span>
+                  <a href="/collections/laptops-tablets?type=playstation">PlayStation</a>
+                  <a href="/collections/laptops-tablets?type=xbox">Xbox</a>
                 </DrawerCategory>
                 <DrawerCategory label="Home Gadgets" icon={House}>
                   <a href="/collections/home-gadgets">All home gadgets</a>
@@ -1331,6 +1352,10 @@ function ProductCardActions({ product, placement }: { product: CatalogProduct; p
 
 function ProductCard({ product, categoryLabel, cartActions = false }: { product: CatalogProduct; categoryLabel?: string; cartActions?: boolean }) {
   const media = primaryMedia(product);
+  // Hover image: the product's next existing image (same choice as the homepage cards). None = primary stays as is.
+  const secondaryMedia = media
+    ? product.media.find((item) => item.id !== media.id && Boolean(item.publicId || item.url)) ?? null
+    : null;
   const pricedVariant = [...product.variants]
     .sort((left, right) => left.priceMinor - right.priceMinor)[0];
   const price = pricedVariant?.priceMinor ?? productPrice(product);
@@ -1350,11 +1375,20 @@ function ProductCard({ product, categoryLabel, cartActions = false }: { product:
       ? `Sale · ${discountPercents[0]}%`
       : "Sale";
   const image = (
-    <a className="product-image" href={`/product/${product.slug}`}>
+    <a className={`product-image${secondaryMedia ? " has-secondary" : ""}`} href={`/product/${product.slug}`}>
       {media ? (
         <img
           src={cloudinaryDeliveryUrl(media.publicId, 800, { trim: true }) || media.url}
           alt={media.alt}
+        />
+      ) : null}
+      {secondaryMedia ? (
+        <img
+          className="product-image-secondary"
+          src={cloudinaryDeliveryUrl(secondaryMedia.publicId, 800, { trim: true }) || secondaryMedia.url}
+          alt=""
+          aria-hidden="true"
+          loading="lazy"
         />
       ) : null}
       {saleLabel && <span className="home-featured-sale product-card-sale">{saleLabel}</span>}
@@ -1399,59 +1433,137 @@ function ProductCard({ product, categoryLabel, cartActions = false }: { product:
   );
 }
 
-type HomeHeroSlide = {
-  desktopSrc: string;
-  mobileSrc?: string;
-  alt: string;
-};
+// Homepage banners come from the Website Editor (published content only). The built-in 7 banners in
+// src/lib/homepageBanners.ts stay the default and the fallback: nothing published, a failed read or unusable data
+// all show them, exactly as before.
+const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME as string | undefined;
+const builtInHomeHeroSlides = bannersToSlides(DEFAULT_HOMEPAGE_BANNERS);
+const PUBLISHED_BANNERS_WAIT_MS = 1500;
 
-const homeHeroSlides: readonly HomeHeroSlide[] = [
-  {
-    desktopSrc: "/assets/banners/banner-apple-01-desktop.webp",
-    mobileSrc: "/assets/banners/banner-apple-01-mobile.webp",
-    alt: "Apple products banner",
-  },
-  {
-    desktopSrc: "/assets/banners/banner-redmi-note-15-pro-desktop.webp",
-    mobileSrc: "/assets/banners/banner-redmi-note-15-pro-mobile.webp",
-    alt: "Redmi Note 15 Pro banner",
-  },
-  {
-    desktopSrc: "/assets/banners/banner-tecno-camon-50-pro-desktop-v2.webp",
-    mobileSrc: "/assets/banners/banner-tecno-camon-50-pro-mobile.webp",
-    alt: "Tecno Camon 50 Pro banner",
-  },
-  {
-    desktopSrc: "/assets/banners/banner-samsung-galaxy-s26-ultra-desktop.webp",
-    mobileSrc: "/assets/banners/banner-samsung-galaxy-s26-ultra-mobile.webp",
-    alt: "Samsung Galaxy S26 Ultra banner",
-  },
-  {
-    desktopSrc: "/assets/banners/banner-xiaomi-tv-a-series-2026-desktop.webp",
-    mobileSrc: "/assets/banners/banner-xiaomi-tv-a-series-2026-mobile.webp",
-    alt: "Xiaomi TV A Series 2026 banner",
-  },
-  {
-    desktopSrc: "/assets/banners/banner-xiaomi-eco-accessories-desktop.webp",
-    mobileSrc: "/assets/banners/banner-xiaomi-eco-accessories-mobile.webp",
-    alt: "Xiaomi ecosystem accessories banner",
-  },
-  {
-    desktopSrc: "/assets/banners/banner-iphone-18-pro-max-desktop.webp",
-    mobileSrc: "/assets/banners/banner-iphone-18-pro-max-mobile.webp",
-    alt: "iPhone 18 Pro Max banner",
-  },
-] as const;
+function readStoredSlides(key: string): HomeHeroSlide[] | null {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as unknown;
+    if (value && typeof value === "object" && (value as { default?: unknown }).default === true) return builtInHomeHeroSlides;
+    const banners = parseHomepageContent(value);
+    return banners ? bannersToSlides(banners, CLOUDINARY_CLOUD_NAME) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The Banner Editor's unsaved edits from this browser (local images resolved from IndexedDB), else the built-in banners. */
+async function readPreviewSlides(): Promise<HomeHeroSlide[]> {
+  try {
+    const raw = window.localStorage.getItem(BANNER_PREVIEW_STORAGE_KEY);
+    const banners = raw ? parseHomepageContent(JSON.parse(raw), { allowLocalPreview: true }) : null;
+    if (!banners) return builtInHomeHeroSlides;
+    const keys = localPreviewKeys(banners);
+    const resolved = keys.length ? resolveLocalPreviewImages(banners, await loadPreviewImageUrls(keys)) : banners;
+    const slides = bannersToSlides(resolved, CLOUDINARY_CLOUD_NAME);
+    return slides.length ? slides : builtInHomeHeroSlides;
+  } catch {
+    return builtInHomeHeroSlides;
+  }
+}
+
+/** Shown only in preview mode (never to visitors): makes clear nothing is published, and leaves preview mode. */
+function BannerPreviewLabel() {
+  return (
+    <div className="banner-preview-label" role="status">
+      <strong>Localhost preview</strong>
+      <span>Banner edits from this browser only — not published. The live website is unchanged.</span>
+      <a href="/">Exit Preview</a>
+    </div>
+  );
+}
+
+function writeBannerCache(value: unknown) {
+  try {
+    window.localStorage.setItem(BANNER_CACHE_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // Storage blocked or full: the next visit simply waits for the published read again.
+  }
+}
+
+/** Chooses the slide list (published, cached or built-in), then renders the unchanged carousel. */
+function HomeHeroBanners() {
+  // ?bannerPreview=1 is the Admin Banner Manager's live preview frame: it shows the editor's unsaved banners from this
+  // browser's own storage, never anything from the database, and never touches the visitor cache.
+  const [isPreview] = useState(() => new URLSearchParams(window.location.search).get("bannerPreview") === "1");
+  // The editor's own preview frame (frame=1) has no label; the full-page preview tab always shows it.
+  const [isPreviewFrame] = useState(() => new URLSearchParams(window.location.search).get("frame") === "1");
+  const [slides, setSlides] = useState<readonly HomeHeroSlide[] | null>(() =>
+    isPreview ? null : readStoredSlides(BANNER_CACHE_STORAGE_KEY),
+  );
+
+  useEffect(() => {
+    if (isPreview) {
+      let current = true;
+      const refresh = () => {
+        void readPreviewSlides().then((next) => {
+          if (current) setSlides((shown) => (shown && slidesSignature(shown) === slidesSignature(next) ? shown : next));
+        });
+      };
+      refresh();
+      const onStorage = (event: StorageEvent) => {
+        if (event.key === BANNER_PREVIEW_STORAGE_KEY) refresh();
+      };
+      window.addEventListener("storage", onStorage);
+      return () => {
+        current = false;
+        window.removeEventListener("storage", onStorage);
+      };
+    }
+    let active = true;
+    const fallback = () => {
+      if (active) setSlides((current) => current ?? builtInHomeHeroSlides);
+    };
+    const timer = window.setTimeout(fallback, PUBLISHED_BANNERS_WAIT_MS);
+    fetchPublishedHomepageBanners()
+      .then((banners) => {
+        writeBannerCache(banners ? { banners } : { default: true });
+        if (!active) return;
+        const next = banners ? bannersToSlides(banners, CLOUDINARY_CLOUD_NAME) : builtInHomeHeroSlides;
+        setSlides((current) => (current && slidesSignature(current) === slidesSignature(next) ? current : next));
+      })
+      .catch(fallback)
+      .finally(() => window.clearTimeout(timer));
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [isPreview]);
+
+  // Until the first answer (at most 1.5 s on a first visit) the carousel frame keeps its space, so nothing shifts.
+  const label = isPreview && !isPreviewFrame ? <BannerPreviewLabel /> : null;
+  if (!slides)
+    return (
+      <>
+        {label}
+        <section className="home-banner-carousel" aria-hidden="true"><div className="home-banner-track" /></section>
+      </>
+    );
+  return (
+    <>
+      {label}
+      <HomeHeroCarousel key={slidesSignature(slides)} slides={slides} />
+    </>
+  );
+}
 
 const HOME_BANNER_MOBILE_QUERY = "(max-width: 600px)";
 
-function HomeHeroCarousel() {
+function HomeHeroCarousel({ slides: homeHeroSlides }: { slides: readonly HomeHeroSlide[] }) {
   // activeSlide is the banner on screen; targetSlide is where navigation wants to go. The two differ only while the
   // target banner is still loading, so the visible banner stays until its replacement is ready (never a blank slide).
   const [activeSlide, setActiveSlide] = useState(0);
   const [targetSlide, setTargetSlide] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const pointerStartX = useRef<number | null>(null);
+  // A swipe must not also follow a banner link.
+  const swiped = useRef(false);
   // One banner variant per device: choosing the source here (rather than <picture>/<source>) keeps the browser from
   // also fetching the desktop file on phones.
   const [isMobileBanner, setIsMobileBanner] = useState(() => window.matchMedia(HOME_BANNER_MOBILE_QUERY).matches);
@@ -1525,6 +1637,7 @@ function HomeHeroCarousel() {
     if (pointerStartX.current === null) return;
     const distance = clientX - pointerStartX.current;
     pointerStartX.current = null;
+    swiped.current = Math.abs(distance) >= 10;
     if (Math.abs(distance) < 45) return;
     if (distance > 0) showPrevious();
     else showNext();
@@ -1544,10 +1657,32 @@ function HomeHeroCarousel() {
       onPointerDown={(event) => { pointerStartX.current = event.clientX; }}
       onPointerUp={(event) => finishSwipe(event.clientX)}
       onPointerCancel={() => { pointerStartX.current = null; }}
+      onClickCapture={(event) => {
+        if (swiped.current) event.preventDefault();
+        swiped.current = false;
+      }}
     >
       <div className="home-banner-track">
         {homeHeroSlides.map((slide, index) => {
           const source = slideSource(index);
+          const picture = (
+            <picture>
+              {requestedSlides.has(index) && !failedSources.has(source) && (
+                <img
+                  // No key: on a desktop/mobile switch the browser keeps painting the old file until the new one loads.
+                  src={source}
+                  alt={index === activeSlide ? slide.alt : ""}
+                  fetchPriority={index === 0 ? "high" : "auto"}
+                  onLoad={(event) => {
+                    // Decoded before it counts as ready, so the transition never shows a half-painted banner.
+                    event.currentTarget.decode().catch(() => undefined).then(() => addSource(setReadySources, source));
+                  }}
+                  onError={() => addSource(setFailedSources, source)}
+                  draggable="false"
+                />
+              )}
+            </picture>
+          );
           return (
             <div
               className={`home-banner-slide${index === activeSlide ? " is-active" : ""}`}
@@ -1556,22 +1691,29 @@ function HomeHeroCarousel() {
               aria-label={`${index + 1} of ${homeHeroSlides.length}`}
               key={`${slide.desktopSrc}-${index}`}
             >
-              <picture>
-                {requestedSlides.has(index) && !failedSources.has(source) && (
-                  <img
-                    // No key: on a desktop/mobile switch the browser keeps painting the old file until the new one loads.
-                    src={source}
-                    alt={index === activeSlide ? slide.alt : ""}
-                    fetchPriority={index === 0 ? "high" : "auto"}
-                    onLoad={(event) => {
-                      // Decoded before it counts as ready, so the transition never shows a half-painted banner.
-                      event.currentTarget.decode().catch(() => undefined).then(() => addSource(setReadySources, source));
-                    }}
-                    onError={() => addSource(setFailedSources, source)}
-                    draggable="false"
-                  />
-                )}
-              </picture>
+              {slide.link && !slide.buttonText ? (
+                <a
+                  className="home-banner-link"
+                  href={slide.link}
+                  tabIndex={index === activeSlide ? 0 : -1}
+                  aria-label={slide.heading ?? slide.alt}
+                  draggable="false"
+                >
+                  {picture}
+                </a>
+              ) : (
+                picture
+              )}
+              {(slide.heading || slide.buttonText) && (
+                <div className="home-banner-copy">
+                  {slide.heading && <p className="home-banner-heading">{slide.heading}</p>}
+                  {slide.buttonText && slide.link && (
+                    <a className="home-banner-button" href={slide.link} tabIndex={index === activeSlide ? 0 : -1}>
+                      {slide.buttonText}
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -1658,7 +1800,7 @@ function Home({ taxonomy }: { taxonomy: Taxonomy }) {
   return (
     <Layout taxonomy={taxonomy}>
       <div className="home-page">
-        <HomeHeroCarousel />
+        <HomeHeroBanners />
         <HomepageTrustBenefits />
         <ShopByCategory />
         <FlashSale products={dealProducts} loading={loading} />
@@ -2091,14 +2233,38 @@ function bundleSaving(bundle: HomepageBundle, products: CatalogProduct[]) {
 }
 
 const USE_LIVE_BUNDLES = false;
-const homepageDemoBundles = [
-  { title: "Phone Essentials Bundle", image: "/assets/bundles/bundle-phone-essentials.png", href: "/collections/bundle-offers?bundle=phone-essentials" },
-  { title: "Power On-the-Go Bundle", image: "/assets/bundles/bundle-power-on-go.png", href: "/collections/bundle-offers?bundle=power-on-go" },
-  { title: "MacBook Essentials Bundle", image: "/assets/bundles/bundle-macbook-essentials.png", href: "/collections/bundle-offers?bundle=macbook-essentials" },
-  { title: "Everyday Essentials Bundle", image: "/assets/bundles/bundle-everyday-essentials.png", href: "/collections/bundle-offers?bundle=everyday-essentials" },
-] as const;
+/** Last published Bundle Offers content seen by this browser (avoids a built-in -> custom image swap on revisits). */
+function readCachedBundleOffers(): BundleOffersContent | null {
+  try {
+    const raw = localStorage.getItem(BUNDLE_OFFERS_CACHE_KEY);
+    return raw ? parseBundleOffers(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
 
 function BundleOffers({ bundles, products, loading }: { bundles: HomepageBundle[]; products: CatalogProduct[]; loading: boolean }) {
+  // Bundle Offers Editor (migration 202611250002): published images / links; built-in tiles, links and banner otherwise.
+  const [offers, setOffers] = useState<BundleOffersContent | null>(readCachedBundleOffers);
+  useEffect(() => {
+    let active = true;
+    void fetchPublishedBundleOffers().then((published) => {
+      if (!active) return;
+      setOffers(published);
+      try {
+        if (published) localStorage.setItem(BUNDLE_OFFERS_CACHE_KEY, JSON.stringify(published));
+        else localStorage.removeItem(BUNDLE_OFFERS_CACHE_KEY);
+      } catch {
+        // Storage unavailable: no cache, same result.
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const { tiles: homepageDemoBundles, promo } = resolveBundleOffers(offers, CLOUDINARY_CLOUD_NAME);
+  // Built-in banner = the stylesheet background (unchanged); a custom one only swaps the image.
+  const promoStyle = promo.image ? { backgroundImage: `url("${promo.image}")` } : undefined;
   return (
     <section className="home-bundles" aria-labelledby="bundle-offers-title">
       <div className="home-bundles-products">
@@ -2142,7 +2308,9 @@ function BundleOffers({ bundles, products, loading }: { bundles: HomepageBundle[
           </div>
         ) : <div className="home-accessories-empty">Bundle offers are being prepared.</div>}
       </div>
-      <div className="home-bundles-promo" aria-label="Bundle Offers promotional banner" />
+      {promo.href
+        ? <a className="home-bundles-promo" href={promo.href} aria-label="Bundle Offers promotional banner" style={promoStyle} />
+        : <div className="home-bundles-promo" aria-label="Bundle Offers promotional banner" style={promoStyle} />}
     </section>
   );
 }
@@ -3632,6 +3800,7 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
   const addedRecommendationIdsRef = useRef(new Set<string>());
   const [shareFeedback, setShareFeedback] = useState("");
   const [wishlisted, setWishlisted] = useState(false);
+  const [fastDelivery, setFastDelivery] = useState(false);
   const reducedMotion = usePrefersReducedMotion();
   useEffect(() => {
     fetchPublicCatalog({ slug, limit: 1 })
@@ -3645,6 +3814,8 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
         setQuantity(1);
         setShareFeedback("");
         setWishlisted(next ? hasStorefrontWishlistItem(next.id) : false);
+        setFastDelivery(false);
+        if (next) void fetchProductFastDelivery(next.id).then(setFastDelivery);
         addedRecommendationIdsRef.current.clear();
         setAddedRecommendationIds([]);
         const related = next
@@ -3990,6 +4161,12 @@ function PDP({ slug, taxonomy }: { slug: string; taxonomy: Taxonomy }) {
               <strong>{formatPkrMinor(variant.priceMinor)}</strong>
               {compareAt && <del>{formatPkrMinor(compareAt)}</del>}
               {discount !== null && (!isPhonePdp || discount > 0) && <span className="pdp-discount">Save {discount}%</span>}
+              {fastDelivery && (
+                <b className="pdp-fast-delivery" aria-label="Fast Delivery">
+                  <i aria-hidden="true">Fast</i>
+                  <i aria-hidden="true">Delivery</i>
+                </b>
+              )}
             </div>
             <span className={`pdp-stock${variant.quantity > 0 ? "" : " unavailable"}`}>
               <i />{variant.quantity > 0 ? `Only ${variant.quantity} ${variant.quantity === 1 ? "unit" : "units"} left!` : "Out of stock"}

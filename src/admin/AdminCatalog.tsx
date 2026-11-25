@@ -98,6 +98,8 @@ type Draft = {
   is_flash_sale: boolean;
   is_featured: boolean;
   is_best_seller: boolean;
+  /** PDP Fast Delivery badge (202611250001). Present only once loaded from a database that has the column. */
+  is_fast_delivery?: boolean;
   /** Home Gadgets subcategory (202611090001). Present only once loaded from a database that has the column. */
   subcategory_id?: string | null;
 };
@@ -968,6 +970,25 @@ export function Phase4ProductEditor() {
     }));
     setMessage(`Description saved. Status unchanged: ${data.publication_status}. Other unsaved edits on this page were not saved.`);
   };
+  // Updates only is_fast_delivery (never publication_status or any other column). Display-only PDP badge.
+  const [savingFastDelivery, setSavingFastDelivery] = useState(false);
+  const saveFastDelivery = async (next: boolean) => {
+    if (!supabase || !productId || savingFastDelivery || draft.is_fast_delivery === undefined) return;
+    setSavingFastDelivery(true);
+    const { data, error } = await supabase
+      .from("products")
+      .update({ is_fast_delivery: next })
+      .eq("id", productId)
+      .select("is_fast_delivery,publication_status")
+      .single();
+    setSavingFastDelivery(false);
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+    setDraft((current) => ({ ...current, is_fast_delivery: data.is_fast_delivery === true }));
+    setMessage(`Fast Delivery badge ${data.is_fast_delivery ? "ON" : "OFF"}. Status unchanged: ${data.publication_status}. Other unsaved edits on this page were not saved.`);
+  };
   // Updates only subcategory_id (never publication_status), after an explicit confirmation.
   const saveSubcategory = async () => {
     if (!supabase || !productId || savingSubcategory || subcategoryBlocker) return;
@@ -1676,6 +1697,27 @@ export function Phase4ProductEditor() {
                     <span>Best Seller</span>
                   </label>
                 </div>
+              </fieldset>
+              <fieldset className="homepage-placement wide">
+                <legend>Product Badge</legend>
+                <div>
+                  <label className="admin-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={draft.is_fast_delivery === true}
+                      disabled={!productId || draft.is_fast_delivery === undefined || savingFastDelivery}
+                      onChange={(e) => void saveFastDelivery(e.target.checked)}
+                    />
+                    <span>Fast Delivery — {draft.is_fast_delivery === true ? "ON" : "OFF"}</span>
+                  </label>
+                </div>
+                <small>
+                  {!productId
+                    ? "Save the product first to set the Fast Delivery badge (default OFF)."
+                    : draft.is_fast_delivery === undefined
+                      ? "Unavailable until migration 202611250001 is applied."
+                      : "Saved immediately. Shows the fixed Fast Delivery badge beside the price on the product page; OFF hides it."}
+                </small>
               </fieldset>
             </div>
           )}
